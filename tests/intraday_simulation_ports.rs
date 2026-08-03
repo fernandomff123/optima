@@ -1,0 +1,109 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
+use async_trait::async_trait;
+use chrono::{DateTime, NaiveDate, Utc};
+use polars_options::hexagon::{
+    PortError, PortResult,
+    application::intraday_simulation::IntradaySimulationApplication,
+    domain::{live_price::LivePrice, options::Snapshot},
+    driven_ports::{
+        for_consulting_trading_calendar::ForConsultingTradingCalendar,
+        for_obtaining_live_prices::ForObtainingLivePrices,
+        for_obtaining_option_chains::ForObtainingOptionChains,
+    },
+    driving_ports::{
+        for_preparing_intraday_simulations::ForPreparingIntradaySimulations,
+        for_viewing_intraday_options::ForViewingIntradayOptions,
+    },
+};
+
+struct OptionChainsMock(Arc<AtomicUsize>);
+
+#[async_trait]
+impl ForObtainingOptionChains for OptionChainsMock {
+    async fn obtain_option_chain(&self, ticker: &str) -> PortResult<Snapshot> {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        Ok(Snapshot {
+            ticker: ticker.to_string(),
+            timestamp_utc: Utc::now(),
+            contratos: Vec::new(),
+            chains: Vec::new(),
+        })
+    }
+}
+
+struct LivePricesMock;
+
+#[async_trait]
+impl ForObtainingLivePrices for LivePricesMock {
+    async fn obtain_live_price(&self, ticker: &str) -> PortResult<LivePrice> {
+        Ok(LivePrice {
+            ticker: ticker.to_string(),
+            price: 5_250.0,
+            market_time: 0,
+            currency: "USD".to_string(),
+            exchange: "TEST".to_string(),
+            regular_session: true,
+            change: 0.0,
+            change_percent: 0.0,
+            day_volume: 0,
+        })
+    }
+}
+
+struct CalendarStub(bool);
+
+impl ForConsultingTradingCalendar for CalendarStub {
+    fn is_regular_session(&self, _instant: DateTime<Utc>) -> PortResult<bool> {
+        Ok(self.0)
+    }
+
+    fn next_session_transition(&self, instant: DateTime<Utc>) -> PortResult<DateTime<Utc>> {
+        Ok(instant)
+    }
+
+    fn latest_session_close_before(&self, instant: DateTime<Utc>) -> PortResult<DateTime<Utc>> {
+        Ok(instant)
+    }
+
+    fn session_open(&self, date: NaiveDate) -> PortResult<DateTime<Utc>> {
+        Ok(date.and_hms_opt(13, 30, 0).expect("valid time").and_utc())
+    }
+
+    fn session_close(&self, date: NaiveDate) -> PortResult<DateTime<Utc>> {
+        Ok(date.and_hms_opt(20, 0, 0).expect("valid time").and_utc())
+    }
+}
+
+#[tokio::test]
+async fn obtains_intraday_inputs_through_mocked_driven_ports() {
+    let application = IntradaySimulationApplication::new(
+        OptionChainsMock(Arc::new(AtomicUsize::new(0))),
+        LivePricesMock,
+        CalendarStub(true),
+    );
+
+    let market = application.intraday_market(" spx ").await.unwrap();
+
+    assert_eq!(market.snapshot.ticker, "SPX");
+    assert_eq!(market.spot, 5_250.0);
+
+    let options_market = application.intraday_options("SPX").await.unwrap();
+    assert_eq!(options_market.spot, 5_250.0);
+}
+
+#[tokio::test]
+async fn closed_session_stops_before_obtaining_external_data() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let chains = OptionChainsMock(Arc::clone(&calls));
+    let application =
+        IntradaySimulationApplication::new(chains, LivePricesMock, CalendarStub(false));
+
+    let error = application.intraday_market("SPX").await.unwrap_err();
+
+    assert!(matches!(error, PortError::Conflict(_)));
+    assert_eq!(calls.load(Ordering::Relaxed), 0);
+}

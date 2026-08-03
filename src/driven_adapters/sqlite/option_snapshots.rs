@@ -1,0 +1,594 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use sqlx::{Row, SqlitePool};
+use std::error::Error;
+use std::fmt;
+
+use crate::hexagon::domain::options::{OptionChain, Snapshot};
+
+const CURRENT_FORMAT_VERSION: i64 = 2;
+
+#[derive(Serialize)]
+struct SnapshotPayloadRef<'a> {
+    chains: &'a [OptionChain],
+}
+
+#[derive(Deserialize)]
+struct SnapshotPayload {
+    chains: Vec<OptionChain>,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SnapshotStorageError {
+    EmptySnapshot,
+    UnsupportedFormat(i64),
+}
+
+impl fmt::Display for SnapshotStorageError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptySnapshot => write!(formatter, "não é possível guardar um snapshot vazio"),
+            Self::UnsupportedFormat(version) => {
+                write!(formatter, "versão de snapshot não suportada: {version}")
+            }
+        }
+    }
+}
+
+impl Error for SnapshotStorageError {}
+
+pub async fn initialize(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    rename_table_if_needed(pool, "cboe_snapshots", "option_snapshots").await?;
+    for index in [
+        "idx_cboe_snapshots_timestamp",
+        "idx_cboe_snapshots_hash",
+        "idx_cboe_snapshots_market_close",
+    ] {
+        sqlx::query(&format!("DROP INDEX IF EXISTS {index}"))
+            .execute(pool)
+            .await?;
+    }
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS option_snapshots (
+            ticker TEXT NOT NULL,
+            timestamp TIMESTAMP NOT NULL,
+            market_close TIMESTAMP,
+            format_version INTEGER NOT NULL,
+            payload BLOB NOT NULL,
+            hash TEXT NOT NULL,
+            PRIMARY KEY (ticker, timestamp)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_option_snapshots_timestamp
+         ON option_snapshots (timestamp)",
+    )
+    .execute(pool)
+    .await?;
+
+    let columns = sqlx::query("PRAGMA table_info(option_snapshots)")
+        .fetch_all(pool)
+        .await?;
+    let has_hash = columns
+        .iter()
+        .any(|column| column.get::<String, _>("name") == "hash");
+    if !has_hash {
+        sqlx::query("ALTER TABLE option_snapshots ADD COLUMN hash TEXT")
+            .execute(pool)
+            .await?;
+    }
+
+    let has_market_close = columns
+        .iter()
+        .any(|column| column.get::<String, _>("name") == "market_close");
+    if !has_market_close {
+        sqlx::query("ALTER TABLE option_snapshots ADD COLUMN market_close TIMESTAMP")
+            .execute(pool)
+            .await?;
+    }
+
+    let rows = sqlx::query("SELECT rowid, payload FROM option_snapshots WHERE hash IS NULL")
+        .fetch_all(pool)
+        .await?;
+    for row in rows {
+        let rowid: i64 = row.try_get("rowid")?;
+        let payload: Vec<u8> = row.try_get("payload")?;
+        sqlx::query("UPDATE option_snapshots SET hash = ? WHERE rowid = ?")
+            .bind(payload_hash(&payload))
+            .bind(rowid)
+            .execute(pool)
+            .await?;
+    }
+
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_option_snapshots_hash
+         ON option_snapshots (hash)",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_option_snapshots_market_close
+         ON option_snapshots (ticker, market_close)
+         WHERE market_close IS NOT NULL",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+async fn rename_table_if_needed(
+    pool: &SqlitePool,
+    old: &str,
+    new: &str,
+) -> Result<(), sqlx::Error> {
+    let old_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)",
+    )
+    .bind(old)
+    .fetch_one(pool)
+    .await?;
+    let new_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)",
+    )
+    .bind(new)
+    .fetch_one(pool)
+    .await?;
+    if old_exists && !new_exists {
+        sqlx::query(&format!("ALTER TABLE {old} RENAME TO {new}"))
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+pub async fn save_snapshot(
+    pool: &SqlitePool,
+    snapshot: &Snapshot,
+    market_close: DateTime<Utc>,
+) -> Result<bool, Box<dyn Error + Send + Sync>> {
+    if snapshot.chains.is_empty() {
+        return Err(SnapshotStorageError::EmptySnapshot.into());
+    }
+
+    let payload = rmp_serde::to_vec(&SnapshotPayloadRef {
+        chains: &snapshot.chains,
+    })?;
+    let hash = payload_hash(&payload);
+    let already_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM option_snapshots WHERE hash = ?)")
+            .bind(&hash)
+            .fetch_one(pool)
+            .await?;
+    if already_exists {
+        sqlx::query(
+            "UPDATE option_snapshots
+             SET market_close = ?
+             WHERE hash = ?
+               AND market_close IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM option_snapshots
+                   WHERE ticker = ? AND market_close = ?
+               )",
+        )
+        .bind(market_close)
+        .bind(&hash)
+        .bind(snapshot.ticker.trim().to_ascii_uppercase())
+        .bind(market_close)
+        .execute(pool)
+        .await?;
+        return Ok(false);
+    }
+
+    let result = sqlx::query(
+        "INSERT OR IGNORE INTO option_snapshots
+         (ticker, timestamp, market_close, format_version, payload, hash)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(snapshot.ticker.trim().to_ascii_uppercase())
+    .bind(snapshot.timestamp_utc)
+    .bind(market_close)
+    .bind(CURRENT_FORMAT_VERSION)
+    .bind(payload)
+    .bind(hash)
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn contains_market_close(
+    pool: &SqlitePool,
+    ticker: &str,
+    market_close: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM option_snapshots
+            WHERE ticker = ? AND market_close = ?
+        )",
+    )
+    .bind(ticker.trim().to_ascii_uppercase())
+    .bind(market_close)
+    .fetch_one(pool)
+    .await
+}
+
+fn payload_hash(payload: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(payload))
+}
+
+pub async fn load_latest_at_or_before(
+    pool: &SqlitePool,
+    ticker: &str,
+    target: DateTime<Utc>,
+) -> Result<Option<Snapshot>, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query(
+        "SELECT ticker, timestamp, format_version, payload
+         FROM option_snapshots
+         WHERE ticker = ? AND timestamp <= ?
+         ORDER BY timestamp DESC
+         LIMIT 1",
+    )
+    .bind(ticker.trim().to_ascii_uppercase())
+    .bind(target)
+    .fetch_optional(pool)
+    .await?;
+
+    row.map(row_to_snapshot).transpose()
+}
+
+pub async fn load_latest(
+    pool: &SqlitePool,
+    ticker: &str,
+) -> Result<Option<Snapshot>, Box<dyn Error + Send + Sync>> {
+    let row = sqlx::query(
+        "SELECT ticker, timestamp, format_version, payload
+         FROM option_snapshots
+         WHERE ticker = ?
+         ORDER BY timestamp DESC
+         LIMIT 1",
+    )
+    .bind(ticker.trim().to_ascii_uppercase())
+    .fetch_optional(pool)
+    .await?;
+
+    row.map(row_to_snapshot).transpose()
+}
+
+pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Snapshot>, Box<dyn Error + Send + Sync>> {
+    let rows = sqlx::query(
+        "SELECT ticker, timestamp, format_version, payload
+         FROM option_snapshots
+         ORDER BY timestamp, ticker",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter().map(row_to_snapshot).collect()
+}
+
+fn row_to_snapshot(row: sqlx::sqlite::SqliteRow) -> Result<Snapshot, Box<dyn Error + Send + Sync>> {
+    let format_version: i64 = row.try_get("format_version")?;
+    if format_version != CURRENT_FORMAT_VERSION {
+        return Err(SnapshotStorageError::UnsupportedFormat(format_version).into());
+    }
+
+    let payload: Vec<u8> = row.try_get("payload")?;
+    let payload: SnapshotPayload = rmp_serde::from_slice(&payload)?;
+    let contratos = payload
+        .chains
+        .iter()
+        .flat_map(|chain| chain.contratos.iter().cloned())
+        .collect();
+
+    Ok(Snapshot {
+        ticker: row.try_get("ticker")?,
+        timestamp_utc: row.try_get("timestamp")?,
+        contratos,
+        chains: payload.chains,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, TimeZone};
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::*;
+    use crate::hexagon::domain::options::{ContratoOpcao, OptionType};
+
+    async fn memory_pool() -> SqlitePool {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
+
+    fn sample_snapshot() -> Snapshot {
+        let contract = ContratoOpcao {
+            occ_symbol: "SPY   260717C00500000".to_string(),
+            option_type: OptionType::Call,
+            strike: 500.0,
+            expiration: NaiveDate::from_ymd_opt(2026, 7, 17).unwrap(),
+            bid: 10.0,
+            ask: 10.2,
+            mid: 10.1,
+            spread: 0.2,
+            volume: 100.0,
+            open_interest: 1_000.0,
+            delta: 0.5,
+            gamma: 0.02,
+            vega: 0.15,
+            theta: -0.05,
+            rho: 0.03,
+            theo: 10.1,
+            implied_volatility: Some(0.2),
+        };
+
+        Snapshot {
+            ticker: "SPY".to_string(),
+            timestamp_utc: Utc.with_ymd_and_hms(2026, 7, 13, 15, 0, 0).unwrap(),
+            contratos: vec![contract.clone()],
+            chains: vec![OptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![contract],
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn saves_and_reconstructs_snapshot() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let expected = sample_snapshot();
+
+        save_snapshot(&pool, &expected, expected.timestamp_utc)
+            .await
+            .unwrap();
+        let loaded = load_latest(&pool, "spy").await.unwrap().unwrap();
+
+        assert_eq!(loaded, expected);
+    }
+
+    #[tokio::test]
+    async fn loads_all_snapshots() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let first = sample_snapshot();
+        let mut second = first.clone();
+        second.ticker = "AAPL".to_string();
+        second.timestamp_utc += chrono::Duration::days(1);
+        second.chains[0].root = "AAPL".to_string();
+
+        save_snapshot(&pool, &first, first.timestamp_utc)
+            .await
+            .unwrap();
+        save_snapshot(&pool, &second, second.timestamp_utc)
+            .await
+            .unwrap();
+
+        assert_eq!(load_all(&pool).await.unwrap(), vec![first, second]);
+    }
+
+    #[tokio::test]
+    async fn ignores_a_snapshot_with_an_existing_payload_hash() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let first = sample_snapshot();
+        let mut duplicate_payload = first.clone();
+        duplicate_payload.timestamp_utc += chrono::Duration::minutes(1);
+
+        assert!(
+            save_snapshot(&pool, &first, first.timestamp_utc)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !save_snapshot(&pool, &duplicate_payload, first.timestamp_utc)
+                .await
+                .unwrap()
+        );
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM option_snapshots")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn stores_only_one_snapshot_per_market_close() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let first = sample_snapshot();
+        let mut same_session = first.clone();
+        same_session.timestamp_utc += chrono::Duration::minutes(1);
+        same_session.chains[0].contratos[0].bid = 11.0;
+        same_session.contratos[0].bid = 11.0;
+
+        assert!(
+            save_snapshot(&pool, &first, first.timestamp_utc)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !save_snapshot(&pool, &same_session, first.timestamp_utc)
+                .await
+                .unwrap()
+        );
+        assert!(
+            contains_market_close(&pool, "spy", first.timestamp_utc)
+                .await
+                .unwrap()
+        );
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM option_snapshots")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn migrates_an_existing_table_and_backfills_its_hash() {
+        let pool = memory_pool().await;
+        sqlx::query(
+            "CREATE TABLE cboe_snapshots (
+                ticker TEXT NOT NULL,
+                timestamp TIMESTAMP NOT NULL,
+                format_version INTEGER NOT NULL,
+                payload BLOB NOT NULL,
+                PRIMARY KEY (ticker, timestamp)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let snapshot = sample_snapshot();
+        let payload = rmp_serde::to_vec(&SnapshotPayloadRef {
+            chains: &snapshot.chains,
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO cboe_snapshots (ticker, timestamp, format_version, payload)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(&snapshot.ticker)
+        .bind(snapshot.timestamp_utc)
+        .bind(CURRENT_FORMAT_VERSION)
+        .bind(&payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        initialize(&pool).await.unwrap();
+
+        let hash: String = sqlx::query_scalar("SELECT hash FROM option_snapshots")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(hash, payload_hash(&payload));
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[tokio::test]
+    async fn finds_latest_snapshot_at_or_before_target() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let first = sample_snapshot();
+        let mut second = first.clone();
+        second.timestamp_utc += chrono::Duration::hours(1);
+        second.chains[0].contratos[0].bid = 11.0;
+        second.contratos[0].bid = 11.0;
+        save_snapshot(&pool, &first, first.timestamp_utc)
+            .await
+            .unwrap();
+        save_snapshot(&pool, &second, second.timestamp_utc)
+            .await
+            .unwrap();
+
+        let target = first.timestamp_utc + chrono::Duration::minutes(30);
+        let loaded = load_latest_at_or_before(&pool, "SPY", target)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(loaded, first);
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_payload_versions() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let snapshot = sample_snapshot();
+        save_snapshot(&pool, &snapshot, snapshot.timestamp_utc)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE option_snapshots SET format_version = 99")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let error = load_latest(&pool, "SPY").await.unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            SnapshotStorageError::UnsupportedFormat(99).to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn parses_stores_and_loads_complete_snapshot_fixture() {
+        let json = include_str!("../../../tests/fixtures/snapshot.json");
+        let response: crate::driven_adapters::cboe::CboeResponse =
+            serde_json::from_str(json).expect("o fixture deve conter um DTO CBOE válido");
+        let snapshot = crate::driven_adapters::cboe::response_to_snapshot("SPY", response)
+            .expect("o DTO completo deve ser convertido para o domínio");
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+
+        assert_eq!(snapshot.ticker, "SPY");
+        assert!(snapshot.contratos.len() > 1_000);
+        assert!(
+            snapshot
+                .contratos
+                .iter()
+                .any(|contract| contract.implied_volatility.is_some()),
+            "o campo IV da CBOE deve chegar ao payload de domínio"
+        );
+        assert_eq!(
+            snapshot.contratos.len(),
+            snapshot
+                .chains
+                .iter()
+                .map(|chain| chain.contratos.len())
+                .sum::<usize>()
+        );
+
+        save_snapshot(&pool, &snapshot, snapshot.timestamp_utc)
+            .await
+            .unwrap();
+        let payload_size: i64 =
+            sqlx::query_scalar("SELECT length(payload) FROM option_snapshots WHERE ticker = ?")
+                .bind("SPY")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+
+        assert_eq!(loaded, snapshot);
+        assert!((payload_size as usize) < json.len());
+        println!(
+            "{} contratos; JSON: {} bytes; MessagePack: {} bytes",
+            loaded.contratos.len(),
+            json.len(),
+            payload_size
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "teste de integração dependente da CBOE"]
+    async fn downloads_parses_stores_and_loads_real_snapshot() {
+        let response = crate::driven_adapters::cboe::download_snapshot("SPY")
+            .await
+            .expect("a CBOE deve devolver o snapshot de SPY");
+        let snapshot = crate::driven_adapters::cboe::response_to_snapshot("SPY", response)
+            .expect("o DTO CBOE deve ser convertido para o domínio");
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+
+        save_snapshot(&pool, &snapshot, snapshot.timestamp_utc)
+            .await
+            .unwrap();
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+
+        assert_eq!(loaded, snapshot);
+    }
+}

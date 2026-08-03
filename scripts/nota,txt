@@ -1,0 +1,13 @@
+Nota importante sobre LocalResource
+O teu código original carrega o catalog sob demanda (só quando se clica numa estratégia), não no mount. Por isso mantive o padrão lazy no contexto. Se quiseres que o catalog carregue automaticamente quando o ticker muda (e o Transition mostre o fallback enquanto isso acontece), adiciona isto ao SimulationContext:
+rust
+
+let catalog_resource = LocalResource::new(move || {
+    let ticker = selected_ticker.get();
+    async move {
+        let ticker = ticker?;
+        fetch_simulation_catalog(&ticker).await.ok()
+    }
+});
+
+E faz o Suspend aguardar catalog_resource.await.

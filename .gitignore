@@ -1,0 +1,9 @@
+target/
+web/dist/
+web/node_modules/
+.env
+.env.*
+!.env.example
+data/*.db
+data/cboe_indices.csv
+*.epub

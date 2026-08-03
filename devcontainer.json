@@ -1,0 +1,14 @@
+{
+    "name": "Rust Distrobox",
+    "dockerComposeFile": [], // Deixar vazio se usar anexo direto
+    "context": "..",
+    "workspaceFolder": "/workspace",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer"
+            ]
+        }
+    },
+    "remoteUser": "o-seu-utilizador"
+}
