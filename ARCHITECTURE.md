@@ -162,3 +162,17 @@ Development follows the book's sequence:
 Architecture tests reject technology and adapter dependencies from the
 hexagon. HTTP contract tests preserve the existing API behavior during the
 migration.
+
+## Generated API documentation
+
+Generate and validate the Rust API documentation from the repository root:
+
+```bash
+env RUSTDOCFLAGS=-Dwarnings \
+  cargo +stable doc --workspace --all-features --no-deps --offline
+```
+
+The autonomous backend crate is published locally at
+`target/doc/hexagonal_backend/index.html`. Both `target/` and the SQLite file
+under `data/` belong to this repository at runtime but are intentionally not
+committed.

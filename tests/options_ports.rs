@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     PortResult,
     application::options::OptionsApplication,
     domain::{
@@ -52,8 +52,9 @@ impl ForLoadingOptionData for OptionDataMock {
         &self,
         _ticker: &str,
         _target_days: f64,
-    ) -> PortResult<Vec<polars_options::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>>
-    {
+    ) -> PortResult<
+        Vec<hexagonal_backend::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>,
+    > {
         Ok(Vec::new())
     }
 }
@@ -146,7 +147,7 @@ async fn missing_stored_term_structure_uses_option_analysis_inputs() {
 
     assert!(matches!(
         error,
-        polars_options::hexagon::PortError::NotFound(_)
+        hexagonal_backend::hexagon::PortError::NotFound(_)
     ));
     assert!(error.to_string().contains("yield curve"));
 }

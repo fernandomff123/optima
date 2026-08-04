@@ -5,10 +5,10 @@ use std::error::Error;
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect("sqlite://data/polars_options.db?mode=rwc")
+        .connect("sqlite://data/hexagonal.db?mode=rwc")
         .await?;
 
-    polars_options::configurator::initialize_storage(&pool).await?;
+    hexagonal_backend::configurator::initialize_storage(&pool).await?;
 
     println!("Migrações de storage concluídas");
     pool.close().await;

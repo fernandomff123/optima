@@ -9,8 +9,8 @@ use axum::{
     response::Response,
     routing::get,
 };
-use polars_options::hexagon::domain::tracked_ticker::TrackedTicker;
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker;
+use hexagonal_backend::hexagon::{
     PortError,
     domain::portfolio::{
         CashMovement, CashMovementKind, Currency, CurrencyExchange, ExchangeRate, Instrument,
@@ -56,10 +56,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = dotenvy::from_filename(".env.local");
     let pool = SqlitePoolOptions::new()
         .max_connections(4)
-        .connect("sqlite://data/polars_options.db?mode=rwc")
+        .connect("sqlite://data/hexagonal.db?mode=rwc")
         .await?;
-    polars_options::configurator::initialize_storage(&pool).await?;
-    let market_scheduling = polars_options::configurator::configure(pool.clone()).market_scheduling;
+    hexagonal_backend::configurator::initialize_storage(&pool).await?;
+    let market_scheduling =
+        hexagonal_backend::configurator::configure(pool.clone()).market_scheduling;
     let market_open = market_scheduling
         .market_is_open(chrono::Utc::now())
         .unwrap_or(false);
@@ -69,7 +70,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         market_scheduling.clone(),
     ));
     let scheduler_application =
-        polars_options::configurator::configure(pool.clone()).synchronization;
+        hexagonal_backend::configurator::configure(pool.clone()).synchronization;
     let market_eod = tokio::spawn(run_market_eod_scheduler(
         scheduler_application,
         market_scheduling,
@@ -78,7 +79,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // The hexagonal router is the production entry point for every migrated
     // conversation. Legacy `/api` routes remain mounted during the API-shape
     // migration so current clients are not broken in one deployment.
-    let hexagonal_routes = polars_options::configurator::configure_http(pool.clone());
+    let hexagonal_routes = hexagonal_backend::configurator::configure_http(pool.clone());
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/assets", get(list_assets))
@@ -170,7 +171,7 @@ async fn health() -> &'static str {
 async fn list_assets(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<Vec<AssetSummary>>, StatusCode> {
-    let tracked = polars_options::configurator::configure(pool)
+    let tracked = hexagonal_backend::configurator::configure(pool)
         .tracked_tickers
         .list_active_tickers()
         .await
@@ -181,7 +182,7 @@ async fn list_assets(
 async fn market_benchmark(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::MarketBenchmarkResponse>, StatusCode> {
-    let application = polars_options::configurator::configure(pool).market_data;
+    let application = hexagonal_backend::configurator::configure(pool).market_data;
     let vix = application
         .index_history("VIX")
         .await
@@ -192,18 +193,18 @@ async fn market_benchmark(
         .map_err(port_status)?;
     let as_of = latest_index_date(&vix)?;
     Ok(Json(
-        polars_options::driving_adapters::http::legacy_market_views::benchmark(&history, as_of),
+        hexagonal_backend::driving_adapters::http::legacy_market_views::benchmark(&history, as_of),
     ))
 }
 
 async fn market_volatility(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::MarketVolatilityResponse>, StatusCode> {
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .market_volatility
         .volatility_overview()
         .await
-        .map(polars_options::driving_adapters::http::legacy_market_views::volatility)
+        .map(hexagonal_backend::driving_adapters::http::legacy_market_views::volatility)
         .map(Json)
         .map_err(port_status)
 }
@@ -211,7 +212,7 @@ async fn market_volatility(
 async fn market_spx_history(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::MarketSpxHistoryResponse>, StatusCode> {
-    let application = polars_options::configurator::configure(pool).market_data;
+    let application = hexagonal_backend::configurator::configure(pool).market_data;
     let vix = application
         .index_history("VIX")
         .await
@@ -222,26 +223,30 @@ async fn market_spx_history(
         .map_err(port_status)?;
     let as_of = latest_index_date(&vix)?;
     Ok(Json(
-        polars_options::driving_adapters::http::legacy_market_views::spx_history(&history, as_of),
+        hexagonal_backend::driving_adapters::http::legacy_market_views::spx_history(
+            &history, as_of,
+        ),
     ))
 }
 
 async fn market_vix_history(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::MarketVixHistoryResponse>, StatusCode> {
-    let history = polars_options::configurator::configure(pool)
+    let history = hexagonal_backend::configurator::configure(pool)
         .market_data
         .index_history("VIX")
         .await
         .map_err(port_status)?;
     let as_of = latest_index_date(&history)?;
     Ok(Json(
-        polars_options::driving_adapters::http::legacy_market_views::vix_history(&history, as_of),
+        hexagonal_backend::driving_adapters::http::legacy_market_views::vix_history(
+            &history, as_of,
+        ),
     ))
 }
 
 fn latest_index_date(
-    history: &polars_options::hexagon::domain::index_history::IndexHistory,
+    history: &hexagonal_backend::hexagon::domain::index_history::IndexHistory,
 ) -> Result<chrono::NaiveDate, StatusCode> {
     history
         .daily_prices
@@ -262,7 +267,7 @@ fn port_status(error: PortError) -> StatusCode {
 async fn market_rates(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::MarketRatesResponse>, StatusCode> {
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     let vix = configured
         .market_data
         .index_history("VIX")
@@ -274,7 +279,7 @@ async fn market_rates(
         .yield_curve(as_of)
         .await
         .map_err(port_status)?;
-    polars_options::driving_adapters::http::legacy_market_views::rates(as_of, curve.as_ref())
+    hexagonal_backend::driving_adapters::http::legacy_market_views::rates(as_of, curve.as_ref())
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -300,13 +305,13 @@ async fn handle_asset_live_prices(
     let (prices, mut received_prices) = tokio::sync::mpsc::channel(32);
     let seed_prices = prices.clone();
     let seed_ticker = subscription.borrow().clone();
-    let seed_application = polars_options::configurator::configure(pool.clone()).market_data;
+    let seed_application = hexagonal_backend::configurator::configure(pool.clone()).market_data;
     tokio::spawn(async move {
         if let Ok(price) = seed_application.live_price(&seed_ticker).await {
             let _ = seed_prices.send(price).await;
         }
     });
-    let stream_application = polars_options::configurator::configure(pool.clone()).market_stream;
+    let stream_application = hexagonal_backend::configurator::configure(pool.clone()).market_stream;
     let mut market_stream = tokio::spawn(async move {
         stream_application
             .stream_market_prices(subscription, prices)
@@ -373,7 +378,7 @@ async fn handle_asset_live_prices(
                         }
                         None => {
                             let ticker = subscription_updates.borrow().clone();
-                            polars_options::configurator::configure(pool.clone())
+                            hexagonal_backend::configurator::configure(pool.clone())
                                 .market_data
                                 .live_price(&ticker)
                                 .await
@@ -421,7 +426,7 @@ async fn handle_asset_live_prices(
 
 async fn run_market_session_clock(
     session: tokio::sync::watch::Sender<bool>,
-    scheduling: polars_options::configurator::ConfiguredMarketScheduling,
+    scheduling: hexagonal_backend::configurator::ConfiguredMarketScheduling,
 ) {
     loop {
         let now = chrono::Utc::now();
@@ -435,8 +440,8 @@ async fn run_market_session_clock(
 }
 
 async fn run_market_eod_scheduler(
-    application: polars_options::configurator::ConfiguredSynchronization,
-    scheduling: polars_options::configurator::ConfiguredMarketScheduling,
+    application: hexagonal_backend::configurator::ConfiguredSynchronization,
+    scheduling: hexagonal_backend::configurator::ConfiguredMarketScheduling,
 ) {
     loop {
         let now = chrono::Utc::now();
@@ -445,9 +450,9 @@ async fn run_market_eod_scheduler(
             match scheduling.eligible_end_of_day_close(now) {
                 Ok(Some(market_close)) => {
                     let history_since = market_close.date_naive();
-                    match polars_options::driving_adapters::scheduler::synchronize_end_of_day(
+                    match hexagonal_backend::driving_adapters::scheduler::synchronize_end_of_day(
                         &application,
-                        polars_options::driving_adapters::scheduler::EndOfDayRequest {
+                        hexagonal_backend::driving_adapters::scheduler::EndOfDayRequest {
                             market_close,
                             history_since,
                             volatility_indices: vec!["VIX".to_string()],
@@ -518,9 +523,9 @@ fn next_eod_attempt_deadline(
 async fn portfolio_overview(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::PortfolioOverview>, StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     let portfolio = main_portfolio(&application).await?;
-    polars_options::driving_adapters::http::legacy_portfolio_views::overview(portfolio)
+    hexagonal_backend::driving_adapters::http::legacy_portfolio_views::overview(portfolio)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -528,9 +533,9 @@ async fn portfolio_overview(
 async fn portfolio_summary(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::PortfolioSummaryResponse>, StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     let portfolio = main_portfolio(&application).await?;
-    polars_options::driving_adapters::http::legacy_portfolio_views::summary(&portfolio)
+    hexagonal_backend::driving_adapters::http::legacy_portfolio_views::summary(&portfolio)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -538,17 +543,17 @@ async fn portfolio_summary(
 async fn portfolio_cash(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::PortfolioCashResponse>, StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     let portfolio = main_portfolio(&application).await?;
     Ok(Json(
-        polars_options::driving_adapters::http::legacy_portfolio_views::cash(&portfolio),
+        hexagonal_backend::driving_adapters::http::legacy_portfolio_views::cash(&portfolio),
     ))
 }
 
 async fn portfolio_positions(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::PortfolioPositionsResponse>, StatusCode> {
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     main_portfolio(&configured.portfolios).await?;
     configured
         .portfolio_valuation
@@ -592,15 +597,15 @@ async fn portfolio_positions(
 async fn portfolio_movements(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<api_models::PortfolioMovementsResponse>, StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     let portfolio = main_portfolio(&application).await?;
-    polars_options::driving_adapters::http::legacy_portfolio_views::movements(&portfolio)
+    hexagonal_backend::driving_adapters::http::legacy_portfolio_views::movements(&portfolio)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 async fn main_portfolio(
-    application: &polars_options::configurator::ConfiguredPortfolios,
+    application: &hexagonal_backend::configurator::ConfiguredPortfolios,
 ) -> Result<Portfolio, StatusCode> {
     match application.portfolio("main").await {
         Ok(portfolio) => Ok(portfolio),
@@ -624,7 +629,7 @@ async fn simulation_overview(
     Query(query): Query<SimulationQuery>,
 ) -> Result<Json<api_models::SimulationOverview>, StatusCode> {
     let ticker = query.ticker.as_deref().unwrap_or("SPX");
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     let (snapshot, spot, curve) = simulation_domain_inputs(&configured, ticker).await?;
     configured
         .simulation
@@ -635,12 +640,12 @@ async fn simulation_overview(
             yield_curve: curve,
             valuation_dates: None,
             strategy_kind:
-                polars_options::hexagon::domain::simulation::SimulationStrategyKind::Straddle,
+                hexagonal_backend::hexagon::domain::simulation::SimulationStrategyKind::Straddle,
             volatility_shifts: vec![-0.10, 0.0, 0.10],
             legs: Vec::new(),
         })
         .await
-        .map(polars_options::driving_adapters::http::legacy_simulation_views::scenario)
+        .map(hexagonal_backend::driving_adapters::http::legacy_simulation_views::scenario)
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -650,7 +655,7 @@ async fn simulation_contracts(
     Query(query): Query<SimulationQuery>,
 ) -> Result<Json<api_models::SimulationCatalogOverview>, StatusCode> {
     let ticker = query.ticker.as_deref().unwrap_or("SPX");
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     let snapshot = configured
         .options
         .option_chain(ticker)
@@ -671,7 +676,7 @@ async fn simulation_contracts(
         .filter(|price| price.is_finite() && *price > 0.0)
         .ok_or(StatusCode::NOT_FOUND)?;
     Ok(Json(
-        polars_options::driving_adapters::http::legacy_simulation_views::catalog(
+        hexagonal_backend::driving_adapters::http::legacy_simulation_views::catalog(
             &ticker.trim().to_ascii_uppercase(),
             &snapshot,
             spot,
@@ -683,7 +688,7 @@ async fn simulate_scenarios(
     State(pool): State<SqlitePool>,
     Json(request): Json<api_models::SimulationScenarioRequest>,
 ) -> Result<Json<api_models::SimulationOverview>, StatusCode> {
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     let (snapshot, spot, curve) = simulation_domain_inputs(&configured, &request.ticker).await?;
     let strategy_kind = domain_strategy_kind(request.strategy_kind);
     let legs = domain_simulation_legs(&request.legs);
@@ -700,19 +705,19 @@ async fn simulate_scenarios(
             legs,
         })
         .await
-        .map(polars_options::driving_adapters::http::legacy_simulation_views::scenario)
+        .map(hexagonal_backend::driving_adapters::http::legacy_simulation_views::scenario)
         .map(Json)
         .map_err(|_| StatusCode::BAD_REQUEST)
 }
 
 async fn simulation_domain_inputs(
-    configured: &polars_options::configurator::ConfiguredApplication,
+    configured: &hexagonal_backend::configurator::ConfiguredApplication,
     ticker: &str,
 ) -> Result<
     (
-        polars_options::hexagon::domain::options::Snapshot,
+        hexagonal_backend::hexagon::domain::options::Snapshot,
         f64,
-        polars_options::hexagon::domain::treasury::YieldCurve,
+        hexagonal_backend::hexagon::domain::treasury::YieldCurve,
     ),
     StatusCode,
 > {
@@ -748,7 +753,7 @@ async fn simulate_intraday_scenarios(
     State(pool): State<SqlitePool>,
     Json(request): Json<api_models::SimulationScenarioRequest>,
 ) -> Result<Json<api_models::SimulationOverview>, StatusCode> {
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     let market = configured
         .intraday_simulation
         .intraday_market(&request.ticker)
@@ -776,7 +781,7 @@ async fn simulate_intraday_scenarios(
             legs,
         })
         .await
-        .map(polars_options::driving_adapters::http::legacy_simulation_views::scenario)
+        .map(hexagonal_backend::driving_adapters::http::legacy_simulation_views::scenario)
         .map(Json)
         .map_err(|error| {
             eprintln!("Falha ao recalcular a simulação intradiária: {error}");
@@ -786,33 +791,33 @@ async fn simulate_intraday_scenarios(
 
 fn domain_strategy_kind(
     kind: api_models::SimulationStrategyKind,
-) -> polars_options::hexagon::domain::simulation::SimulationStrategyKind {
+) -> hexagonal_backend::hexagon::domain::simulation::SimulationStrategyKind {
     match kind {
         api_models::SimulationStrategyKind::Straddle => {
-            polars_options::hexagon::domain::simulation::SimulationStrategyKind::Straddle
+            hexagonal_backend::hexagon::domain::simulation::SimulationStrategyKind::Straddle
         }
         api_models::SimulationStrategyKind::BullCallSpread => {
-            polars_options::hexagon::domain::simulation::SimulationStrategyKind::BullCallSpread
+            hexagonal_backend::hexagon::domain::simulation::SimulationStrategyKind::BullCallSpread
         }
         api_models::SimulationStrategyKind::Custom => {
-            polars_options::hexagon::domain::simulation::SimulationStrategyKind::Custom
+            hexagonal_backend::hexagon::domain::simulation::SimulationStrategyKind::Custom
         }
     }
 }
 
 fn domain_simulation_legs(
     legs: &[api_models::SimulationLegRequest],
-) -> Vec<polars_options::hexagon::domain::simulation::SimulationLegSelection> {
+) -> Vec<hexagonal_backend::hexagon::domain::simulation::SimulationLegSelection> {
     legs.iter()
         .map(
-            |leg| polars_options::hexagon::domain::simulation::SimulationLegSelection {
+            |leg| hexagonal_backend::hexagon::domain::simulation::SimulationLegSelection {
                 occ_symbol: leg.occ_symbol.clone(),
                 side: match leg.side {
                     api_models::SimulationTradeSide::Buy => {
-                        polars_options::hexagon::domain::simulation::SimulationTradeSide::Buy
+                        hexagonal_backend::hexagon::domain::simulation::SimulationTradeSide::Buy
                     }
                     api_models::SimulationTradeSide::Sell => {
-                        polars_options::hexagon::domain::simulation::SimulationTradeSide::Sell
+                        hexagonal_backend::hexagon::domain::simulation::SimulationTradeSide::Sell
                     }
                 },
                 quantity: leg.quantity,
@@ -825,7 +830,7 @@ fn domain_simulation_legs(
 async fn saved_strategies(
     State(pool): State<SqlitePool>,
 ) -> Result<Json<Vec<api_models::SavedStrategyOverview>>, StatusCode> {
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .saved_strategies
         .list_strategies()
         .await
@@ -864,7 +869,7 @@ async fn save_strategy(
             })
             .collect(),
     };
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .saved_strategies
         .save_strategy(command)
         .await
@@ -879,7 +884,7 @@ async fn delete_strategy(
     State(pool): State<SqlitePool>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .saved_strategies
         .delete_strategy(id)
         .await
@@ -916,7 +921,7 @@ async fn create_portfolio_cash_movement(
     State(pool): State<SqlitePool>,
     Json(request): Json<api_models::CreatePortfolioCashMovement>,
 ) -> Result<(StatusCode, Json<api_models::PortfolioOverview>), StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     main_portfolio(&application).await?;
     let movement = CashMovement::new(
         request.id,
@@ -935,7 +940,7 @@ async fn create_portfolio_cash_movement(
         .record_cash_movement("main", movement)
         .await
         .map_err(port_status)?;
-    let overview = polars_options::driving_adapters::http::legacy_portfolio_views::overview(
+    let overview = hexagonal_backend::driving_adapters::http::legacy_portfolio_views::overview(
         application.portfolio("main").await.map_err(port_status)?,
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -946,7 +951,7 @@ async fn create_portfolio_option_trade(
     State(pool): State<SqlitePool>,
     Json(request): Json<api_models::CreatePortfolioOptionTrade>,
 ) -> Result<(StatusCode, Json<api_models::PortfolioOverview>), StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     main_portfolio(&application).await?;
     let currency = Currency::new(&request.currency).map_err(|_| StatusCode::BAD_REQUEST)?;
     let mut trade = Trade::new(
@@ -982,7 +987,7 @@ async fn create_portfolio_option_trade(
         .record_option_trade("main", trade)
         .await
         .map_err(port_status)?;
-    let overview = polars_options::driving_adapters::http::legacy_portfolio_views::overview(
+    let overview = hexagonal_backend::driving_adapters::http::legacy_portfolio_views::overview(
         application.portfolio("main").await.map_err(port_status)?,
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -993,7 +998,7 @@ async fn create_portfolio_currency_exchange(
     State(pool): State<SqlitePool>,
     Json(request): Json<api_models::CreatePortfolioCurrencyExchange>,
 ) -> Result<(StatusCode, Json<api_models::PortfolioOverview>), StatusCode> {
-    let application = polars_options::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure(pool).portfolios;
     main_portfolio(&application).await?;
     let sold_currency =
         Currency::new(&request.sold_currency).map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -1024,7 +1029,7 @@ async fn create_portfolio_currency_exchange(
         .record_currency_exchange("main", exchange)
         .await
         .map_err(port_status)?;
-    let overview = polars_options::driving_adapters::http::legacy_portfolio_views::overview(
+    let overview = hexagonal_backend::driving_adapters::http::legacy_portfolio_views::overview(
         application.portfolio("main").await.map_err(port_status)?,
     )
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -1036,7 +1041,7 @@ async fn asset_price(
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetPriceResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .market_data
         .market_history(&normalized)
         .await
@@ -1049,7 +1054,7 @@ async fn asset_price_history(
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetPriceHistoryResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .market_data
         .market_history(&normalized)
         .await
@@ -1059,7 +1064,7 @@ async fn asset_price_history(
 
 fn legacy_asset_price(
     ticker: String,
-    history: &polars_options::hexagon::domain::market_history::MarketHistory,
+    history: &hexagonal_backend::hexagon::domain::market_history::MarketHistory,
 ) -> api_models::AssetPriceResponse {
     let latest = history.daily_quotes.last();
     let as_of = latest.map(|quote| quote.timestamp.date_naive());
@@ -1096,7 +1101,7 @@ fn legacy_asset_price(
 
 fn legacy_asset_price_history(
     ticker: String,
-    history: &polars_options::hexagon::domain::market_history::MarketHistory,
+    history: &hexagonal_backend::hexagon::domain::market_history::MarketHistory,
 ) -> api_models::AssetPriceHistoryResponse {
     const MAX_SESSIONS: usize = 1_260;
     let as_of = history
@@ -1138,11 +1143,11 @@ async fn asset_historical_volatility(
     State(pool): State<SqlitePool>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetHistoricalVolatilityResponse>, StatusCode> {
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .market_volatility
         .historical_volatility(&ticker)
         .await
-        .map(polars_options::driving_adapters::http::legacy_asset_views::historical_volatility)
+        .map(hexagonal_backend::driving_adapters::http::legacy_asset_views::historical_volatility)
         .map(Json)
         .map_err(port_status)
 }
@@ -1151,11 +1156,11 @@ async fn asset_implied_volatility(
     State(pool): State<SqlitePool>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetImpliedVolatilityResponse>, StatusCode> {
-    polars_options::configurator::configure(pool)
+    hexagonal_backend::configurator::configure(pool)
         .market_volatility
         .implied_volatility(&ticker)
         .await
-        .map(polars_options::driving_adapters::http::legacy_asset_views::implied_volatility)
+        .map(hexagonal_backend::driving_adapters::http::legacy_asset_views::implied_volatility)
         .map(Json)
         .map_err(port_status)
 }
@@ -1165,7 +1170,7 @@ async fn options_snapshot(
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::OptionsSnapshotResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    match polars_options::configurator::configure(pool)
+    match hexagonal_backend::configurator::configure(pool)
         .options
         .option_chain(&normalized)
         .await
@@ -1182,7 +1187,7 @@ async fn options_snapshot(
                 .iter()
                 .filter(|contract| {
                     contract.option_type
-                        == polars_options::hexagon::domain::options::OptionType::Call
+                        == hexagonal_backend::hexagon::domain::options::OptionType::Call
                 })
                 .count();
             let minimum_strike = snapshot
@@ -1223,7 +1228,7 @@ async fn options_term_structure(
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::OptionsTermStructureResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    match polars_options::configurator::configure(pool)
+    match hexagonal_backend::configurator::configure(pool)
         .options
         .term_structure(&normalized)
         .await
@@ -1269,7 +1274,7 @@ async fn options_volatility_surface(
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::OptionsVolatilitySurfaceResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    match polars_options::configurator::configure(pool)
+    match hexagonal_backend::configurator::configure(pool)
         .options
         .volatility_surface(&normalized)
         .await
@@ -1292,7 +1297,7 @@ async fn options_volatility_surface(
 }
 
 fn legacy_volatility_surface(
-    surface: polars_options::hexagon::domain::volatility_surface::VolatilitySurface,
+    surface: hexagonal_backend::hexagon::domain::volatility_surface::VolatilitySurface,
 ) -> api_models::DataState<api_models::VolatilitySurfaceOverview> {
     const LEVELS: [f64; 9] = [80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0];
     let observations = surface
@@ -1372,19 +1377,19 @@ async fn options_intraday(
     State(pool): State<SqlitePool>,
     Path(ticker): Path<String>,
 ) -> Result<Json<api_models::OptionsIntradayResponse>, StatusCode> {
-    let market = polars_options::configurator::configure(pool)
+    let market = hexagonal_backend::configurator::configure(pool)
         .intraday_simulation
         .intraday_options(&ticker)
         .await
         .map_err(port_status)?;
     let normalized = ticker.trim().to_ascii_uppercase();
-    let catalog = polars_options::driving_adapters::http::legacy_simulation_views::catalog(
+    let catalog = hexagonal_backend::driving_adapters::http::legacy_simulation_views::catalog(
         &normalized,
         &market.snapshot,
         market.spot,
     );
     let volatility_surface =
-        polars_options::hexagon::domain::volatility_surface::VolatilitySurface::from_snapshot(
+        hexagonal_backend::hexagon::domain::volatility_surface::VolatilitySurface::from_snapshot(
             &market.snapshot,
             market.spot,
         )
@@ -1453,7 +1458,7 @@ mod tests {
     #[test]
     fn maps_domain_volatility_surface_to_legacy_percent_units() {
         let expiration = chrono::NaiveDate::from_ymd_opt(2026, 9, 18).expect("valid date");
-        let surface = polars_options::hexagon::domain::volatility_surface::VolatilitySurface {
+        let surface = hexagonal_backend::hexagon::domain::volatility_surface::VolatilitySurface {
             ticker: "SPY".to_string(),
             snapshot_time: expiration
                 .and_hms_opt(20, 0, 0)
@@ -1461,12 +1466,12 @@ mod tests {
                 .and_utc(),
             reference_price: 100.0,
             points: vec![
-                polars_options::hexagon::domain::volatility_surface::VolatilitySurfacePoint {
+                hexagonal_backend::hexagon::domain::volatility_surface::VolatilitySurfacePoint {
                     expiration,
                     days_to_expiration: 30,
                     strike: 100.0,
                     moneyness: 1.0,
-                    option_type: polars_options::hexagon::domain::options::OptionType::Call,
+                    option_type: hexagonal_backend::hexagon::domain::options::OptionType::Call,
                     implied_volatility: 0.25,
                 },
             ],
@@ -1481,7 +1486,7 @@ mod tests {
 
     #[test]
     fn maps_market_history_to_legacy_price_change() {
-        let quote = |day, close| polars_options::hexagon::domain::market_history::DailyQuote {
+        let quote = |day, close| hexagonal_backend::hexagon::domain::market_history::DailyQuote {
             timestamp: chrono::NaiveDate::from_ymd_opt(2026, 8, day)
                 .expect("valid date")
                 .and_hms_opt(20, 0, 0)
@@ -1494,7 +1499,7 @@ mod tests {
             adjusted_close: Some(close),
             volume: Some(100),
         };
-        let history = polars_options::hexagon::domain::market_history::MarketHistory {
+        let history = hexagonal_backend::hexagon::domain::market_history::MarketHistory {
             ticker: "TEST".to_string(),
             currency: Some("USD".to_string()),
             exchange_timezone: None,

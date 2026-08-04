@@ -4,7 +4,7 @@
 //! architectural promise explicit: concrete providers satisfy application-owned
 //! ports without exposing provider types to the hexagon.
 
-use polars_options::{
+use hexagonal_backend::{
     driven_adapters::{
         cboe::{CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter},
         exchange_calendar::ExchangeTradingCalendarAdapter,

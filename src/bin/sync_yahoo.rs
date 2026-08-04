@@ -1,4 +1,4 @@
-use polars_options::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
+use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
@@ -8,9 +8,9 @@ const TICKERS: [&str; 4] = ["IBM", "GOOGL", "MSFT", "JPM"];
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect("sqlite://data/polars_options.db?mode=rwc")
+        .connect("sqlite://data/hexagonal.db?mode=rwc")
         .await?;
-    let configured = polars_options::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure(pool.clone());
     let since = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).ok_or("invalid initial date")?;
 
     for ticker in TICKERS {

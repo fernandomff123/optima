@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     PortResult,
     application::market_volatility::MarketVolatilityApplication,
     domain::{
@@ -40,9 +40,9 @@ impl ForLoadingMarketHistory for MarketHistoryMock {
     async fn load_market_history(
         &self,
         ticker: &str,
-    ) -> PortResult<polars_options::hexagon::domain::market_history::MarketHistory> {
+    ) -> PortResult<hexagonal_backend::hexagon::domain::market_history::MarketHistory> {
         Ok(
-            polars_options::hexagon::domain::market_history::MarketHistory {
+            hexagonal_backend::hexagon::domain::market_history::MarketHistory {
                 ticker: ticker.to_string(),
                 currency: None,
                 exchange_timezone: None,
@@ -84,8 +84,9 @@ impl ForLoadingOptionData for OptionDataMock {
         &self,
         _ticker: &str,
         _target_days: f64,
-    ) -> PortResult<Vec<polars_options::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>>
-    {
+    ) -> PortResult<
+        Vec<hexagonal_backend::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>,
+    > {
         Ok(Vec::new())
     }
 }

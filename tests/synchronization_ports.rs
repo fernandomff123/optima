@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     PortError, PortResult,
     application::synchronization::{OptionAnalysisCollaborators, SynchronizationApplication},
     domain::{
@@ -36,9 +36,9 @@ struct OptionsSuccessMock;
 impl ForLoadingTrackedTickers for OptionTrackedTickersMock {
     async fn load_active_tickers(
         &self,
-    ) -> PortResult<Vec<polars_options::hexagon::domain::tracked_ticker::TrackedTicker>> {
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
         Ok(vec![
-            polars_options::hexagon::domain::tracked_ticker::TrackedTicker {
+            hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                 ticker: "SPY".to_string(),
                 active: true,
                 historical_prices: false,
@@ -90,8 +90,9 @@ impl ForLoadingOptionData for OptionDataMock {
         &self,
         _ticker: &str,
         _target_days: f64,
-    ) -> PortResult<Vec<polars_options::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>>
-    {
+    ) -> PortResult<
+        Vec<hexagonal_backend::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>,
+    > {
         Ok(Vec::new())
     }
 }
@@ -122,9 +123,9 @@ impl ForConsultingTradingCalendar for TradingCalendarMock {
 impl ForLoadingTrackedTickers for TrackedTickersMock {
     async fn load_active_tickers(
         &self,
-    ) -> PortResult<Vec<polars_options::hexagon::domain::tracked_ticker::TrackedTicker>> {
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
         Ok(vec![
-            polars_options::hexagon::domain::tracked_ticker::TrackedTicker {
+            hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                 ticker: "SPY".to_string(),
                 active: true,
                 historical_prices: true,
@@ -263,7 +264,7 @@ async fn invalid_year_is_rejected_before_calling_driven_ports() {
 
 #[tokio::test]
 async fn batch_synchronization_uses_tracked_ticker_configuration() {
-    use polars_options::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers;
+    use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers;
 
     let application = SynchronizationApplication::new(
         HistoryMock,
@@ -289,7 +290,7 @@ async fn batch_synchronization_uses_tracked_ticker_configuration() {
 
 #[tokio::test]
 async fn batch_reports_term_structure_separately_after_storing_option_chain() {
-    use polars_options::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers;
+    use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers;
 
     let application = SynchronizationApplication::new(
         HistoryMock,

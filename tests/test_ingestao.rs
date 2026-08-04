@@ -1,12 +1,12 @@
-use polars_options::driven_adapters::sqlite::option_snapshots;
+use hexagonal_backend::driven_adapters::sqlite::option_snapshots;
 use sqlx::sqlite::SqlitePoolOptions;
 
 #[tokio::test]
 async fn test_pipeline_msgpack_e_sqlite() {
-    let response: polars_options::driven_adapters::cboe::CboeResponse =
+    let response: hexagonal_backend::driven_adapters::cboe::CboeResponse =
         serde_json::from_str(include_str!("fixtures/snapshot.json"))
             .expect("o fixture deve conter um DTO CBOE válido");
-    let expected = polars_options::driven_adapters::cboe::response_to_snapshot("SPY", response)
+    let expected = hexagonal_backend::driven_adapters::cboe::response_to_snapshot("SPY", response)
         .expect("o DTO deve ser convertido para o domínio");
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

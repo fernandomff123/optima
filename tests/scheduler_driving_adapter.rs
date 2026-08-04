@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chrono::{TimeZone, Utc};
-use polars_options::{
+use hexagonal_backend::{
     driving_adapters::scheduler::{EndOfDayRequest, synchronize_end_of_day},
     hexagon::{
         PortError, PortResult,

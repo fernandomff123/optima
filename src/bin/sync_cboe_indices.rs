@@ -1,4 +1,4 @@
-use polars_options::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
+use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
@@ -6,10 +6,10 @@ use std::error::Error;
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect("sqlite://data/polars_options.db?mode=rwc")
+        .connect("sqlite://data/hexagonal.db?mode=rwc")
         .await?;
 
-    let configured = polars_options::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure(pool.clone());
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let tickers: Vec<_> = if arguments.is_empty() {
         vec!["VIX".to_string()]

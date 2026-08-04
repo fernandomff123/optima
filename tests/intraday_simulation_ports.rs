@@ -5,7 +5,7 @@ use std::sync::{
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     PortError, PortResult,
     application::intraday_simulation::IntradaySimulationApplication,
     domain::{live_price::LivePrice, options::Snapshot},

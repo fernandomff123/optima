@@ -1,4 +1,4 @@
-use polars_options::{
+use hexagonal_backend::{
     driven_adapters::sqlite::tracked_tickers::SqliteTrackedTickersAdapter,
     hexagon::{
         application::tracked_tickers::TrackedTickersApplication,

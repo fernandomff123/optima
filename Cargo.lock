@@ -779,6 +779,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hexagonal_backend"
+version = "0.1.0"
+dependencies = [
+ "api_models",
+ "async-trait",
+ "axum",
+ "base64",
+ "chrono",
+ "chrono-tz",
+ "dotenvy",
+ "exchange-calendars-rs",
+ "futures-util",
+ "prost",
+ "quick-xml",
+ "regex",
+ "reqwest",
+ "rmp-serde",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tower",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1448,34 +1476,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "polars_options"
-version = "0.1.0"
-dependencies = [
- "api_models",
- "async-trait",
- "axum",
- "base64",
- "chrono",
- "chrono-tz",
- "dotenvy",
- "exchange-calendars-rs",
- "futures-util",
- "prost",
- "quick-xml",
- "regex",
- "reqwest",
- "rmp-serde",
- "rust_decimal",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "tower",
-]
 
 [[package]]
 name = "potential_utf"

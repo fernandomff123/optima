@@ -1,5 +1,5 @@
-use polars_options::hexagon::driving_ports::for_scheduling_market_operations::ForSchedulingMarketOperations;
-use polars_options::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
+use hexagonal_backend::hexagon::driving_ports::for_scheduling_market_operations::ForSchedulingMarketOperations;
+use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
@@ -16,10 +16,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .unwrap_or_else(|| "SPY".to_string());
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect("sqlite://data/polars_options.db?mode=rwc")
+        .connect("sqlite://data/hexagonal.db?mode=rwc")
         .await?;
 
-    let configured = polars_options::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure(pool.clone());
     let Some(market_close) = configured
         .market_scheduling
         .eligible_end_of_day_close(chrono::Utc::now())?

@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     PortError, PortResult,
     domain::{
         index_history::IndexHistory,
@@ -49,7 +49,7 @@ impl ForObtainingMarketHistory for MarketHistoryProviderMock {
         &self,
         _ticker: &str,
         _since: chrono::NaiveDate,
-    ) -> PortResult<polars_options::hexagon::domain::market_history::MarketHistory> {
+    ) -> PortResult<hexagonal_backend::hexagon::domain::market_history::MarketHistory> {
         Err(PortError::Unavailable(
             "no configured market history".into(),
         ))

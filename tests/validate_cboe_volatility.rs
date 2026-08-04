@@ -1,18 +1,18 @@
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     domain::volatility::TermStructureSource,
     driving_ports::for_analyzing_options::ForAnalyzingOptions,
 };
 use sqlx::sqlite::SqlitePoolOptions;
 
 #[tokio::test]
-#[ignore = "requer o snapshot local do SPY em data/polars_options.db"]
+#[ignore = "requer o snapshot local do SPY em data/hexagonal.db"]
 async fn validates_real_cboe_volatility_snapshots() {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect("sqlite://data/polars_options.db")
+        .connect("sqlite://data/hexagonal.db")
         .await
         .unwrap();
-    let configured = polars_options::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure(pool);
     let spy_term_structure = configured.options.term_structure("SPY").await.unwrap();
     let spy_30_days = &spy_term_structure.points[0];
     println!("SPY 30 dias: volatilidade={:.6}%", spy_30_days.volatility,);

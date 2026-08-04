@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use polars_options::hexagon::{
+use hexagonal_backend::hexagon::{
     PortResult,
     application::tracked_tickers::TrackedTickersApplication,
     domain::tracked_ticker::TrackedTicker,
