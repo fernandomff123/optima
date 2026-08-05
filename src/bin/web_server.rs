@@ -152,7 +152,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .layer(Extension(market_session))
         .merge(hexagonal_routes);
     let address =
-        std::env::var("POLARS_OPTIONS_API_ADDR").unwrap_or_else(|_| "127.0.0.1:3100".to_string());
+        std::env::var("HEXAGONAL_BACKEND_ADDR").unwrap_or_else(|_| "127.0.0.1:3100".to_string());
     let listener = tokio::net::TcpListener::bind(&address).await?;
     println!("API disponível em http://{address}");
     let result = axum::serve(listener, app).await;

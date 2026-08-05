@@ -10,7 +10,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .nth(1)
         .unwrap_or_else(|| "AAPL".to_string());
     let next_ticker = std::env::args().nth(2);
-    let base_url = std::env::var("POLARS_OPTIONS_LIVE_URL")
+    let base_url = std::env::var("HEXAGONAL_BACKEND_LIVE_URL")
         .unwrap_or_else(|_| "ws://127.0.0.1:3100/api/assets/live".to_string());
     let url = format!("{base_url}?ticker={ticker}");
     let (mut socket, _) = connect_async(url).await?;
