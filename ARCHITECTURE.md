@@ -5,6 +5,17 @@ business logic is split into cohesive modules, but those modules are not nested
 hexagons. This follows *Hexagonal Architecture Explained*, especially chapters
 2.1–2.4, 4.3–4.9, 5.3–5.4, and 5.8.
 
+The architecture can also be explored by intent rather than by source tree:
+
+- [Actor catalogue](docs/actors.md) identifies driving and driven actors and
+  separates actors from their adapters.
+- [Conversation catalogue](docs/conversations.md) maps every offered use case
+  to its driving port, application coordinator, required ports, and actors.
+- Detailed flows explain [portfolio valuation](docs/conversations/portfolio-valuation.md),
+  [market-data synchronization](docs/conversations/synchronization.md),
+  [option analysis](docs/conversations/options.md), and
+  [intraday market data](docs/conversations/intraday-market.md).
+
 ## Boundary
 
 The application owns all port definitions. Nothing crosses the application
