@@ -48,8 +48,14 @@ pub async fn fetch_price(ticker: &str) -> Result<YahooLivePrice, Box<dyn Error +
     let change_percent = previous_close
         .filter(|previous| *previous != 0.0)
         .map_or(0.0, |previous| change / previous * 100.0);
+    // Session state is Yahoo data. Exchange-calendar decisions belong to the
+    // application and must not couple this adapter to another technology.
     let market_hours = i32::from(
-        crate::driven_adapters::exchange_calendar::is_regular_session(chrono::Utc::now())?,
+        result
+            .meta
+            .market_state
+            .as_deref()
+            .is_some_and(|state| state.eq_ignore_ascii_case("REGULAR")),
     );
     Ok(YahooLivePrice {
         ticker,

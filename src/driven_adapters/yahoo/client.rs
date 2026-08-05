@@ -53,6 +53,9 @@ pub struct YahooMeta {
     pub regular_market_time: Option<i64>,
     #[serde(rename = "regularMarketVolume")]
     pub regular_market_volume: Option<i64>,
+    /// Provider-reported session state, for example `REGULAR` or `CLOSED`.
+    #[serde(rename = "marketState")]
+    pub market_state: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,7 +268,8 @@ mod tests {
                 "currency": "USD",
                 "exchangeName": "NMS",
                 "instrumentType": "EQUITY",
-                "exchangeTimezoneName": "America/New_York"
+                "exchangeTimezoneName": "America/New_York",
+                "marketState": "REGULAR"
               },
               "timestamp": [1704205800, 1704292200],
               "indicators": {
@@ -301,6 +305,7 @@ mod tests {
         let result = &response.chart.result.unwrap()[0];
 
         assert_eq!(result.meta.symbol, "AAPL");
+        assert_eq!(result.meta.market_state.as_deref(), Some("REGULAR"));
         assert_eq!(result.timestamp, [1704205800, 1704292200]);
         assert_eq!(result.indicators.quote[0].open, [Some(185.0), None]);
         assert_eq!(result.indicators.adjclose[0].adjclose[1], Some(186.4));
