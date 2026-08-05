@@ -88,7 +88,10 @@ contract tests replace the application with mocks and verify HTTP translation.
 
 | Application need | Driven port | Production adapter |
 | --- | --- | --- |
-| Store market information | `ForStoringMarketData` | SQLite |
+| Store market history | `ForStoringMarketHistory` | SQLite |
+| Store option data and derived analytics | `ForStoringOptionData` | SQLite |
+| Store volatility-index history | `ForStoringIndexHistory` | SQLite |
+| Store risk-free yield curves | `ForStoringYieldCurves` | SQLite |
 | Load stored market history | `ForLoadingMarketHistory` | SQLite |
 | Load stored index history | `ForLoadingIndexHistory` | SQLite |
 | Load stored option data | `ForLoadingOptionData` | SQLite |

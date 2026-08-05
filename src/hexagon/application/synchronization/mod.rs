@@ -13,7 +13,10 @@ use crate::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
-        for_storing_market_data::ForStoringMarketData,
+        for_storing_index_history::ForStoringIndexHistory,
+        for_storing_market_history::ForStoringMarketHistory,
+        for_storing_option_data::ForStoringOptionData,
+        for_storing_yield_curves::ForStoringYieldCurves,
     },
     driving_ports::for_synchronizing_market_data::{
         ForSynchronizingMarketData, SynchronizationFailure, SynchronizationReport,
@@ -38,13 +41,36 @@ impl<OptionData, TradingCalendar> OptionAnalysisCollaborators<OptionData, Tradin
     }
 }
 
+/// Persistence participants grouped for constructor injection, while each
+/// remains governed by its own business conversation.
+pub struct SynchronizationStores<History, Options, Indices, Curves> {
+    history: History,
+    options: Options,
+    indices: Indices,
+    curves: Curves,
+}
+
+impl<History, Options, Indices, Curves> SynchronizationStores<History, Options, Indices, Curves> {
+    pub fn new(history: History, options: Options, indices: Indices, curves: Curves) -> Self {
+        Self {
+            history,
+            options,
+            indices,
+            curves,
+        }
+    }
+}
+
 /// Coordinates provider-neutral acquisition and persistence ports.
 pub struct SynchronizationApplication<
     History,
     Options,
     Indices,
     Curves,
-    Store,
+    HistoryStore,
+    OptionStore,
+    IndexStore,
+    CurveStore,
     TrackedTickers,
     OptionData,
     TradingCalendar,
@@ -53,18 +79,33 @@ pub struct SynchronizationApplication<
     options: Options,
     indices: Indices,
     curves: Curves,
-    store: Store,
+    stores: SynchronizationStores<HistoryStore, OptionStore, IndexStore, CurveStore>,
     tracked_tickers: TrackedTickers,
     option_analysis: OptionAnalysisCollaborators<OptionData, TradingCalendar>,
 }
 
-impl<History, Options, Indices, Curves, Store, TrackedTickers, OptionData, TradingCalendar>
+impl<
+    History,
+    Options,
+    Indices,
+    Curves,
+    HistoryStore,
+    OptionStore,
+    IndexStore,
+    CurveStore,
+    TrackedTickers,
+    OptionData,
+    TradingCalendar,
+>
     SynchronizationApplication<
         History,
         Options,
         Indices,
         Curves,
-        Store,
+        HistoryStore,
+        OptionStore,
+        IndexStore,
+        CurveStore,
         TrackedTickers,
         OptionData,
         TradingCalendar,
@@ -75,7 +116,7 @@ impl<History, Options, Indices, Curves, Store, TrackedTickers, OptionData, Tradi
         options: Options,
         indices: Indices,
         curves: Curves,
-        store: Store,
+        stores: SynchronizationStores<HistoryStore, OptionStore, IndexStore, CurveStore>,
         tracked_tickers: TrackedTickers,
         option_analysis: OptionAnalysisCollaborators<OptionData, TradingCalendar>,
     ) -> Self {
@@ -84,7 +125,7 @@ impl<History, Options, Indices, Curves, Store, TrackedTickers, OptionData, Tradi
             options,
             indices,
             curves,
-            store,
+            stores,
             tracked_tickers,
             option_analysis,
         }
@@ -92,14 +133,28 @@ impl<History, Options, Indices, Curves, Store, TrackedTickers, OptionData, Tradi
 }
 
 #[async_trait]
-impl<History, Options, Indices, Curves, Store, TrackedTickers, OptionData, TradingCalendar>
-    ForSynchronizingMarketData
+impl<
+    History,
+    Options,
+    Indices,
+    Curves,
+    HistoryStore,
+    OptionStore,
+    IndexStore,
+    CurveStore,
+    TrackedTickers,
+    OptionData,
+    TradingCalendar,
+> ForSynchronizingMarketData
     for SynchronizationApplication<
         History,
         Options,
         Indices,
         Curves,
-        Store,
+        HistoryStore,
+        OptionStore,
+        IndexStore,
+        CurveStore,
         TrackedTickers,
         OptionData,
         TradingCalendar,
@@ -109,7 +164,10 @@ where
     Options: ForObtainingOptionChains,
     Indices: ForObtainingVolatilityIndices,
     Curves: ForObtainingYieldCurves,
-    Store: ForStoringMarketData,
+    HistoryStore: ForStoringMarketHistory,
+    OptionStore: ForStoringOptionData,
+    IndexStore: ForStoringIndexHistory,
+    CurveStore: ForStoringYieldCurves,
     TrackedTickers: ForLoadingTrackedTickers,
     OptionData: ForLoadingOptionData,
     TradingCalendar: ForConsultingTradingCalendar,
@@ -188,7 +246,7 @@ where
         let history = self.history.obtain_market_history(&ticker, since).await?;
         let items_obtained =
             history.daily_quotes.len() + history.dividends.len() + history.splits.len();
-        let items_stored = self.store.store_market_history(&history).await?;
+        let items_stored = self.stores.history.store_market_history(&history).await?;
         Ok(SynchronizationReport {
             items_obtained,
             items_stored,
@@ -204,7 +262,8 @@ where
         let snapshot = self.options.obtain_option_chain(&ticker).await?;
         let items_obtained = snapshot.contratos.len();
         let items_stored = self
-            .store
+            .stores
+            .options
             .store_option_chain(&snapshot, market_close)
             .await?;
         Ok(SynchronizationReport {
@@ -222,7 +281,11 @@ where
         )
         .await?;
         let items_obtained = term_structure.points.len();
-        let items_stored = self.store.store_term_structure(&term_structure).await?;
+        let items_stored = self
+            .stores
+            .options
+            .store_term_structure(&term_structure)
+            .await?;
         Ok(SynchronizationReport {
             items_obtained,
             items_stored,
@@ -236,7 +299,7 @@ where
         let ticker = normalized_ticker(ticker)?;
         let history = self.indices.obtain_volatility_index(&ticker).await?;
         let items_obtained = history.daily_prices.len();
-        let items_stored = self.store.store_volatility_index(&history).await?;
+        let items_stored = self.stores.indices.store_index_history(&history).await?;
         Ok(SynchronizationReport {
             items_obtained,
             items_stored,
@@ -249,7 +312,7 @@ where
         }
         let curves = self.curves.obtain_yield_curves(year).await?;
         let items_obtained = curves.len();
-        let items_stored = self.store.store_yield_curves(&curves).await?;
+        let items_stored = self.stores.curves.store_yield_curves(&curves).await?;
         Ok(SynchronizationReport {
             items_obtained,
             items_stored,

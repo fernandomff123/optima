@@ -2,7 +2,6 @@
 
 pub mod index_history;
 pub mod index_history_port;
-pub mod market_data;
 pub mod market_history;
 pub mod migrations;
 pub mod option_data;

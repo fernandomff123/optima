@@ -4,7 +4,11 @@ use std::error::Error;
 
 use crate::hexagon::domain::market_history::{DailyQuote, Dividend, MarketHistory, StockSplit};
 use crate::hexagon::{
-    PortError, PortResult, driven_ports::for_loading_market_history::ForLoadingMarketHistory,
+    PortError, PortResult,
+    driven_ports::{
+        for_loading_market_history::ForLoadingMarketHistory,
+        for_storing_market_history::ForStoringMarketHistory,
+    },
 };
 
 #[derive(Clone)]
@@ -24,6 +28,16 @@ impl ForLoadingMarketHistory for SqliteMarketHistoryAdapter {
         load_history(&self.pool, ticker)
             .await
             .map_err(|error| PortError::Unavailable(error.to_string()))
+    }
+}
+
+#[async_trait::async_trait]
+impl ForStoringMarketHistory for SqliteMarketHistoryAdapter {
+    async fn store_market_history(&self, history: &MarketHistory) -> PortResult<u64> {
+        let report = insert_incremental(&self.pool, history)
+            .await
+            .map_err(|error| PortError::Unavailable(error.to_string()))?;
+        Ok(report.prices_affected + report.dividends_affected + report.splits_affected)
     }
 }
 

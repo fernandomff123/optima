@@ -9,7 +9,10 @@ use crate::hexagon::{
         treasury::YieldCurve,
         volatility::{ConstantMaturityVolatilityPoint, TermStructure},
     },
-    driven_ports::for_loading_option_data::ForLoadingOptionData,
+    driven_ports::{
+        for_loading_option_data::ForLoadingOptionData,
+        for_storing_option_data::ForStoringOptionData,
+    },
 };
 
 use super::{market_history, option_snapshots, volatility_term_structures, yield_curves};
@@ -86,6 +89,26 @@ impl ForLoadingOptionData for SqliteOptionDataAdapter {
         target_days: f64,
     ) -> PortResult<Vec<ConstantMaturityVolatilityPoint>> {
         volatility_term_structures::load_constant_maturity_history(&self.pool, ticker, target_days)
+            .await
+            .map_err(unavailable)
+    }
+}
+
+#[async_trait::async_trait]
+impl ForStoringOptionData for SqliteOptionDataAdapter {
+    async fn store_option_chain(
+        &self,
+        snapshot: &Snapshot,
+        market_close: DateTime<Utc>,
+    ) -> PortResult<u64> {
+        option_snapshots::save_snapshot(&self.pool, snapshot, market_close)
+            .await
+            .map(u64::from)
+            .map_err(unavailable)
+    }
+
+    async fn store_term_structure(&self, term_structure: &TermStructure) -> PortResult<u64> {
+        volatility_term_structures::insert(&self.pool, term_structure)
             .await
             .map_err(unavailable)
     }

@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use hexagonal_backend::hexagon::{
     PortError, PortResult,
-    application::synchronization::{OptionAnalysisCollaborators, SynchronizationApplication},
+    application::synchronization::{
+        OptionAnalysisCollaborators, SynchronizationApplication, SynchronizationStores,
+    },
     domain::{
         index_history::IndexHistory, market_history::MarketHistory, options::Snapshot,
         treasury::YieldCurve, volatility::TermStructure,
@@ -17,7 +19,10 @@ use hexagonal_backend::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
-        for_storing_market_data::ForStoringMarketData,
+        for_storing_index_history::ForStoringIndexHistory,
+        for_storing_market_history::ForStoringMarketHistory,
+        for_storing_option_data::ForStoringOptionData,
+        for_storing_yield_curves::ForStoringYieldCurves,
     },
     driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData,
 };
@@ -180,7 +185,7 @@ struct StoreMock {
 }
 
 #[async_trait]
-impl ForStoringMarketData for StoreMock {
+impl ForStoringMarketHistory for StoreMock {
     async fn store_market_history(&self, history: &MarketHistory) -> PortResult<u64> {
         self.stored_tickers
             .lock()
@@ -188,7 +193,10 @@ impl ForStoringMarketData for StoreMock {
             .push(history.ticker.clone());
         Ok(1)
     }
+}
 
+#[async_trait]
+impl ForStoringOptionData for StoreMock {
     async fn store_option_chain(
         &self,
         _snapshot: &Snapshot,
@@ -197,15 +205,21 @@ impl ForStoringMarketData for StoreMock {
         Ok(1)
     }
 
-    async fn store_volatility_index(&self, _history: &IndexHistory) -> PortResult<u64> {
-        Ok(1)
-    }
-
-    async fn store_yield_curves(&self, _curves: &[YieldCurve]) -> PortResult<u64> {
-        Ok(1)
-    }
-
     async fn store_term_structure(&self, _term_structure: &TermStructure) -> PortResult<u64> {
+        Ok(1)
+    }
+}
+
+#[async_trait]
+impl ForStoringIndexHistory for StoreMock {
+    async fn store_index_history(&self, _history: &IndexHistory) -> PortResult<u64> {
+        Ok(1)
+    }
+}
+
+#[async_trait]
+impl ForStoringYieldCurves for StoreMock {
+    async fn store_yield_curves(&self, _curves: &[YieldCurve]) -> PortResult<u64> {
         Ok(1)
     }
 }
@@ -219,7 +233,7 @@ async fn driving_port_orchestrates_provider_and_store_mocks() {
         OptionsMock,
         IndicesMock,
         CurvesMock,
-        store,
+        SynchronizationStores::new(store.clone(), store.clone(), store.clone(), store),
         TrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
     );
@@ -246,7 +260,12 @@ async fn invalid_year_is_rejected_before_calling_driven_ports() {
         OptionsMock,
         IndicesMock,
         CurvesMock,
-        StoreMock::default(),
+        SynchronizationStores::new(
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+        ),
         TrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
     );
@@ -271,7 +290,12 @@ async fn batch_synchronization_uses_tracked_ticker_configuration() {
         OptionsMock,
         IndicesMock,
         CurvesMock,
-        StoreMock::default(),
+        SynchronizationStores::new(
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+        ),
         TrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
     );
@@ -297,7 +321,12 @@ async fn batch_reports_term_structure_separately_after_storing_option_chain() {
         OptionsSuccessMock,
         IndicesMock,
         CurvesMock,
-        StoreMock::default(),
+        SynchronizationStores::new(
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+        ),
         OptionTrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
     );

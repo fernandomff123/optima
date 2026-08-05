@@ -7,10 +7,12 @@ use hexagonal_backend::hexagon::{
     domain::{
         index_history::IndexHistory,
         live_price::LivePrice,
+        market_history::MarketHistory,
         options::Snapshot,
         portfolio::{Instrument, Portfolio},
         portfolio_valuation::InstrumentPrice,
         treasury::YieldCurve,
+        volatility::TermStructure,
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
@@ -23,7 +25,11 @@ use hexagonal_backend::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
+        for_storing_index_history::ForStoringIndexHistory,
+        for_storing_market_history::ForStoringMarketHistory,
+        for_storing_option_data::ForStoringOptionData,
         for_storing_portfolios::ForStoringPortfolios,
+        for_storing_yield_curves::ForStoringYieldCurves,
     },
 };
 
@@ -96,6 +102,46 @@ impl ForObtainingVolatilityIndices for VolatilityIndicesMock {
 }
 
 struct YieldCurvesMock;
+struct MarketHistoryStoreMock;
+struct OptionDataStoreMock;
+struct IndexHistoryWriterMock;
+struct YieldCurvesStoreMock;
+
+#[async_trait]
+impl ForStoringMarketHistory for MarketHistoryStoreMock {
+    async fn store_market_history(&self, _history: &MarketHistory) -> PortResult<u64> {
+        Ok(0)
+    }
+}
+
+#[async_trait]
+impl ForStoringOptionData for OptionDataStoreMock {
+    async fn store_option_chain(
+        &self,
+        _snapshot: &Snapshot,
+        _market_close: DateTime<Utc>,
+    ) -> PortResult<u64> {
+        Ok(0)
+    }
+
+    async fn store_term_structure(&self, _term_structure: &TermStructure) -> PortResult<u64> {
+        Ok(0)
+    }
+}
+
+#[async_trait]
+impl ForStoringIndexHistory for IndexHistoryWriterMock {
+    async fn store_index_history(&self, _history: &IndexHistory) -> PortResult<u64> {
+        Ok(0)
+    }
+}
+
+#[async_trait]
+impl ForStoringYieldCurves for YieldCurvesStoreMock {
+    async fn store_yield_curves(&self, _curves: &[YieldCurve]) -> PortResult<u64> {
+        Ok(0)
+    }
+}
 
 struct StoredYieldCurvesMock;
 
@@ -178,6 +224,10 @@ fn every_declared_driven_port_accepts_a_test_double() {
     fn load_curves(_: &impl ForLoadingYieldCurves) {}
     fn load_portfolios(_: &impl ForLoadingPortfolios) {}
     fn portfolios(_: &impl ForStoringPortfolios) {}
+    fn store_market_history(_: &impl ForStoringMarketHistory) {}
+    fn store_option_data(_: &impl ForStoringOptionData) {}
+    fn store_index_history(_: &impl ForStoringIndexHistory) {}
+    fn store_yield_curves(_: &impl ForStoringYieldCurves) {}
     fn calendar(_: &impl ForConsultingTradingCalendar) {}
 
     live(&LivePricesMock);
@@ -191,5 +241,9 @@ fn every_declared_driven_port_accepts_a_test_double() {
     let portfolio_store = PortfoliosMock::default();
     load_portfolios(&portfolio_store);
     portfolios(&portfolio_store);
+    store_market_history(&MarketHistoryStoreMock);
+    store_option_data(&OptionDataStoreMock);
+    store_index_history(&IndexHistoryWriterMock);
+    store_yield_curves(&YieldCurvesStoreMock);
     calendar(&TradingCalendarStub);
 }
