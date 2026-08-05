@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 
 use super::client::{CboeOptionRowRaw, CboeResponse};
-use crate::hexagon::domain::options::{
-    ContratoOpcao, OccSymbol, OptionChain, OptionType, Snapshot,
-};
+use crate::hexagon::domain::options::{ContratoOpcao, OccSymbol, OptionChain, Snapshot};
 
 #[derive(Debug)]
 pub struct ParseError;
@@ -21,33 +19,7 @@ impl fmt::Display for ParseError {
 }
 
 pub fn parse_occ_symbol(symbol: &str) -> Result<OccSymbol, ParseError> {
-    let len = symbol.len();
-    if len < 16 {
-        return Err(ParseError);
-    }
-
-    let strike_raw = &symbol[len - 8..];
-    let option_type_raw = &symbol[len - 9..len - 8];
-    let expiration_raw = &symbol[len - 15..len - 9];
-    let root = symbol[..len - 15].trim();
-
-    let option_type = match option_type_raw {
-        "C" => OptionType::Call,
-        "P" => OptionType::Put,
-        _ => return Err(ParseError),
-    };
-    let expiration = NaiveDate::parse_from_str(expiration_raw, "%y%m%d").map_err(|_| ParseError)?;
-    let strike = strike_raw
-        .parse::<f64>()
-        .map(|value| value / 1000.0)
-        .map_err(|_| ParseError)?;
-
-    Ok(OccSymbol {
-        root: root.to_string(),
-        expiration,
-        option_type,
-        strike,
-    })
+    OccSymbol::parse(symbol).map_err(|_| ParseError)
 }
 
 pub fn response_to_snapshot(

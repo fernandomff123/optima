@@ -25,6 +25,47 @@ pub struct OccSymbol {
     pub strike: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OccSymbolError;
+
+impl std::error::Error for OccSymbolError {}
+
+impl fmt::Display for OccSymbolError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "invalid OCC option symbol")
+    }
+}
+
+impl OccSymbol {
+    /// Interprets the industry-standard OCC symbol without provider knowledge.
+    pub fn parse(symbol: &str) -> Result<Self, OccSymbolError> {
+        let len = symbol.len();
+        if len < 16 || !symbol.is_char_boundary(len - 15) {
+            return Err(OccSymbolError);
+        }
+
+        let strike_raw = &symbol[len - 8..];
+        let option_type_raw = &symbol[len - 9..len - 8];
+        let expiration_raw = &symbol[len - 15..len - 9];
+        let option_type = match option_type_raw {
+            "C" => OptionType::Call,
+            "P" => OptionType::Put,
+            _ => return Err(OccSymbolError),
+        };
+
+        Ok(Self {
+            root: symbol[..len - 15].trim().to_string(),
+            expiration: NaiveDate::parse_from_str(expiration_raw, "%y%m%d")
+                .map_err(|_| OccSymbolError)?,
+            option_type,
+            strike: strike_raw
+                .parse::<f64>()
+                .map(|value| value / 1000.0)
+                .map_err(|_| OccSymbolError)?,
+        })
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ContratoOpcao {
     pub occ_symbol: String,

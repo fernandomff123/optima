@@ -50,6 +50,7 @@ fn unavailable(error: impl std::fmt::Display) -> PortError {
 }
 
 pub use client::CboeResponse;
+#[cfg(test)]
 pub(crate) use client::download_snapshot;
 #[cfg(test)]
 pub(crate) use indices_client::download_indice;

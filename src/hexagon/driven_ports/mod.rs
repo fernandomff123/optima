@@ -8,7 +8,6 @@ pub mod for_loading_portfolios;
 pub mod for_loading_strategies;
 pub mod for_loading_tracked_tickers;
 pub mod for_loading_yield_curves;
-pub mod for_obtaining_instrument_prices;
 pub mod for_obtaining_live_prices;
 pub mod for_obtaining_market_history;
 pub mod for_obtaining_option_chains;

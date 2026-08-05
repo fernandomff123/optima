@@ -12,7 +12,6 @@ use crate::{
     driven_adapters::{
         cboe::{CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter},
         exchange_calendar::ExchangeTradingCalendarAdapter,
-        instrument_prices::MarketInstrumentPricesAdapter,
         sqlite::{
             index_history_port::SqliteIndexHistoryAdapter,
             market_history::SqliteMarketHistoryAdapter, option_data::SqliteOptionDataAdapter,
@@ -32,7 +31,7 @@ use crate::{
         market_volatility::MarketVolatilityApplication,
         options::OptionsApplication,
         portfolio::PortfolioApplication,
-        portfolio_valuation::PortfolioValuationApplication,
+        portfolio_valuation::{PortfolioValuationApplication, PricingCollaborators},
         saved_strategies::SavedStrategiesApplication,
         simulation::SimulationApplication,
         synchronization::{
@@ -64,8 +63,16 @@ pub type ConfiguredIntradaySimulation = IntradaySimulationApplication<
 >;
 pub type ConfiguredPortfolios =
     PortfolioApplication<SqlitePortfolioAdapter, SqlitePortfolioAdapter>;
-pub type ConfiguredPortfolioValuation =
-    PortfolioValuationApplication<SqlitePortfolioAdapter, MarketInstrumentPricesAdapter>;
+pub type ConfiguredPortfolioValuation = PortfolioValuationApplication<
+    SqlitePortfolioAdapter,
+    PricingCollaborators<
+        ExchangeTradingCalendarAdapter,
+        YahooLivePricesAdapter,
+        SqliteMarketHistoryAdapter,
+        CboeOptionChainsAdapter,
+        SqliteOptionDataAdapter,
+    >,
+>;
 pub type ConfiguredSavedStrategies =
     SavedStrategiesApplication<SqliteSavedStrategiesAdapter, SqliteSavedStrategiesAdapter>;
 pub type ConfiguredTrackedTickers =
@@ -155,7 +162,13 @@ pub fn configure(pool: SqlitePool) -> ConfiguredApplication {
         portfolios: PortfolioApplication::new(portfolio_adapter.clone(), portfolio_adapter),
         portfolio_valuation: PortfolioValuationApplication::new(
             SqlitePortfolioAdapter::new(pool.clone()),
-            MarketInstrumentPricesAdapter::new(pool.clone()),
+            PricingCollaborators::new(
+                ExchangeTradingCalendarAdapter,
+                YahooLivePricesAdapter,
+                SqliteMarketHistoryAdapter::new(pool.clone()),
+                CboeOptionChainsAdapter,
+                SqliteOptionDataAdapter::new(pool.clone()),
+            ),
         ),
         saved_strategies: SavedStrategiesApplication::new(
             strategies_adapter.clone(),

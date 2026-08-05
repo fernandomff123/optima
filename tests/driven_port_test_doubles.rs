@@ -5,21 +5,14 @@ use chrono::{DateTime, Utc};
 use hexagonal_backend::hexagon::{
     PortError, PortResult,
     domain::{
-        index_history::IndexHistory,
-        live_price::LivePrice,
-        market_history::MarketHistory,
-        options::Snapshot,
-        portfolio::{Instrument, Portfolio},
-        portfolio_valuation::InstrumentPrice,
-        treasury::YieldCurve,
-        volatility::TermStructure,
+        index_history::IndexHistory, live_price::LivePrice, market_history::MarketHistory,
+        options::Snapshot, portfolio::Portfolio, treasury::YieldCurve, volatility::TermStructure,
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
         for_loading_index_history::ForLoadingIndexHistory,
         for_loading_portfolios::ForLoadingPortfolios,
         for_loading_yield_curves::ForLoadingYieldCurves,
-        for_obtaining_instrument_prices::ForObtainingInstrumentPrices,
         for_obtaining_live_prices::ForObtainingLivePrices,
         for_obtaining_market_history::ForObtainingMarketHistory,
         for_obtaining_option_chains::ForObtainingOptionChains,
@@ -34,18 +27,6 @@ use hexagonal_backend::hexagon::{
 };
 
 struct LivePricesMock;
-
-struct InstrumentPricesMock;
-
-#[async_trait]
-impl ForObtainingInstrumentPrices for InstrumentPricesMock {
-    async fn obtain_instrument_prices(
-        &self,
-        instruments: &[Instrument],
-    ) -> PortResult<Vec<Option<InstrumentPrice>>> {
-        Ok(vec![None; instruments.len()])
-    }
-}
 
 struct MarketHistoryProviderMock;
 
@@ -215,7 +196,6 @@ impl ForConsultingTradingCalendar for TradingCalendarStub {
 #[test]
 fn every_declared_driven_port_accepts_a_test_double() {
     fn live(_: &impl ForObtainingLivePrices) {}
-    fn instrument_prices(_: &impl ForObtainingInstrumentPrices) {}
     fn market_history(_: &impl ForObtainingMarketHistory) {}
     fn chains(_: &impl ForObtainingOptionChains) {}
     fn indices(_: &impl ForObtainingVolatilityIndices) {}
@@ -231,7 +211,6 @@ fn every_declared_driven_port_accepts_a_test_double() {
     fn calendar(_: &impl ForConsultingTradingCalendar) {}
 
     live(&LivePricesMock);
-    instrument_prices(&InstrumentPricesMock);
     market_history(&MarketHistoryProviderMock);
     chains(&OptionChainsMock);
     indices(&VolatilityIndicesMock);

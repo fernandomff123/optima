@@ -105,7 +105,6 @@ contract tests replace the application with mocks and verify HTTP translation.
 | Obtain historical prices and corporate actions | `ForObtainingMarketHistory` | Yahoo |
 | Obtain live prices | `ForObtainingLivePrices` | Yahoo |
 | Stream live prices | `ForStreamingLivePrices` | Yahoo |
-| Obtain prices for held instruments | `ForObtainingInstrumentPrices` | market-price adapter |
 | Obtain option chains | `ForObtainingOptionChains` | CBOE |
 | Obtain volatility-index history | `ForObtainingVolatilityIndices` | CBOE |
 | Obtain risk-free yield curves | `ForObtainingYieldCurves` | U.S. Treasury |
@@ -114,6 +113,11 @@ contract tests replace the application with mocks and verify HTTP translation.
 The adapter column is configuration, not part of any port contract. Tests
 replace each production adapter with an in-memory test double implementing the
 same driven port.
+
+Portfolio valuation is application orchestration rather than a driven actor.
+It selects live or stored observations using the trading-calendar port, then
+uses the specialized live-price, market-history, live-option, or stored-option
+port. Consequently no adapter mixes Yahoo, CBOE, SQLite, and calendar logic.
 
 Provider aliases and wire formats are translated at the adapter boundary. For
 example, the Yahoo adapter maps the domain ticker `SPX` to `^GSPC` and restores
