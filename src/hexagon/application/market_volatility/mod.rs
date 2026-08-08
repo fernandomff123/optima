@@ -15,7 +15,7 @@ use crate::hexagon::{
     driven_ports::{
         for_loading_index_history::ForLoadingIndexHistory,
         for_loading_market_history::ForLoadingMarketHistory,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
     },
     driving_ports::for_viewing_volatility::ForViewingVolatility,
 };
@@ -49,7 +49,7 @@ impl<IndexHistoryStore, OptionDataStore, MarketHistoryStore> ForViewingVolatilit
     for MarketVolatilityApplication<IndexHistoryStore, OptionDataStore, MarketHistoryStore>
 where
     IndexHistoryStore: ForLoadingIndexHistory,
-    OptionDataStore: ForLoadingOptionData,
+    OptionDataStore: ForLoadingVolatilityTermStructures,
     MarketHistoryStore: ForLoadingMarketHistory,
 {
     async fn volatility_overview(&self) -> PortResult<MarketVolatilityOverview> {

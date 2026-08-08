@@ -180,6 +180,48 @@ pub async fn load(
     }))
 }
 
+pub async fn load_latest(
+    pool: &SqlitePool,
+    ticker: &str,
+) -> Result<Option<TermStructure>, Box<dyn Error + Send + Sync>> {
+    load_latest_at_or_before(pool, ticker, None).await
+}
+
+pub async fn load_latest_at_or_before(
+    pool: &SqlitePool,
+    ticker: &str,
+    instant: Option<DateTime<Utc>>,
+) -> Result<Option<TermStructure>, Box<dyn Error + Send + Sync>> {
+    let ticker = ticker.trim().to_ascii_uppercase();
+    let timestamp = match instant {
+        Some(instant) => {
+            sqlx::query_scalar(
+                "SELECT MAX(snapshot_timestamp) FROM volatility_term_structure_points
+             WHERE ticker = ? AND calculation_version = ? AND snapshot_timestamp <= ?",
+            )
+            .bind(&ticker)
+            .bind(CALCULATION_VERSION)
+            .bind(instant)
+            .fetch_one(pool)
+            .await?
+        }
+        None => {
+            sqlx::query_scalar(
+                "SELECT MAX(snapshot_timestamp) FROM volatility_term_structure_points
+             WHERE ticker = ? AND calculation_version = ?",
+            )
+            .bind(&ticker)
+            .bind(CALCULATION_VERSION)
+            .fetch_one(pool)
+            .await?
+        }
+    };
+    match timestamp {
+        Some(timestamp) => load(pool, &ticker, timestamp).await,
+        None => Ok(None),
+    }
+}
+
 pub async fn load_constant_maturity_history(
     pool: &SqlitePool,
     ticker: &str,
@@ -208,6 +250,45 @@ pub async fn load_constant_maturity_history(
             target_days,
             volatility,
         })
+        .collect())
+}
+
+pub async fn load_all_current(
+    pool: &SqlitePool,
+) -> Result<Vec<TermStructure>, Box<dyn Error + Send + Sync>> {
+    let rows = sqlx::query(
+        "SELECT ticker, snapshot_timestamp, treasury_date, days, variance, volatility,
+                source_type, expiration, interest_rate, near_expiration, near_rate,
+                next_expiration, next_rate
+         FROM volatility_term_structure_points
+         WHERE calculation_version = ?
+         ORDER BY ticker, snapshot_timestamp, days",
+    )
+    .bind(CALCULATION_VERSION)
+    .fetch_all(pool)
+    .await?;
+    let mut structures = std::collections::BTreeMap::<
+        (String, DateTime<Utc>, NaiveDate),
+        Vec<TermStructurePoint>,
+    >::new();
+    for row in rows {
+        let key = (
+            row.try_get("ticker")?,
+            row.try_get("snapshot_timestamp")?,
+            row.try_get("treasury_date")?,
+        );
+        structures.entry(key).or_default().push(row_to_point(row)?);
+    }
+    Ok(structures
+        .into_iter()
+        .map(
+            |((ticker, snapshot_timestamp, treasury_date), points)| TermStructure {
+                ticker,
+                snapshot_timestamp,
+                treasury_date,
+                points,
+            },
+        )
         .collect())
 }
 

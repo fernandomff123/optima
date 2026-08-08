@@ -163,6 +163,18 @@ pub async fn load_history(pool: &SqlitePool, ticker: &str) -> Result<IndexHistor
     })
 }
 
+pub async fn load_all_histories(pool: &SqlitePool) -> Result<Vec<IndexHistory>, sqlx::Error> {
+    let tickers =
+        sqlx::query_scalar::<_, String>("SELECT DISTINCT ticker FROM index_prices ORDER BY ticker")
+            .fetch_all(pool)
+            .await?;
+    let mut histories = Vec::with_capacity(tickers.len());
+    for ticker in tickers {
+        histories.push(load_history(pool, &ticker).await?);
+    }
+    Ok(histories)
+}
+
 pub async fn latest_date(
     pool: &SqlitePool,
     ticker: &str,

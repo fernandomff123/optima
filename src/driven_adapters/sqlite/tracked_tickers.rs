@@ -4,6 +4,7 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::tracked_ticker::TrackedTicker,
     driven_ports::{
+        for_loading_tracked_ticker_archive::ForLoadingTrackedTickerArchive,
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
         for_storing_tracked_tickers::ForStoringTrackedTickers,
     },
@@ -12,6 +13,13 @@ use crate::hexagon::{
 #[derive(Clone)]
 pub struct SqliteTrackedTickersAdapter {
     pool: SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl ForLoadingTrackedTickerArchive for SqliteTrackedTickersAdapter {
+    async fn load_tracked_ticker_archive(&self) -> PortResult<Vec<TrackedTicker>> {
+        load_all(&self.pool).await.map_err(unavailable)
+    }
 }
 
 impl SqliteTrackedTickersAdapter {
@@ -74,12 +82,22 @@ pub async fn upsert(pool: &SqlitePool, ticker: &TrackedTicker) -> Result<(), sql
 }
 
 pub async fn load_active(pool: &SqlitePool) -> Result<Vec<TrackedTicker>, sqlx::Error> {
-    let rows = sqlx::query(
+    load_with_filter(pool, true).await
+}
+
+pub async fn load_all(pool: &SqlitePool) -> Result<Vec<TrackedTicker>, sqlx::Error> {
+    load_with_filter(pool, false).await
+}
+
+async fn load_with_filter(
+    pool: &SqlitePool,
+    active_only: bool,
+) -> Result<Vec<TrackedTicker>, sqlx::Error> {
+    let predicate = if active_only { "WHERE active = 1" } else { "" };
+    let rows = sqlx::query(&format!(
         "SELECT ticker, active, yahoo_prices, cboe_snapshot
-         FROM tracked_tickers
-         WHERE active = 1
-         ORDER BY ticker",
-    )
+             FROM tracked_tickers {predicate} ORDER BY ticker"
+    ))
     .fetch_all(pool)
     .await?;
 

@@ -10,11 +10,15 @@ use hexagonal_backend::hexagon::{
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_option_chains::ForLoadingOptionChains,
+        for_loading_reference_prices::ForLoadingReferencePrices,
+        for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
+        for_loading_yield_curves::ForLoadingYieldCurves,
     },
     driving_ports::for_analyzing_options::{ForAnalyzingOptions, GreeksRequest},
 };
 
+#[derive(Clone)]
 struct OptionDataMock {
     snapshot: Snapshot,
     term_structure: Option<TermStructure>,
@@ -23,11 +27,14 @@ struct OptionDataMock {
 }
 
 #[async_trait]
-impl ForLoadingOptionData for OptionDataMock {
+impl ForLoadingOptionChains for OptionDataMock {
     async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
         Ok(Some(self.snapshot.clone()))
     }
+}
 
+#[async_trait]
+impl ForLoadingVolatilityTermStructures for OptionDataMock {
     async fn load_term_structure(&self, _ticker: &str) -> PortResult<Option<TermStructure>> {
         Ok(self.term_structure.clone())
     }
@@ -40,14 +47,6 @@ impl ForLoadingOptionData for OptionDataMock {
         Ok(self.term_structure.clone())
     }
 
-    async fn load_reference_price(&self, _ticker: &str) -> PortResult<Option<f64>> {
-        Ok(Some(self.reference_price))
-    }
-
-    async fn load_yield_curve(&self, _on_or_before: NaiveDate) -> PortResult<Option<YieldCurve>> {
-        Ok(self.yield_curve.clone())
-    }
-
     async fn load_constant_maturity_volatility_history(
         &self,
         _ticker: &str,
@@ -56,6 +55,20 @@ impl ForLoadingOptionData for OptionDataMock {
         Vec<hexagonal_backend::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>,
     > {
         Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl ForLoadingReferencePrices for OptionDataMock {
+    async fn load_reference_price(&self, _ticker: &str) -> PortResult<Option<f64>> {
+        Ok(Some(self.reference_price))
+    }
+}
+
+#[async_trait]
+impl ForLoadingYieldCurves for OptionDataMock {
+    async fn load_yield_curve(&self, _on_or_before: NaiveDate) -> PortResult<Option<YieldCurve>> {
+        Ok(self.yield_curve.clone())
     }
 }
 
@@ -105,37 +118,38 @@ fn contract(symbol: &str, option_type: OptionType, strike: f64) -> ContratoOpcao
     }
 }
 
-fn app_with_stored_term(stored: bool) -> OptionsApplication<OptionDataMock, TradingCalendarStub> {
+fn app_with_stored_term(
+    stored: bool,
+) -> OptionsApplication<OptionDataMock, OptionDataMock, OptionDataMock, TradingCalendarStub> {
     let contracts = vec![
         contract("TEST-PUT", OptionType::Put, 95.0),
         contract("TEST-CALL", OptionType::Call, 105.0),
     ];
     let snapshot_time = Utc.with_ymd_and_hms(2026, 8, 3, 21, 0, 0).unwrap();
-    OptionsApplication::new(
-        OptionDataMock {
-            snapshot: Snapshot {
-                ticker: "TEST".into(),
-                timestamp_utc: snapshot_time,
-                contratos: contracts.clone(),
-                chains: vec![OptionChain {
-                    root: "TEST".into(),
-                    contratos: contracts,
-                }],
-            },
-            term_structure: stored.then_some(TermStructure {
-                ticker: "TEST".into(),
-                snapshot_timestamp: snapshot_time,
-                treasury_date: NaiveDate::from_ymd_opt(2026, 8, 3).unwrap(),
-                points: Vec::new(),
-            }),
-            yield_curve: None,
-            reference_price: 100.0,
+    let data = OptionDataMock {
+        snapshot: Snapshot {
+            ticker: "TEST".into(),
+            timestamp_utc: snapshot_time,
+            contratos: contracts.clone(),
+            chains: vec![OptionChain {
+                root: "TEST".into(),
+                contratos: contracts,
+            }],
         },
-        TradingCalendarStub,
-    )
+        term_structure: stored.then_some(TermStructure {
+            ticker: "TEST".into(),
+            snapshot_timestamp: snapshot_time,
+            treasury_date: NaiveDate::from_ymd_opt(2026, 8, 3).unwrap(),
+            points: Vec::new(),
+        }),
+        yield_curve: None,
+        reference_price: 100.0,
+    };
+    OptionsApplication::new(data.clone(), data.clone(), data, TradingCalendarStub)
 }
 
-fn app() -> OptionsApplication<OptionDataMock, TradingCalendarStub> {
+fn app() -> OptionsApplication<OptionDataMock, OptionDataMock, OptionDataMock, TradingCalendarStub>
+{
     app_with_stored_term(true)
 }
 

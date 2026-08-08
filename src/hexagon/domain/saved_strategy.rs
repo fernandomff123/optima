@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StrategySide {
+    #[serde(rename = "buy", alias = "Buy")]
     Buy,
+    #[serde(rename = "sell", alias = "Sell")]
     Sell,
 }
 

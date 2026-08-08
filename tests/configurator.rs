@@ -21,16 +21,10 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 
 #[tokio::test]
 async fn configurator_wires_every_application_to_its_driving_port() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("in-memory SQLite must connect");
-    let configured = configure(pool);
+    let configured = configure();
 
     fn market_data(_: &impl ForViewingMarketData) {}
     fn market_stream(_: &impl ForStreamingMarketPrices) {}
@@ -79,11 +73,5 @@ async fn configurator_wires_every_application_to_its_driving_port() {
 
 #[tokio::test]
 async fn configurator_connects_the_application_to_the_http_adapter() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("in-memory SQLite must connect");
-
-    let _router = configure_http(pool);
+    let _router = configure_http();
 }

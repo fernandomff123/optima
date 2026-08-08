@@ -13,15 +13,18 @@ use hexagonal_backend::hexagon::{
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_option_chains::ForLoadingOptionChains,
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
+        for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
+        for_loading_yield_curves::ForLoadingYieldCurves,
         for_obtaining_market_history::ForObtainingMarketHistory,
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
-        for_storing_option_data::ForStoringOptionData,
+        for_storing_option_chains::ForStoringOptionChains,
+        for_storing_volatility_term_structures::ForStoringVolatilityTermStructures,
         for_storing_yield_curves::ForStoringYieldCurves,
     },
     driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData,
@@ -66,11 +69,14 @@ impl ForObtainingOptionChains for OptionsSuccessMock {
 }
 
 #[async_trait]
-impl ForLoadingOptionData for OptionDataMock {
+impl ForLoadingOptionChains for OptionDataMock {
     async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
         Ok(None)
     }
+}
 
+#[async_trait]
+impl ForLoadingVolatilityTermStructures for OptionDataMock {
     async fn load_term_structure(&self, _ticker: &str) -> PortResult<Option<TermStructure>> {
         Ok(None)
     }
@@ -83,14 +89,6 @@ impl ForLoadingOptionData for OptionDataMock {
         Ok(None)
     }
 
-    async fn load_reference_price(&self, _ticker: &str) -> PortResult<Option<f64>> {
-        Ok(None)
-    }
-
-    async fn load_yield_curve(&self, _on_or_before: NaiveDate) -> PortResult<Option<YieldCurve>> {
-        Ok(None)
-    }
-
     async fn load_constant_maturity_volatility_history(
         &self,
         _ticker: &str,
@@ -99,6 +97,13 @@ impl ForLoadingOptionData for OptionDataMock {
         Vec<hexagonal_backend::hexagon::domain::volatility::ConstantMaturityVolatilityPoint>,
     > {
         Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl ForLoadingYieldCurves for OptionDataMock {
+    async fn load_yield_curve(&self, _on_or_before: NaiveDate) -> PortResult<Option<YieldCurve>> {
+        Ok(None)
     }
 }
 
@@ -196,7 +201,7 @@ impl ForStoringMarketHistory for StoreMock {
 }
 
 #[async_trait]
-impl ForStoringOptionData for StoreMock {
+impl ForStoringOptionChains for StoreMock {
     async fn store_option_chain(
         &self,
         _snapshot: &Snapshot,
@@ -204,7 +209,10 @@ impl ForStoringOptionData for StoreMock {
     ) -> PortResult<u64> {
         Ok(1)
     }
+}
 
+#[async_trait]
+impl ForStoringVolatilityTermStructures for StoreMock {
     async fn store_term_structure(&self, _term_structure: &TermStructure) -> PortResult<u64> {
         Ok(1)
     }
@@ -233,9 +241,15 @@ async fn driving_port_orchestrates_provider_and_store_mocks() {
         OptionsMock,
         IndicesMock,
         CurvesMock,
-        SynchronizationStores::new(store.clone(), store.clone(), store.clone(), store),
+        SynchronizationStores::new(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store,
+        ),
         TrackedTickersMock,
-        OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
     );
 
     let report = application
@@ -265,9 +279,10 @@ async fn invalid_year_is_rejected_before_calling_driven_ports() {
             StoreMock::default(),
             StoreMock::default(),
             StoreMock::default(),
+            StoreMock::default(),
         ),
         TrackedTickersMock,
-        OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
     );
 
     let error = application
@@ -295,9 +310,10 @@ async fn batch_synchronization_uses_tracked_ticker_configuration() {
             StoreMock::default(),
             StoreMock::default(),
             StoreMock::default(),
+            StoreMock::default(),
         ),
         TrackedTickersMock,
-        OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
     );
     let report = application
         .synchronize_tracked_tickers(SynchronizeTrackedTickers {
@@ -326,9 +342,10 @@ async fn batch_reports_term_structure_separately_after_storing_option_chain() {
             StoreMock::default(),
             StoreMock::default(),
             StoreMock::default(),
+            StoreMock::default(),
         ),
         OptionTrackedTickersMock,
-        OptionAnalysisCollaborators::new(OptionDataMock, TradingCalendarMock),
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
     );
     let report = application
         .synchronize_tracked_tickers(SynchronizeTrackedTickers {

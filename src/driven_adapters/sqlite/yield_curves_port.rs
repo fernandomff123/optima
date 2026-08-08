@@ -7,6 +7,7 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::treasury::YieldCurve,
     driven_ports::{
+        for_loading_yield_curve_archive::ForLoadingYieldCurveArchive,
         for_loading_yield_curves::ForLoadingYieldCurves,
         for_storing_yield_curves::ForStoringYieldCurves,
     },
@@ -15,6 +16,15 @@ use crate::hexagon::{
 #[derive(Clone)]
 pub struct SqliteYieldCurvesAdapter {
     pool: SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl ForLoadingYieldCurveArchive for SqliteYieldCurvesAdapter {
+    async fn load_yield_curve_archive(&self) -> PortResult<Vec<YieldCurve>> {
+        super::yield_curves::load_all(&self.pool)
+            .await
+            .map_err(|error| PortError::Unavailable(error.to_string()))
+    }
 }
 
 impl SqliteYieldCurvesAdapter {

@@ -7,14 +7,12 @@ use hexagonal_backend::hexagon::{
     application::market_volatility::MarketVolatilityApplication,
     domain::{
         index_history::{DailyIndexPrice, IndexHistory},
-        options::Snapshot,
-        treasury::YieldCurve,
         volatility::{TermStructure, TermStructurePoint, TermStructureSource},
     },
     driven_ports::{
         for_loading_index_history::ForLoadingIndexHistory,
         for_loading_market_history::ForLoadingMarketHistory,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
     },
     driving_ports::for_viewing_volatility::ForViewingVolatility,
 };
@@ -55,11 +53,7 @@ impl ForLoadingMarketHistory for MarketHistoryMock {
 }
 
 #[async_trait]
-impl ForLoadingOptionData for OptionDataMock {
-    async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
-        Ok(None)
-    }
-
+impl ForLoadingVolatilityTermStructures for OptionDataMock {
     async fn load_term_structure(&self, _ticker: &str) -> PortResult<Option<TermStructure>> {
         Ok(Some(self.0.clone()))
     }
@@ -70,14 +64,6 @@ impl ForLoadingOptionData for OptionDataMock {
         _instant: DateTime<Utc>,
     ) -> PortResult<Option<TermStructure>> {
         Ok(Some(self.0.clone()))
-    }
-
-    async fn load_reference_price(&self, _ticker: &str) -> PortResult<Option<f64>> {
-        Ok(None)
-    }
-
-    async fn load_yield_curve(&self, _on_or_before: NaiveDate) -> PortResult<Option<YieldCurve>> {
-        Ok(None)
     }
 
     async fn load_constant_maturity_volatility_history(

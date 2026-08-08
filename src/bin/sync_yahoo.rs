@@ -1,16 +1,11 @@
 use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
 const TICKERS: [&str; 4] = ["IBM", "GOOGL", "MSFT", "JPM"];
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
-    let configured = hexagonal_backend::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure();
     let since = chrono::NaiveDate::from_ymd_opt(1970, 1, 1).ok_or("invalid initial date")?;
 
     for ticker in TICKERS {
@@ -27,6 +22,5 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
 
-    pool.close().await;
     Ok(())
 }

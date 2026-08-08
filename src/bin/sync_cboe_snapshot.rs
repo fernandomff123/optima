@@ -1,6 +1,5 @@
 use hexagonal_backend::hexagon::driving_ports::for_scheduling_market_operations::ForSchedulingMarketOperations;
 use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
 #[tokio::main]
@@ -14,12 +13,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .find(|argument| argument.as_str() != "--term-structure")
         .cloned()
         .unwrap_or_else(|| "SPY".to_string());
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
 
-    let configured = hexagonal_backend::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure();
     let Some(market_close) = configured
         .market_scheduling
         .eligible_end_of_day_close(chrono::Utc::now())?
@@ -46,6 +41,5 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         );
     }
 
-    pool.close().await;
     Ok(())
 }

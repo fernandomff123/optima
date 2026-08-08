@@ -4,7 +4,7 @@ use hexagonal_backend::{
         exchange_calendar::ExchangeTradingCalendarAdapter,
         sqlite::{
             market_history, option_data::SqliteOptionDataAdapter, option_snapshots,
-            volatility_term_structures,
+            volatility_term_structures, yield_curves, yield_curves_port::SqliteYieldCurvesAdapter,
         },
     },
     hexagon::{
@@ -29,6 +29,7 @@ async fn options_application_loads_all_inputs_through_the_sqlite_adapter() {
     market_history::initialize(&pool).await.unwrap();
     option_snapshots::initialize(&pool).await.unwrap();
     volatility_term_structures::initialize(&pool).await.unwrap();
+    yield_curves::initialize(&pool).await.unwrap();
 
     let snapshot_time = Utc.with_ymd_and_hms(2026, 8, 3, 21, 0, 0).unwrap();
     let expiration = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
@@ -104,8 +105,11 @@ async fn options_application_loads_all_inputs_through_the_sqlite_adapter() {
     .await
     .unwrap();
 
+    let adapter = SqliteOptionDataAdapter::new(pool.clone());
     let app = OptionsApplication::new(
-        SqliteOptionDataAdapter::new(pool),
+        adapter.clone(),
+        adapter,
+        SqliteYieldCurvesAdapter::new(pool),
         ExchangeTradingCalendarAdapter,
     );
 

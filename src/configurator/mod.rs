@@ -11,6 +11,14 @@ use sqlx::SqlitePool;
 use crate::{
     driven_adapters::{
         cboe::{CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter},
+        duckdb::{
+            index_history::DuckDbIndexHistoryAdapter, market_history::DuckDbMarketHistoryAdapter,
+            option_chains::DuckDbOptionChainsAdapter, portfolio::DuckDbPortfolioAdapter,
+            saved_strategies::DuckDbSavedStrategiesAdapter,
+            tracked_tickers::DuckDbTrackedTickersAdapter,
+            volatility_term_structures::DuckDbVolatilityTermStructuresAdapter,
+            yield_curves::DuckDbYieldCurvesAdapter,
+        },
         exchange_calendar::ExchangeTradingCalendarAdapter,
         sqlite::{
             index_history_port::SqliteIndexHistoryAdapter,
@@ -23,38 +31,50 @@ use crate::{
         yahoo::{YahooLivePricesAdapter, YahooMarketHistoryAdapter},
     },
     hexagon::application::{
+        index_history_migration::IndexHistoryMigrationApplication,
         interest_rates::InterestRatesApplication,
         intraday_simulation::IntradaySimulationApplication,
         market_data::MarketDataApplication,
+        market_history_migration::MarketHistoryMigrationApplication,
         market_scheduling::MarketSchedulingApplication,
         market_stream::MarketStreamApplication,
         market_volatility::MarketVolatilityApplication,
+        option_chain_migration::OptionChainMigrationApplication,
         options::OptionsApplication,
         portfolio::PortfolioApplication,
+        portfolio_migration::PortfolioMigrationApplication,
         portfolio_valuation::{PortfolioValuationApplication, PricingCollaborators},
         saved_strategies::SavedStrategiesApplication,
         simulation::SimulationApplication,
+        strategy_migration::StrategyMigrationApplication,
         synchronization::{
             OptionAnalysisCollaborators, SynchronizationApplication, SynchronizationStores,
         },
+        tracked_ticker_migration::TrackedTickerMigrationApplication,
         tracked_tickers::TrackedTickersApplication,
+        volatility_term_structure_migration::VolatilityTermStructureMigrationApplication,
+        yield_curve_migration::YieldCurveMigrationApplication,
     },
 };
 
 pub type ConfiguredMarketData = MarketDataApplication<
-    SqliteMarketHistoryAdapter,
-    SqliteIndexHistoryAdapter,
+    DuckDbMarketHistoryAdapter,
+    DuckDbIndexHistoryAdapter,
     YahooLivePricesAdapter,
 >;
 pub type ConfiguredMarketStream = MarketStreamApplication<YahooLivePricesAdapter>;
 pub type ConfiguredMarketScheduling = MarketSchedulingApplication<ExchangeTradingCalendarAdapter>;
-pub type ConfiguredOptions =
-    OptionsApplication<SqliteOptionDataAdapter, ExchangeTradingCalendarAdapter>;
-pub type ConfiguredInterestRates = InterestRatesApplication<SqliteYieldCurvesAdapter>;
+pub type ConfiguredOptions = OptionsApplication<
+    DuckDbOptionChainsAdapter,
+    DuckDbVolatilityTermStructuresAdapter,
+    DuckDbYieldCurvesAdapter,
+    ExchangeTradingCalendarAdapter,
+>;
+pub type ConfiguredInterestRates = InterestRatesApplication<DuckDbYieldCurvesAdapter>;
 pub type ConfiguredMarketVolatility = MarketVolatilityApplication<
-    SqliteIndexHistoryAdapter,
-    SqliteOptionDataAdapter,
-    SqliteMarketHistoryAdapter,
+    DuckDbIndexHistoryAdapter,
+    DuckDbVolatilityTermStructuresAdapter,
+    DuckDbMarketHistoryAdapter,
 >;
 pub type ConfiguredIntradaySimulation = IntradaySimulationApplication<
     CboeOptionChainsAdapter,
@@ -62,34 +82,54 @@ pub type ConfiguredIntradaySimulation = IntradaySimulationApplication<
     ExchangeTradingCalendarAdapter,
 >;
 pub type ConfiguredPortfolios =
-    PortfolioApplication<SqlitePortfolioAdapter, SqlitePortfolioAdapter>;
+    PortfolioApplication<DuckDbPortfolioAdapter, DuckDbPortfolioAdapter>;
 pub type ConfiguredPortfolioValuation = PortfolioValuationApplication<
-    SqlitePortfolioAdapter,
+    DuckDbPortfolioAdapter,
     PricingCollaborators<
         ExchangeTradingCalendarAdapter,
         YahooLivePricesAdapter,
-        SqliteMarketHistoryAdapter,
+        DuckDbMarketHistoryAdapter,
         CboeOptionChainsAdapter,
-        SqliteOptionDataAdapter,
+        DuckDbOptionChainsAdapter,
     >,
 >;
 pub type ConfiguredSavedStrategies =
-    SavedStrategiesApplication<SqliteSavedStrategiesAdapter, SqliteSavedStrategiesAdapter>;
+    SavedStrategiesApplication<DuckDbSavedStrategiesAdapter, DuckDbSavedStrategiesAdapter>;
 pub type ConfiguredTrackedTickers =
-    TrackedTickersApplication<SqliteTrackedTickersAdapter, SqliteTrackedTickersAdapter>;
+    TrackedTickersApplication<DuckDbTrackedTickersAdapter, DuckDbTrackedTickersAdapter>;
 pub type ConfiguredSynchronization = SynchronizationApplication<
     YahooMarketHistoryAdapter,
     CboeOptionChainsAdapter,
     CboeVolatilityIndicesAdapter,
     TreasuryYieldCurvesAdapter,
-    SqliteMarketHistoryAdapter,
-    SqliteOptionDataAdapter,
-    SqliteIndexHistoryAdapter,
-    SqliteYieldCurvesAdapter,
-    SqliteTrackedTickersAdapter,
-    SqliteOptionDataAdapter,
+    DuckDbMarketHistoryAdapter,
+    DuckDbOptionChainsAdapter,
+    DuckDbVolatilityTermStructuresAdapter,
+    DuckDbIndexHistoryAdapter,
+    DuckDbYieldCurvesAdapter,
+    DuckDbTrackedTickersAdapter,
+    DuckDbOptionChainsAdapter,
+    DuckDbYieldCurvesAdapter,
     ExchangeTradingCalendarAdapter,
 >;
+pub type ConfiguredOptionChainMigration =
+    OptionChainMigrationApplication<SqliteOptionDataAdapter, DuckDbOptionChainsAdapter>;
+pub type ConfiguredMarketHistoryMigration =
+    MarketHistoryMigrationApplication<SqliteMarketHistoryAdapter, DuckDbMarketHistoryAdapter>;
+pub type ConfiguredIndexHistoryMigration =
+    IndexHistoryMigrationApplication<SqliteIndexHistoryAdapter, DuckDbIndexHistoryAdapter>;
+pub type ConfiguredYieldCurveMigration =
+    YieldCurveMigrationApplication<SqliteYieldCurvesAdapter, DuckDbYieldCurvesAdapter>;
+pub type ConfiguredVolatilityTermStructureMigration = VolatilityTermStructureMigrationApplication<
+    SqliteOptionDataAdapter,
+    DuckDbVolatilityTermStructuresAdapter,
+>;
+pub type ConfiguredTrackedTickerMigration =
+    TrackedTickerMigrationApplication<SqliteTrackedTickersAdapter, DuckDbTrackedTickersAdapter>;
+pub type ConfiguredPortfolioMigration =
+    PortfolioMigrationApplication<SqlitePortfolioAdapter, DuckDbPortfolioAdapter>;
+pub type ConfiguredStrategyMigration =
+    StrategyMigrationApplication<SqliteSavedStrategiesAdapter, DuckDbSavedStrategiesAdapter>;
 
 /// Fully wired single hexagon, ready to be handed to driving adapters.
 pub struct ConfiguredApplication {
@@ -131,24 +171,41 @@ pub async fn initialize_storage(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Prepares the analytical schemas selected by the production configurator.
+pub async fn initialize_analytical_storage() -> crate::hexagon::PortResult<()> {
+    let path = "data/market_data.duckdb";
+    DuckDbOptionChainsAdapter::new(path).initialize().await?;
+    DuckDbMarketHistoryAdapter::new(path).initialize().await?;
+    DuckDbIndexHistoryAdapter::new(path).initialize().await?;
+    DuckDbYieldCurvesAdapter::new(path).initialize().await?;
+    DuckDbVolatilityTermStructuresAdapter::new(path)
+        .initialize()
+        .await?;
+    DuckDbTrackedTickersAdapter::new(path).initialize().await?;
+    DuckDbPortfolioAdapter::new(path).initialize().await?;
+    DuckDbSavedStrategiesAdapter::new(path).initialize().await
+}
+
 /// Selects concrete production adapters and injects them through constructors.
-pub fn configure(pool: SqlitePool) -> ConfiguredApplication {
-    let portfolio_adapter = SqlitePortfolioAdapter::new(pool.clone());
-    let strategies_adapter = SqliteSavedStrategiesAdapter::new(pool.clone());
-    let tracked_tickers_adapter = SqliteTrackedTickersAdapter::new(pool.clone());
+pub fn configure() -> ConfiguredApplication {
+    let portfolio_adapter = DuckDbPortfolioAdapter::new("data/market_data.duckdb");
+    let strategies_adapter = DuckDbSavedStrategiesAdapter::new("data/market_data.duckdb");
+    let tracked_tickers_adapter = DuckDbTrackedTickersAdapter::new("data/market_data.duckdb");
     ConfiguredApplication {
         market_data: MarketDataApplication::new(
-            SqliteMarketHistoryAdapter::new(pool.clone()),
-            SqliteIndexHistoryAdapter::new(pool.clone()),
+            DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+            DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
             YahooLivePricesAdapter,
         ),
         market_stream: configure_market_stream(),
         market_scheduling: MarketSchedulingApplication::new(ExchangeTradingCalendarAdapter),
-        interest_rates: InterestRatesApplication::new(SqliteYieldCurvesAdapter::new(pool.clone())),
+        interest_rates: InterestRatesApplication::new(DuckDbYieldCurvesAdapter::new(
+            "data/market_data.duckdb",
+        )),
         market_volatility: MarketVolatilityApplication::new(
-            SqliteIndexHistoryAdapter::new(pool.clone()),
-            SqliteOptionDataAdapter::new(pool.clone()),
-            SqliteMarketHistoryAdapter::new(pool.clone()),
+            DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
+            DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
+            DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
         ),
         intraday_simulation: IntradaySimulationApplication::new(
             CboeOptionChainsAdapter,
@@ -156,18 +213,20 @@ pub fn configure(pool: SqlitePool) -> ConfiguredApplication {
             ExchangeTradingCalendarAdapter,
         ),
         options: OptionsApplication::new(
-            SqliteOptionDataAdapter::new(pool.clone()),
+            DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
+            DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
+            DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
             ExchangeTradingCalendarAdapter,
         ),
         portfolios: PortfolioApplication::new(portfolio_adapter.clone(), portfolio_adapter),
         portfolio_valuation: PortfolioValuationApplication::new(
-            SqlitePortfolioAdapter::new(pool.clone()),
+            DuckDbPortfolioAdapter::new("data/market_data.duckdb"),
             PricingCollaborators::new(
                 ExchangeTradingCalendarAdapter,
                 YahooLivePricesAdapter,
-                SqliteMarketHistoryAdapter::new(pool.clone()),
+                DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
                 CboeOptionChainsAdapter,
-                SqliteOptionDataAdapter::new(pool.clone()),
+                DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
             ),
         ),
         saved_strategies: SavedStrategiesApplication::new(
@@ -185,14 +244,16 @@ pub fn configure(pool: SqlitePool) -> ConfiguredApplication {
             CboeVolatilityIndicesAdapter,
             TreasuryYieldCurvesAdapter,
             SynchronizationStores::new(
-                SqliteMarketHistoryAdapter::new(pool.clone()),
-                SqliteOptionDataAdapter::new(pool.clone()),
-                SqliteIndexHistoryAdapter::new(pool.clone()),
-                SqliteYieldCurvesAdapter::new(pool.clone()),
+                DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+                DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
+                DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
+                DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
+                DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
             ),
             tracked_tickers_adapter,
             OptionAnalysisCollaborators::new(
-                SqliteOptionDataAdapter::new(pool.clone()),
+                DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
+                DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
                 ExchangeTradingCalendarAdapter,
             ),
         ),
@@ -204,9 +265,78 @@ pub fn configure_market_stream() -> ConfiguredMarketStream {
     MarketStreamApplication::new(YahooLivePricesAdapter)
 }
 
+/// Wires the temporary offline migration from the legacy proof of concept.
+///
+/// SQLite is selected here only as a migration source; it is not part of the
+/// production option-chain conversation.
+pub fn configure_option_chain_migration(pool: SqlitePool) -> ConfiguredOptionChainMigration {
+    OptionChainMigrationApplication::new(
+        SqliteOptionDataAdapter::new(pool),
+        DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of prices, dividends, and splits.
+pub fn configure_market_history_migration(pool: SqlitePool) -> ConfiguredMarketHistoryMigration {
+    MarketHistoryMigrationApplication::new(
+        SqliteMarketHistoryAdapter::new(pool),
+        DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of volatility-index histories.
+pub fn configure_index_history_migration(pool: SqlitePool) -> ConfiguredIndexHistoryMigration {
+    IndexHistoryMigrationApplication::new(
+        SqliteIndexHistoryAdapter::new(pool),
+        DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of risk-free yield curves.
+pub fn configure_yield_curve_migration(pool: SqlitePool) -> ConfiguredYieldCurveMigration {
+    YieldCurveMigrationApplication::new(
+        SqliteYieldCurvesAdapter::new(pool),
+        DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of calculated volatility structures.
+pub fn configure_volatility_term_structure_migration(
+    pool: SqlitePool,
+) -> ConfiguredVolatilityTermStructureMigration {
+    VolatilityTermStructureMigrationApplication::new(
+        SqliteOptionDataAdapter::new(pool),
+        DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of tracked ticker configuration.
+pub fn configure_tracked_ticker_migration(pool: SqlitePool) -> ConfiguredTrackedTickerMigration {
+    TrackedTickerMigrationApplication::new(
+        SqliteTrackedTickersAdapter::new(pool),
+        DuckDbTrackedTickersAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of portfolio event ledgers.
+pub fn configure_portfolio_migration(pool: SqlitePool) -> ConfiguredPortfolioMigration {
+    PortfolioMigrationApplication::new(
+        SqlitePortfolioAdapter::new(pool),
+        DuckDbPortfolioAdapter::new("data/market_data.duckdb"),
+    )
+}
+
+/// Wires the temporary offline migration of saved strategy definitions.
+pub fn configure_strategy_migration(pool: SqlitePool) -> ConfiguredStrategyMigration {
+    StrategyMigrationApplication::new(
+        SqliteSavedStrategiesAdapter::new(pool),
+        DuckDbSavedStrategiesAdapter::new("data/market_data.duckdb"),
+    )
+}
+
 /// Connects the configured application to its production HTTP driving adapter.
-pub fn configure_http(pool: SqlitePool) -> Router {
-    let configured = configure(pool);
+pub fn configure_http() -> Router {
+    let configured = configure();
     crate::driving_adapters::http::router(
         Arc::new(configured.market_data),
         Arc::new(configured.options),

@@ -1,15 +1,9 @@
 use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
-
-    let configured = hexagonal_backend::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure();
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     let tickers: Vec<_> = if arguments.is_empty() {
         vec!["VIX".to_string()]
@@ -41,6 +35,5 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("{ticker}: {error}");
     }
 
-    pool.close().await;
     Ok(())
 }

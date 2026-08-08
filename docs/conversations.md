@@ -12,12 +12,18 @@ The configurator selects concrete adapters only at runtime composition.
 | View market history, index history, or a live price | Market viewer | `ForViewingMarketData` | `MarketDataApplication` | `ForLoadingMarketHistory`, `ForLoadingIndexHistory`, `ForObtainingLivePrices` |
 | Stream live prices | Live-price subscriber | `ForStreamingMarketPrices` | `MarketStreamApplication` | `ForStreamingLivePrices` |
 | Inspect exchange scheduling | Scheduler | `ForSchedulingMarketOperations` | `MarketSchedulingApplication` | `ForConsultingTradingCalendar` |
-| Analyze stored options | Options analyst | `ForAnalyzingOptions` | `OptionsApplication` | `ForLoadingOptionData`, `ForConsultingTradingCalendar` |
+| Analyze stored options | Options analyst | `ForAnalyzingOptions` | `OptionsApplication` | `ForLoadingOptionChains`, `ForLoadingVolatilityTermStructures`, `ForLoadingReferencePrices`, `ForLoadingYieldCurves`, `ForConsultingTradingCalendar` |
+| Migrate archived option chains (temporary) | CLI operator | `ForMigratingOptionChains` | `OptionChainMigrationApplication` | `ForLoadingOptionChainArchive`, `ForStoringOptionChains`, `ForCountingOptionChains` |
+| Migrate market histories (temporary) | CLI operator | `ForMigratingMarketHistory` | `MarketHistoryMigrationApplication` | `ForLoadingMarketHistoryArchive`, `ForStoringMarketHistory`, `ForCountingMarketHistory` |
+| Migrate volatility-index histories (temporary) | CLI operator | `ForMigratingIndexHistory` | `IndexHistoryMigrationApplication` | `ForLoadingIndexHistoryArchive`, `ForStoringIndexHistory`, `ForCountingIndexHistory` |
+| Migrate yield curves (temporary) | CLI operator | `ForMigratingYieldCurves` | `YieldCurveMigrationApplication` | `ForLoadingYieldCurveArchive`, `ForStoringYieldCurves`, `ForCountingYieldCurves` |
 | Prepare an intraday option market | Intraday analyst | `ForPreparingIntradaySimulations`, `ForViewingIntradayOptions` | `IntradaySimulationApplication` | `ForObtainingOptionChains`, `ForObtainingLivePrices`, `ForConsultingTradingCalendar` |
 | View a yield curve or interpolated rate | Interest-rate viewer | `ForViewingInterestRates` | `InterestRatesApplication` | `ForLoadingYieldCurves` |
-| View market volatility | Volatility viewer | `ForViewingVolatility` | `MarketVolatilityApplication` | `ForLoadingIndexHistory`, `ForLoadingOptionData`, `ForLoadingMarketHistory` |
+| View market volatility | Volatility viewer | `ForViewingVolatility` | `MarketVolatilityApplication` | `ForLoadingIndexHistory`, `ForLoadingVolatilityTermStructures`, `ForLoadingMarketHistory` |
+| Migrate volatility term structures (temporary) | CLI operator | `ForMigratingVolatilityTermStructures` | `VolatilityTermStructureMigrationApplication` | archive, storing, and counting ports for volatility structures |
+| Migrate tracked ticker configuration (temporary) | CLI operator | `ForMigratingTrackedTickers` | `TrackedTickerMigrationApplication` | archive, storing, and counting ports for tracked tickers |
 | Manage a portfolio | Portfolio owner | `ForManagingPortfolios` | `PortfolioApplication` | `ForLoadingPortfolios`, `ForStoringPortfolios` |
-| Value portfolio positions | Portfolio viewer | `ForViewingPortfolioPositions` | `PortfolioValuationApplication` | `ForLoadingPortfolios`, `ForConsultingTradingCalendar`, `ForObtainingLivePrices`, `ForLoadingMarketHistory`, `ForObtainingOptionChains`, `ForLoadingOptionData` |
+| Value portfolio positions | Portfolio viewer | `ForViewingPortfolioPositions` | `PortfolioValuationApplication` | `ForLoadingPortfolios`, `ForConsultingTradingCalendar`, `ForObtainingLivePrices`, `ForLoadingMarketHistory`, `ForObtainingOptionChains`, `ForLoadingOptionChains` |
 | Manage saved strategies | Strategy-library owner | `ForManagingSavedStrategies` | `SavedStrategiesApplication` | `ForLoadingStrategies`, `ForStoringStrategies` |
 | Manage tracked tickers | Market-data operator | `ForManagingTrackedTickers` | `TrackedTickersApplication` | `ForLoadingTrackedTickers`, `ForStoringTrackedTickers` |
 | Simulate option strategies | Strategy analyst | `ForSimulatingStrategies` | `SimulationApplication` | None; calculation uses supplied domain values |

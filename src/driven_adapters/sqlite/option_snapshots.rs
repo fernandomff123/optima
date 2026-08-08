@@ -273,6 +273,39 @@ pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Snapshot>, Box<dyn Error 
     rows.into_iter().map(row_to_snapshot).collect()
 }
 
+/// Snapshot plus storage metadata required by one-off adapter migrations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredSnapshot {
+    pub snapshot: Snapshot,
+    pub market_close: Option<DateTime<Utc>>,
+    pub payload_hash: String,
+}
+
+/// Reads the legacy representation without exposing its MessagePack payload.
+pub async fn load_all_with_metadata(
+    pool: &SqlitePool,
+) -> Result<Vec<StoredSnapshot>, Box<dyn Error + Send + Sync>> {
+    let rows = sqlx::query(
+        "SELECT ticker, timestamp, market_close, format_version, payload, hash
+         FROM option_snapshots
+         ORDER BY timestamp, ticker",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            let market_close = row.try_get("market_close")?;
+            let payload_hash = row.try_get("hash")?;
+            Ok(StoredSnapshot {
+                snapshot: row_to_snapshot(row)?,
+                market_close,
+                payload_hash,
+            })
+        })
+        .collect()
+}
+
 fn row_to_snapshot(row: sqlx::sqlite::SqliteRow) -> Result<Snapshot, Box<dyn Error + Send + Sync>> {
     let format_version: i64 = row.try_get("format_version")?;
     if format_version != CURRENT_FORMAT_VERSION {

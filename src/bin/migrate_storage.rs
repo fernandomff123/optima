@@ -9,6 +9,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .await?;
 
     hexagonal_backend::configurator::initialize_storage(&pool).await?;
+    hexagonal_backend::configurator::initialize_analytical_storage().await?;
 
     println!("Migrações de storage concluídas");
     pool.close().await;

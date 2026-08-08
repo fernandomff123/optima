@@ -31,7 +31,6 @@ use hexagonal_backend::hexagon::{
     driving_ports::for_viewing_portfolio_positions::ForViewingPortfolioPositions,
     driving_ports::for_viewing_volatility::ForViewingVolatility,
 };
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::error::Error;
 
 #[derive(serde::Deserialize)]
@@ -54,13 +53,8 @@ const EOD_RETRY_MINUTES: u64 = 5;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = dotenvy::from_filename(".env.local");
-    let pool = SqlitePoolOptions::new()
-        .max_connections(4)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
-    hexagonal_backend::configurator::initialize_storage(&pool).await?;
-    let market_scheduling =
-        hexagonal_backend::configurator::configure(pool.clone()).market_scheduling;
+    hexagonal_backend::configurator::initialize_analytical_storage().await?;
+    let market_scheduling = hexagonal_backend::configurator::configure().market_scheduling;
     let market_open = market_scheduling
         .market_is_open(chrono::Utc::now())
         .unwrap_or(false);
@@ -69,8 +63,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         market_session_updates,
         market_scheduling.clone(),
     ));
-    let scheduler_application =
-        hexagonal_backend::configurator::configure(pool.clone()).synchronization;
+    let scheduler_application = hexagonal_backend::configurator::configure().synchronization;
     let market_eod = tokio::spawn(run_market_eod_scheduler(
         scheduler_application,
         market_scheduling,
@@ -79,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // The hexagonal router is the production entry point for every migrated
     // conversation. Legacy `/api` routes remain mounted during the API-shape
     // migration so current clients are not broken in one deployment.
-    let hexagonal_routes = hexagonal_backend::configurator::configure_http(pool.clone());
+    let hexagonal_routes = hexagonal_backend::configurator::configure_http();
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/assets", get(list_assets))
@@ -148,7 +141,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             "/api/assets/{ticker}/options/intraday",
             get(options_intraday),
         )
-        .with_state(pool.clone())
+        .with_state(())
         .layer(Extension(market_session))
         .merge(hexagonal_routes);
     let address =
@@ -168,10 +161,8 @@ async fn health() -> &'static str {
     "ok"
 }
 
-async fn list_assets(
-    State(pool): State<SqlitePool>,
-) -> Result<Json<Vec<AssetSummary>>, StatusCode> {
-    let tracked = hexagonal_backend::configurator::configure(pool)
+async fn list_assets(State(_state): State<()>) -> Result<Json<Vec<AssetSummary>>, StatusCode> {
+    let tracked = hexagonal_backend::configurator::configure()
         .tracked_tickers
         .list_active_tickers()
         .await
@@ -180,9 +171,9 @@ async fn list_assets(
 }
 
 async fn market_benchmark(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::MarketBenchmarkResponse>, StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).market_data;
+    let application = hexagonal_backend::configurator::configure().market_data;
     let vix = application
         .index_history("VIX")
         .await
@@ -198,9 +189,9 @@ async fn market_benchmark(
 }
 
 async fn market_volatility(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::MarketVolatilityResponse>, StatusCode> {
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .market_volatility
         .volatility_overview()
         .await
@@ -210,9 +201,9 @@ async fn market_volatility(
 }
 
 async fn market_spx_history(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::MarketSpxHistoryResponse>, StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).market_data;
+    let application = hexagonal_backend::configurator::configure().market_data;
     let vix = application
         .index_history("VIX")
         .await
@@ -230,9 +221,9 @@ async fn market_spx_history(
 }
 
 async fn market_vix_history(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::MarketVixHistoryResponse>, StatusCode> {
-    let history = hexagonal_backend::configurator::configure(pool)
+    let history = hexagonal_backend::configurator::configure()
         .market_data
         .index_history("VIX")
         .await
@@ -265,9 +256,9 @@ fn port_status(error: PortError) -> StatusCode {
 }
 
 async fn market_rates(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::MarketRatesResponse>, StatusCode> {
-    let configured = hexagonal_backend::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure();
     let vix = configured
         .market_data
         .index_history("VIX")
@@ -285,33 +276,31 @@ async fn market_rates(
 }
 
 async fn asset_live_prices(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     websocket: WebSocketUpgrade,
     Query(query): Query<LivePriceQuery>,
     Extension(market_session): Extension<tokio::sync::watch::Receiver<bool>>,
 ) -> Response {
     let ticker = query.ticker.unwrap_or_else(|| "SPX".to_string());
-    websocket
-        .on_upgrade(move |socket| handle_asset_live_prices(socket, ticker, market_session, pool))
+    websocket.on_upgrade(move |socket| handle_asset_live_prices(socket, ticker, market_session))
 }
 
 async fn handle_asset_live_prices(
     mut socket: WebSocket,
     ticker: String,
     mut market_session: tokio::sync::watch::Receiver<bool>,
-    pool: SqlitePool,
 ) {
     let (subscription_updates, subscription) = tokio::sync::watch::channel(ticker);
     let (prices, mut received_prices) = tokio::sync::mpsc::channel(32);
     let seed_prices = prices.clone();
     let seed_ticker = subscription.borrow().clone();
-    let seed_application = hexagonal_backend::configurator::configure(pool.clone()).market_data;
+    let seed_application = hexagonal_backend::configurator::configure().market_data;
     tokio::spawn(async move {
         if let Ok(price) = seed_application.live_price(&seed_ticker).await {
             let _ = seed_prices.send(price).await;
         }
     });
-    let stream_application = hexagonal_backend::configurator::configure(pool.clone()).market_stream;
+    let stream_application = hexagonal_backend::configurator::configure().market_stream;
     let mut market_stream = tokio::spawn(async move {
         stream_application
             .stream_market_prices(subscription, prices)
@@ -378,7 +367,7 @@ async fn handle_asset_live_prices(
                         }
                         None => {
                             let ticker = subscription_updates.borrow().clone();
-                            hexagonal_backend::configurator::configure(pool.clone())
+                            hexagonal_backend::configurator::configure()
                                 .market_data
                                 .live_price(&ticker)
                                 .await
@@ -521,9 +510,9 @@ fn next_eod_attempt_deadline(
 }
 
 async fn portfolio_overview(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::PortfolioOverview>, StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     let portfolio = main_portfolio(&application).await?;
     hexagonal_backend::driving_adapters::http::legacy_portfolio_views::overview(portfolio)
         .map(Json)
@@ -531,9 +520,9 @@ async fn portfolio_overview(
 }
 
 async fn portfolio_summary(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::PortfolioSummaryResponse>, StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     let portfolio = main_portfolio(&application).await?;
     hexagonal_backend::driving_adapters::http::legacy_portfolio_views::summary(&portfolio)
         .map(Json)
@@ -541,9 +530,9 @@ async fn portfolio_summary(
 }
 
 async fn portfolio_cash(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::PortfolioCashResponse>, StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     let portfolio = main_portfolio(&application).await?;
     Ok(Json(
         hexagonal_backend::driving_adapters::http::legacy_portfolio_views::cash(&portfolio),
@@ -551,9 +540,9 @@ async fn portfolio_cash(
 }
 
 async fn portfolio_positions(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::PortfolioPositionsResponse>, StatusCode> {
-    let configured = hexagonal_backend::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure();
     main_portfolio(&configured.portfolios).await?;
     configured
         .portfolio_valuation
@@ -595,9 +584,9 @@ async fn portfolio_positions(
 }
 
 async fn portfolio_movements(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<api_models::PortfolioMovementsResponse>, StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     let portfolio = main_portfolio(&application).await?;
     hexagonal_backend::driving_adapters::http::legacy_portfolio_views::movements(&portfolio)
         .map(Json)
@@ -625,11 +614,11 @@ async fn main_portfolio(
 }
 
 async fn simulation_overview(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Query(query): Query<SimulationQuery>,
 ) -> Result<Json<api_models::SimulationOverview>, StatusCode> {
     let ticker = query.ticker.as_deref().unwrap_or("SPX");
-    let configured = hexagonal_backend::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure();
     let (snapshot, spot, curve) = simulation_domain_inputs(&configured, ticker).await?;
     configured
         .simulation
@@ -651,11 +640,11 @@ async fn simulation_overview(
 }
 
 async fn simulation_contracts(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Query(query): Query<SimulationQuery>,
 ) -> Result<Json<api_models::SimulationCatalogOverview>, StatusCode> {
     let ticker = query.ticker.as_deref().unwrap_or("SPX");
-    let configured = hexagonal_backend::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure();
     let snapshot = configured
         .options
         .option_chain(ticker)
@@ -685,10 +674,10 @@ async fn simulation_contracts(
 }
 
 async fn simulate_scenarios(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Json(request): Json<api_models::SimulationScenarioRequest>,
 ) -> Result<Json<api_models::SimulationOverview>, StatusCode> {
-    let configured = hexagonal_backend::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure();
     let (snapshot, spot, curve) = simulation_domain_inputs(&configured, &request.ticker).await?;
     let strategy_kind = domain_strategy_kind(request.strategy_kind);
     let legs = domain_simulation_legs(&request.legs);
@@ -750,10 +739,10 @@ async fn simulation_domain_inputs(
 }
 
 async fn simulate_intraday_scenarios(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Json(request): Json<api_models::SimulationScenarioRequest>,
 ) -> Result<Json<api_models::SimulationOverview>, StatusCode> {
-    let configured = hexagonal_backend::configurator::configure(pool);
+    let configured = hexagonal_backend::configurator::configure();
     let market = configured
         .intraday_simulation
         .intraday_market(&request.ticker)
@@ -828,9 +817,9 @@ fn domain_simulation_legs(
 }
 
 async fn saved_strategies(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
 ) -> Result<Json<Vec<api_models::SavedStrategyOverview>>, StatusCode> {
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .saved_strategies
         .list_strategies()
         .await
@@ -849,7 +838,7 @@ async fn saved_strategies(
 }
 
 async fn save_strategy(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Json(request): Json<api_models::SaveStrategyRequest>,
 ) -> Result<(StatusCode, Json<api_models::SavedStrategyOverview>), StatusCode> {
     let command = SaveStrategy {
@@ -869,7 +858,7 @@ async fn save_strategy(
             })
             .collect(),
     };
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .saved_strategies
         .save_strategy(command)
         .await
@@ -881,10 +870,10 @@ async fn save_strategy(
 }
 
 async fn delete_strategy(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .saved_strategies
         .delete_strategy(id)
         .await
@@ -918,10 +907,10 @@ fn saved_strategy_overview(strategy: SavedStrategy) -> api_models::SavedStrategy
 }
 
 async fn create_portfolio_cash_movement(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Json(request): Json<api_models::CreatePortfolioCashMovement>,
 ) -> Result<(StatusCode, Json<api_models::PortfolioOverview>), StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     main_portfolio(&application).await?;
     let movement = CashMovement::new(
         request.id,
@@ -948,10 +937,10 @@ async fn create_portfolio_cash_movement(
 }
 
 async fn create_portfolio_option_trade(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Json(request): Json<api_models::CreatePortfolioOptionTrade>,
 ) -> Result<(StatusCode, Json<api_models::PortfolioOverview>), StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     main_portfolio(&application).await?;
     let currency = Currency::new(&request.currency).map_err(|_| StatusCode::BAD_REQUEST)?;
     let mut trade = Trade::new(
@@ -995,10 +984,10 @@ async fn create_portfolio_option_trade(
 }
 
 async fn create_portfolio_currency_exchange(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Json(request): Json<api_models::CreatePortfolioCurrencyExchange>,
 ) -> Result<(StatusCode, Json<api_models::PortfolioOverview>), StatusCode> {
-    let application = hexagonal_backend::configurator::configure(pool).portfolios;
+    let application = hexagonal_backend::configurator::configure().portfolios;
     main_portfolio(&application).await?;
     let sold_currency =
         Currency::new(&request.sold_currency).map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -1037,11 +1026,11 @@ async fn create_portfolio_currency_exchange(
 }
 
 async fn asset_price(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetPriceResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .market_data
         .market_history(&normalized)
         .await
@@ -1050,11 +1039,11 @@ async fn asset_price(
 }
 
 async fn asset_price_history(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetPriceHistoryResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .market_data
         .market_history(&normalized)
         .await
@@ -1140,10 +1129,10 @@ fn legacy_asset_price_history(
 }
 
 async fn asset_historical_volatility(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetHistoricalVolatilityResponse>, StatusCode> {
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .market_volatility
         .historical_volatility(&ticker)
         .await
@@ -1153,10 +1142,10 @@ async fn asset_historical_volatility(
 }
 
 async fn asset_implied_volatility(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::AssetImpliedVolatilityResponse>, StatusCode> {
-    hexagonal_backend::configurator::configure(pool)
+    hexagonal_backend::configurator::configure()
         .market_volatility
         .implied_volatility(&ticker)
         .await
@@ -1166,11 +1155,11 @@ async fn asset_implied_volatility(
 }
 
 async fn options_snapshot(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::OptionsSnapshotResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    match hexagonal_backend::configurator::configure(pool)
+    match hexagonal_backend::configurator::configure()
         .options
         .option_chain(&normalized)
         .await
@@ -1224,11 +1213,11 @@ async fn options_snapshot(
 }
 
 async fn options_term_structure(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::OptionsTermStructureResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    match hexagonal_backend::configurator::configure(pool)
+    match hexagonal_backend::configurator::configure()
         .options
         .term_structure(&normalized)
         .await
@@ -1270,11 +1259,11 @@ fn option_metadata(session_date: chrono::NaiveDate, source: &str) -> api_models:
 }
 
 async fn options_volatility_surface(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
 ) -> Result<Json<api_models::OptionsVolatilitySurfaceResponse>, StatusCode> {
     let normalized = ticker.trim().to_ascii_uppercase();
-    match hexagonal_backend::configurator::configure(pool)
+    match hexagonal_backend::configurator::configure()
         .options
         .volatility_surface(&normalized)
         .await
@@ -1374,10 +1363,10 @@ fn legacy_volatility_surface(
 }
 
 async fn options_intraday(
-    State(pool): State<SqlitePool>,
+    State(_state): State<()>,
     Path(ticker): Path<String>,
 ) -> Result<Json<api_models::OptionsIntradayResponse>, StatusCode> {
-    let market = hexagonal_backend::configurator::configure(pool)
+    let market = hexagonal_backend::configurator::configure()
         .intraday_simulation
         .intraday_options(&ticker)
         .await

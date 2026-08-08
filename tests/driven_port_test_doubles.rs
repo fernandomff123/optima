@@ -11,6 +11,7 @@ use hexagonal_backend::hexagon::{
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
         for_loading_index_history::ForLoadingIndexHistory,
+        for_loading_option_chains::ForLoadingOptionChains,
         for_loading_portfolios::ForLoadingPortfolios,
         for_loading_yield_curves::ForLoadingYieldCurves,
         for_obtaining_live_prices::ForObtainingLivePrices,
@@ -20,8 +21,9 @@ use hexagonal_backend::hexagon::{
         for_obtaining_yield_curves::ForObtainingYieldCurves,
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
-        for_storing_option_data::ForStoringOptionData,
+        for_storing_option_chains::ForStoringOptionChains,
         for_storing_portfolios::ForStoringPortfolios,
+        for_storing_volatility_term_structures::ForStoringVolatilityTermStructures,
         for_storing_yield_curves::ForStoringYieldCurves,
     },
 };
@@ -85,6 +87,7 @@ impl ForObtainingVolatilityIndices for VolatilityIndicesMock {
 struct YieldCurvesMock;
 struct MarketHistoryStoreMock;
 struct OptionDataStoreMock;
+struct StoredOptionChainsMock;
 struct IndexHistoryWriterMock;
 struct YieldCurvesStoreMock;
 
@@ -96,7 +99,7 @@ impl ForStoringMarketHistory for MarketHistoryStoreMock {
 }
 
 #[async_trait]
-impl ForStoringOptionData for OptionDataStoreMock {
+impl ForStoringOptionChains for OptionDataStoreMock {
     async fn store_option_chain(
         &self,
         _snapshot: &Snapshot,
@@ -104,9 +107,19 @@ impl ForStoringOptionData for OptionDataStoreMock {
     ) -> PortResult<u64> {
         Ok(0)
     }
+}
 
+#[async_trait]
+impl ForStoringVolatilityTermStructures for OptionDataStoreMock {
     async fn store_term_structure(&self, _term_structure: &TermStructure) -> PortResult<u64> {
         Ok(0)
+    }
+}
+
+#[async_trait]
+impl ForLoadingOptionChains for StoredOptionChainsMock {
+    async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
+        Ok(None)
     }
 }
 
@@ -205,7 +218,9 @@ fn every_declared_driven_port_accepts_a_test_double() {
     fn load_portfolios(_: &impl ForLoadingPortfolios) {}
     fn portfolios(_: &impl ForStoringPortfolios) {}
     fn store_market_history(_: &impl ForStoringMarketHistory) {}
-    fn store_option_data(_: &impl ForStoringOptionData) {}
+    fn load_option_chains(_: &impl ForLoadingOptionChains) {}
+    fn store_option_chains(_: &impl ForStoringOptionChains) {}
+    fn store_option_data(_: &impl ForStoringVolatilityTermStructures) {}
     fn store_index_history(_: &impl ForStoringIndexHistory) {}
     fn store_yield_curves(_: &impl ForStoringYieldCurves) {}
     fn calendar(_: &impl ForConsultingTradingCalendar) {}
@@ -221,6 +236,8 @@ fn every_declared_driven_port_accepts_a_test_double() {
     load_portfolios(&portfolio_store);
     portfolios(&portfolio_store);
     store_market_history(&MarketHistoryStoreMock);
+    load_option_chains(&StoredOptionChainsMock);
+    store_option_chains(&OptionDataStoreMock);
     store_option_data(&OptionDataStoreMock);
     store_index_history(&IndexHistoryWriterMock);
     store_yield_curves(&YieldCurvesStoreMock);

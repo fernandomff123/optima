@@ -16,7 +16,7 @@ use crate::hexagon::{
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
         for_loading_market_history::ForLoadingMarketHistory,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_option_chains::ForLoadingOptionChains,
         for_loading_portfolios::ForLoadingPortfolios,
         for_obtaining_live_prices::ForObtainingLivePrices,
         for_obtaining_option_chains::ForObtainingOptionChains,
@@ -79,7 +79,7 @@ where
     LivePrices: ForObtainingLivePrices,
     MarketHistory: ForLoadingMarketHistory,
     LiveOptions: ForObtainingOptionChains,
-    StoredOptions: ForLoadingOptionData,
+    StoredOptions: ForLoadingOptionChains,
 {
     async fn valued_positions(&self, portfolio_id: &str) -> PortResult<Vec<ValuedPosition>> {
         let portfolio = self
@@ -127,7 +127,7 @@ where
     LivePrices: ForObtainingLivePrices,
     MarketHistory: ForLoadingMarketHistory,
     LiveOptions: ForObtainingOptionChains,
-    StoredOptions: ForLoadingOptionData,
+    StoredOptions: ForLoadingOptionChains,
 {
     async fn price(
         &self,

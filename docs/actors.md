@@ -41,7 +41,8 @@ and an automated test can all drive the same port without changing the use case.
 
 | Actor | Role in conversations | Driven ports | Production adapter(s) |
 | --- | --- | --- | --- |
-| SQLite database | Persist and retrieve application state and market observations | All `ForLoading*` and `ForStoring*` ports | Domain-focused `Sqlite*Adapter` implementations |
+| SQLite database | Temporary migration source and inactive proof of concept | Contract-tested domain ports and migration-only archive ports | Domain-focused `Sqlite*Adapter` implementations |
+| DuckDB database | Production persistence for all application-owned data | Domain-focused loading, storing, and migration-verification ports | Domain-focused `DuckDb*Adapter` implementations |
 | Yahoo Finance | Supply historical market data, current prices, and price streams | `ForObtainingMarketHistory`, `ForObtainingLivePrices`, `ForStreamingLivePrices` | `YahooMarketHistoryAdapter`, `YahooLivePricesAdapter` |
 | Cboe | Supply option chains and volatility-index histories | `ForObtainingOptionChains`, `ForObtainingVolatilityIndices` | `CboeOptionChainsAdapter`, `CboeVolatilityIndicesAdapter` |
 | U.S. Treasury | Supply published risk-free yield curves | `ForObtainingYieldCurves` | `TreasuryYieldCurvesAdapter` |
@@ -50,8 +51,8 @@ and an automated test can all drive the same port without changing the use case.
 
 One port may have multiple adapters. For example, a future PostgreSQL or
 in-memory adapter can implement `ForLoadingPortfolios`. One adapter may also
-implement several coherent ports: `SqlitePortfolioAdapter` implements both
+implement several coherent ports: `DuckDbPortfolioAdapter` implements both
 loading and storing for the same aggregate and technology.
 
 What an adapter must not do is coordinate unrelated actors. Choosing between
-Yahoo, Cboe, SQLite, and the exchange calendar is application work.
+Yahoo, Cboe, DuckDB, and the exchange calendar is application work.

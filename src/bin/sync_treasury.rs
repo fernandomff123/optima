@@ -1,16 +1,10 @@
 use chrono::Datelike;
 use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
-
-    let configured = hexagonal_backend::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure();
     let current_year = chrono::Utc::now().year();
     let mut succeeded = 0;
     let mut inserted = 0;
@@ -37,6 +31,5 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("{year}: {error}");
     }
 
-    pool.close().await;
     Ok(())
 }

@@ -14,32 +14,47 @@ use crate::hexagon::{
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_option_chains::ForLoadingOptionChains,
+        for_loading_reference_prices::ForLoadingReferencePrices,
+        for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
+        for_loading_yield_curves::ForLoadingYieldCurves,
     },
     driving_ports::for_analyzing_options::{ForAnalyzingOptions, GreeksRequest},
 };
 
-pub struct OptionsApplication<OptionDataStore, TradingCalendar> {
+pub struct OptionsApplication<OptionChains, OptionDataStore, YieldCurves, TradingCalendar> {
+    option_chains: OptionChains,
     option_data_store: OptionDataStore,
+    yield_curves: YieldCurves,
     trading_calendar: TradingCalendar,
 }
 
-impl<OptionDataStore, TradingCalendar> OptionsApplication<OptionDataStore, TradingCalendar> {
-    pub fn new(option_data_store: OptionDataStore, trading_calendar: TradingCalendar) -> Self {
+impl<OptionChains, OptionDataStore, YieldCurves, TradingCalendar>
+    OptionsApplication<OptionChains, OptionDataStore, YieldCurves, TradingCalendar>
+{
+    pub fn new(
+        option_chains: OptionChains,
+        option_data_store: OptionDataStore,
+        yield_curves: YieldCurves,
+        trading_calendar: TradingCalendar,
+    ) -> Self {
         Self {
+            option_chains,
             option_data_store,
+            yield_curves,
             trading_calendar,
         }
     }
 }
 
-impl<OptionDataStore, TradingCalendar> OptionsApplication<OptionDataStore, TradingCalendar>
+impl<OptionChains, OptionDataStore, YieldCurves, TradingCalendar>
+    OptionsApplication<OptionChains, OptionDataStore, YieldCurves, TradingCalendar>
 where
-    OptionDataStore: ForLoadingOptionData,
+    OptionChains: ForLoadingOptionChains,
 {
     async fn snapshot(&self, ticker: &str) -> PortResult<Snapshot> {
         let ticker = normalized_ticker(ticker)?;
-        self.option_data_store
+        self.option_chains
             .load_option_chain(&ticker)
             .await?
             .ok_or_else(|| {
@@ -49,10 +64,12 @@ where
 }
 
 #[async_trait]
-impl<OptionDataStore, TradingCalendar> ForAnalyzingOptions
-    for OptionsApplication<OptionDataStore, TradingCalendar>
+impl<OptionChains, OptionDataStore, YieldCurves, TradingCalendar> ForAnalyzingOptions
+    for OptionsApplication<OptionChains, OptionDataStore, YieldCurves, TradingCalendar>
 where
-    OptionDataStore: ForLoadingOptionData,
+    OptionChains: ForLoadingOptionChains,
+    OptionDataStore: ForLoadingVolatilityTermStructures + ForLoadingReferencePrices,
+    YieldCurves: ForLoadingYieldCurves,
     TradingCalendar: ForConsultingTradingCalendar,
 {
     async fn option_chain(&self, ticker: &str) -> PortResult<Snapshot> {
@@ -64,7 +81,13 @@ where
         if let Some(stored) = self.option_data_store.load_term_structure(&ticker).await? {
             return Ok(stored);
         }
-        build_term_structure(&self.option_data_store, &self.trading_calendar, &ticker).await
+        build_term_structure(
+            &self.option_chains,
+            &self.yield_curves,
+            &self.trading_calendar,
+            &ticker,
+        )
+        .await
     }
 
     async fn volatility_surface(&self, ticker: &str) -> PortResult<VolatilitySurface> {
@@ -134,21 +157,23 @@ where
 }
 
 /// Builds option analytics from required ports without knowing their adapters.
-pub(crate) async fn build_term_structure<OptionDataStore, TradingCalendar>(
-    option_data_store: &OptionDataStore,
+pub(crate) async fn build_term_structure<OptionChains, YieldCurves, TradingCalendar>(
+    option_chains: &OptionChains,
+    yield_curves: &YieldCurves,
     trading_calendar: &TradingCalendar,
     ticker: &str,
 ) -> PortResult<TermStructure>
 where
-    OptionDataStore: ForLoadingOptionData,
+    OptionChains: ForLoadingOptionChains,
+    YieldCurves: ForLoadingYieldCurves,
     TradingCalendar: ForConsultingTradingCalendar,
 {
     let ticker = normalized_ticker(ticker)?;
-    let snapshot = option_data_store
+    let snapshot = option_chains
         .load_option_chain(&ticker)
         .await?
         .ok_or_else(|| PortError::NotFound(format!("option chain for '{ticker}' was not found")))?;
-    let curve = option_data_store
+    let curve = yield_curves
         .load_yield_curve(snapshot.timestamp_utc.date_naive())
         .await?
         .ok_or_else(|| PortError::NotFound(format!("yield curve for '{ticker}' was not found")))?;

@@ -7,6 +7,7 @@ use crate::hexagon::{
     PortError, PortResult,
     driven_ports::{
         for_loading_market_history::ForLoadingMarketHistory,
+        for_loading_market_history_archive::ForLoadingMarketHistoryArchive,
         for_storing_market_history::ForStoringMarketHistory,
     },
 };
@@ -14,6 +15,15 @@ use crate::hexagon::{
 #[derive(Clone)]
 pub struct SqliteMarketHistoryAdapter {
     pool: SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl ForLoadingMarketHistoryArchive for SqliteMarketHistoryAdapter {
+    async fn load_market_history_archive(&self) -> PortResult<Vec<MarketHistory>> {
+        load_all_histories(&self.pool)
+            .await
+            .map_err(|error| PortError::Unavailable(error.to_string()))
+    }
 }
 
 impl SqliteMarketHistoryAdapter {
@@ -359,6 +369,24 @@ pub async fn load_history(
         dividends,
         splits,
     })
+}
+
+pub async fn load_all_histories(
+    pool: &SqlitePool,
+) -> Result<Vec<MarketHistory>, Box<dyn Error + Send + Sync>> {
+    let tickers = sqlx::query_scalar::<_, String>(
+        "SELECT ticker FROM market_prices
+         UNION SELECT ticker FROM dividends
+         UNION SELECT ticker FROM stock_splits
+         ORDER BY ticker",
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut histories = Vec::with_capacity(tickers.len());
+    for ticker in tickers {
+        histories.push(load_history(pool, &ticker).await?);
+    }
+    Ok(histories)
 }
 
 #[cfg(test)]

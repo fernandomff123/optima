@@ -1,5 +1,4 @@
 use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
 #[tokio::main]
@@ -8,12 +7,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .nth(1)
         .ok_or("uso: sync_treasury_year <ano>")?
         .parse()?;
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
 
-    let configured = hexagonal_backend::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure();
     let report = configured
         .synchronization
         .synchronize_yield_curves(year)
@@ -23,6 +18,5 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         report.items_obtained, report.items_stored
     );
 
-    pool.close().await;
     Ok(())
 }

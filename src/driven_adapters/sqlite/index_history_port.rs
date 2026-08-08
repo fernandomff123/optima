@@ -7,6 +7,7 @@ use crate::hexagon::{
     domain::index_history::IndexHistory,
     driven_ports::{
         for_loading_index_history::ForLoadingIndexHistory,
+        for_loading_index_history_archive::ForLoadingIndexHistoryArchive,
         for_storing_index_history::ForStoringIndexHistory,
     },
 };
@@ -14,6 +15,15 @@ use crate::hexagon::{
 #[derive(Clone)]
 pub struct SqliteIndexHistoryAdapter {
     pool: SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl ForLoadingIndexHistoryArchive for SqliteIndexHistoryAdapter {
+    async fn load_index_history_archive(&self) -> PortResult<Vec<IndexHistory>> {
+        super::index_history::load_all_histories(&self.pool)
+            .await
+            .map_err(|error| PortError::Unavailable(error.to_string()))
+    }
 }
 
 impl SqliteIndexHistoryAdapter {

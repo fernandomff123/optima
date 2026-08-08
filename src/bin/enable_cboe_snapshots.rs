@@ -1,5 +1,4 @@
 use hexagonal_backend::hexagon::driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers;
-use sqlx::sqlite::SqlitePoolOptions;
 use std::error::Error;
 
 const DEFAULT_TICKERS: [&str; 5] = ["AAPL", "GOOGL", "IBM", "JPM", "MSFT"];
@@ -12,11 +11,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     } else {
         requested.iter().map(String::as_str).collect()
     };
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite://data/hexagonal.db?mode=rwc")
-        .await?;
-    let configured = hexagonal_backend::configurator::configure(pool.clone());
+    let configured = hexagonal_backend::configurator::configure();
     let active = configured.tracked_tickers.list_active_tickers().await?;
 
     for ticker in tickers {
@@ -34,6 +29,5 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         println!("{normalized}: option_snapshots ativado");
     }
 
-    pool.close().await;
     Ok(())
 }

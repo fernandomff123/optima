@@ -2,6 +2,7 @@ use crate::hexagon::domain::portfolio::{Currency, Portfolio, PortfolioEvent};
 use crate::hexagon::{
     PortError, PortResult,
     driven_ports::{
+        for_loading_portfolio_archive::ForLoadingPortfolioArchive,
         for_loading_portfolios::ForLoadingPortfolios, for_storing_portfolios::ForStoringPortfolios,
     },
 };
@@ -12,6 +13,15 @@ use std::error::Error;
 #[derive(Clone)]
 pub struct SqlitePortfolioAdapter {
     pool: SqlitePool,
+}
+
+#[async_trait::async_trait]
+impl ForLoadingPortfolioArchive for SqlitePortfolioAdapter {
+    async fn load_portfolio_archive(&self) -> PortResult<Vec<Portfolio>> {
+        load_all(&self.pool)
+            .await
+            .map_err(|error| PortError::Unavailable(error.to_string()))
+    }
 }
 
 impl SqlitePortfolioAdapter {
@@ -135,6 +145,20 @@ pub async fn load(
         portfolio.record(rmp_serde::from_slice::<PortfolioEvent>(&payload)?)?;
     }
     Ok(Some(portfolio))
+}
+
+pub async fn load_all(pool: &SqlitePool) -> Result<Vec<Portfolio>, Box<dyn Error + Send + Sync>> {
+    initialize(pool).await?;
+    let ids = sqlx::query_scalar::<_, String>("SELECT id FROM portfolios ORDER BY id")
+        .fetch_all(pool)
+        .await?;
+    let mut portfolios = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Some(portfolio) = load(pool, &id).await? {
+            portfolios.push(portfolio);
+        }
+    }
+    Ok(portfolios)
 }
 
 #[cfg(test)]

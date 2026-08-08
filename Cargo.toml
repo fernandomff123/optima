@@ -15,6 +15,7 @@ async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22"
 dotenvy = "0.15"
+duckdb = { version = "1.10505.0", features = ["bundled", "chrono"] }
 futures-util = "0.3"
 prost = "0.13"
 serde = { version = "1.0", features = ["derive"] }

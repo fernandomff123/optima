@@ -7,15 +7,17 @@ use crate::hexagon::{
     PortError, PortResult,
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
-        for_loading_option_data::ForLoadingOptionData,
+        for_loading_option_chains::ForLoadingOptionChains,
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
+        for_loading_yield_curves::ForLoadingYieldCurves,
         for_obtaining_market_history::ForObtainingMarketHistory,
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
-        for_storing_option_data::ForStoringOptionData,
+        for_storing_option_chains::ForStoringOptionChains,
+        for_storing_volatility_term_structures::ForStoringVolatilityTermStructures,
         for_storing_yield_curves::ForStoringYieldCurves,
     },
     driving_ports::for_synchronizing_market_data::{
@@ -27,15 +29,23 @@ use crate::hexagon::{
 use super::options::build_term_structure;
 
 /// Collaborators needed specifically for derived option analytics.
-pub struct OptionAnalysisCollaborators<OptionData, TradingCalendar> {
-    option_data: OptionData,
+pub struct OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalendar> {
+    option_chains: OptionChains,
+    yield_curves: YieldCurves,
     trading_calendar: TradingCalendar,
 }
 
-impl<OptionData, TradingCalendar> OptionAnalysisCollaborators<OptionData, TradingCalendar> {
-    pub fn new(option_data: OptionData, trading_calendar: TradingCalendar) -> Self {
+impl<OptionChains, YieldCurves, TradingCalendar>
+    OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalendar>
+{
+    pub fn new(
+        option_chains: OptionChains,
+        yield_curves: YieldCurves,
+        trading_calendar: TradingCalendar,
+    ) -> Self {
         Self {
-            option_data,
+            option_chains,
+            yield_curves,
             trading_calendar,
         }
     }
@@ -43,18 +53,28 @@ impl<OptionData, TradingCalendar> OptionAnalysisCollaborators<OptionData, Tradin
 
 /// Persistence participants grouped for constructor injection, while each
 /// remains governed by its own business conversation.
-pub struct SynchronizationStores<History, Options, Indices, Curves> {
+pub struct SynchronizationStores<History, OptionChains, OptionData, Indices, Curves> {
     history: History,
-    options: Options,
+    option_chains: OptionChains,
+    option_data: OptionData,
     indices: Indices,
     curves: Curves,
 }
 
-impl<History, Options, Indices, Curves> SynchronizationStores<History, Options, Indices, Curves> {
-    pub fn new(history: History, options: Options, indices: Indices, curves: Curves) -> Self {
+impl<History, OptionChains, OptionData, Indices, Curves>
+    SynchronizationStores<History, OptionChains, OptionData, Indices, Curves>
+{
+    pub fn new(
+        history: History,
+        option_chains: OptionChains,
+        option_data: OptionData,
+        indices: Indices,
+        curves: Curves,
+    ) -> Self {
         Self {
             history,
-            options,
+            option_chains,
+            option_data,
             indices,
             curves,
         }
@@ -68,20 +88,23 @@ pub struct SynchronizationApplication<
     Indices,
     Curves,
     HistoryStore,
+    OptionChainStore,
     OptionStore,
     IndexStore,
     CurveStore,
     TrackedTickers,
-    OptionData,
+    OptionChains,
+    YieldCurves,
     TradingCalendar,
 > {
     history: History,
     options: Options,
     indices: Indices,
     curves: Curves,
-    stores: SynchronizationStores<HistoryStore, OptionStore, IndexStore, CurveStore>,
+    stores:
+        SynchronizationStores<HistoryStore, OptionChainStore, OptionStore, IndexStore, CurveStore>,
     tracked_tickers: TrackedTickers,
-    option_analysis: OptionAnalysisCollaborators<OptionData, TradingCalendar>,
+    option_analysis: OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalendar>,
 }
 
 impl<
@@ -90,11 +113,13 @@ impl<
     Indices,
     Curves,
     HistoryStore,
+    OptionChainStore,
     OptionStore,
     IndexStore,
     CurveStore,
     TrackedTickers,
-    OptionData,
+    OptionChains,
+    YieldCurves,
     TradingCalendar,
 >
     SynchronizationApplication<
@@ -103,11 +128,13 @@ impl<
         Indices,
         Curves,
         HistoryStore,
+        OptionChainStore,
         OptionStore,
         IndexStore,
         CurveStore,
         TrackedTickers,
-        OptionData,
+        OptionChains,
+        YieldCurves,
         TradingCalendar,
     >
 {
@@ -116,9 +143,15 @@ impl<
         options: Options,
         indices: Indices,
         curves: Curves,
-        stores: SynchronizationStores<HistoryStore, OptionStore, IndexStore, CurveStore>,
+        stores: SynchronizationStores<
+            HistoryStore,
+            OptionChainStore,
+            OptionStore,
+            IndexStore,
+            CurveStore,
+        >,
         tracked_tickers: TrackedTickers,
-        option_analysis: OptionAnalysisCollaborators<OptionData, TradingCalendar>,
+        option_analysis: OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalendar>,
     ) -> Self {
         Self {
             history,
@@ -139,11 +172,13 @@ impl<
     Indices,
     Curves,
     HistoryStore,
+    OptionChainStore,
     OptionStore,
     IndexStore,
     CurveStore,
     TrackedTickers,
-    OptionData,
+    OptionChains,
+    YieldCurves,
     TradingCalendar,
 > ForSynchronizingMarketData
     for SynchronizationApplication<
@@ -152,11 +187,13 @@ impl<
         Indices,
         Curves,
         HistoryStore,
+        OptionChainStore,
         OptionStore,
         IndexStore,
         CurveStore,
         TrackedTickers,
-        OptionData,
+        OptionChains,
+        YieldCurves,
         TradingCalendar,
     >
 where
@@ -165,11 +202,13 @@ where
     Indices: ForObtainingVolatilityIndices,
     Curves: ForObtainingYieldCurves,
     HistoryStore: ForStoringMarketHistory,
-    OptionStore: ForStoringOptionData,
+    OptionChainStore: ForStoringOptionChains,
+    OptionStore: ForStoringVolatilityTermStructures,
     IndexStore: ForStoringIndexHistory,
     CurveStore: ForStoringYieldCurves,
     TrackedTickers: ForLoadingTrackedTickers,
-    OptionData: ForLoadingOptionData,
+    OptionChains: ForLoadingOptionChains,
+    YieldCurves: ForLoadingYieldCurves,
     TradingCalendar: ForConsultingTradingCalendar,
 {
     async fn synchronize_tracked_tickers(
@@ -263,7 +302,7 @@ where
         let items_obtained = snapshot.contratos.len();
         let items_stored = self
             .stores
-            .options
+            .option_chains
             .store_option_chain(&snapshot, market_close)
             .await?;
         Ok(SynchronizationReport {
@@ -275,7 +314,8 @@ where
     async fn synchronize_term_structure(&self, ticker: &str) -> PortResult<SynchronizationReport> {
         let ticker = normalized_ticker(ticker)?;
         let term_structure = build_term_structure(
-            &self.option_analysis.option_data,
+            &self.option_analysis.option_chains,
+            &self.option_analysis.yield_curves,
             &self.option_analysis.trading_calendar,
             &ticker,
         )
@@ -283,7 +323,7 @@ where
         let items_obtained = term_structure.points.len();
         let items_stored = self
             .stores
-            .options
+            .option_data
             .store_term_structure(&term_structure)
             .await?;
         Ok(SynchronizationReport {
