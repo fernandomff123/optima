@@ -22,6 +22,7 @@ use hexagonal_backend::hexagon::{
     driving_ports::for_managing_saved_strategies::{ForManagingSavedStrategies, SaveStrategy},
     driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers,
     driving_ports::for_preparing_intraday_simulations::ForPreparingIntradaySimulations,
+    driving_ports::for_refreshing_market_data::ForRefreshingMarketData,
     driving_ports::for_scheduling_market_operations::ForSchedulingMarketOperations,
     driving_ports::for_simulating_strategies::{ForSimulatingStrategies, SimulateScenario},
     driving_ports::for_streaming_market_prices::ForStreamingMarketPrices,
@@ -54,7 +55,8 @@ const EOD_RETRY_MINUTES: u64 = 5;
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = dotenvy::from_filename(".env.local");
     hexagonal_backend::configurator::initialize_analytical_storage().await?;
-    let market_scheduling = hexagonal_backend::configurator::configure().market_scheduling;
+    let configured = hexagonal_backend::configurator::configure();
+    let market_scheduling = configured.market_scheduling.clone();
     let market_open = market_scheduling
         .market_is_open(chrono::Utc::now())
         .unwrap_or(false);
@@ -63,16 +65,37 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         market_session_updates,
         market_scheduling.clone(),
     ));
-    let scheduler_application = hexagonal_backend::configurator::configure().synchronization;
+    let data_refresh = configured.data_refresh.clone();
+    let recovered = data_refresh
+        .recover_interrupted_data_refreshes(chrono::Utc::now())
+        .await?;
+    if recovered > 0 {
+        eprintln!("Foram reconciliadas {recovered} atualizações interrompidas");
+    }
+    let startup_refresh = data_refresh.clone();
+    let (startup_finished, startup_completion) = tokio::sync::watch::channel(false);
+    let startup = tokio::spawn(async move {
+        if let Err(error) = startup_refresh
+            .refresh_market_data(
+                hexagonal_backend::hexagon::domain::data_refresh::DataRefreshOrigin::Startup,
+                chrono::Utc::now(),
+            )
+            .await
+        {
+            eprintln!("Falha na atualização de arranque: {error}");
+        }
+        startup_finished.send_replace(true);
+    });
     let market_eod = tokio::spawn(run_market_eod_scheduler(
-        scheduler_application,
+        data_refresh,
         market_scheduling,
+        startup_completion,
     ));
 
     // The hexagonal router is the production entry point for every migrated
     // conversation. Legacy `/api` routes remain mounted during the API-shape
     // migration so current clients are not broken in one deployment.
-    let hexagonal_routes = hexagonal_backend::configurator::configure_http();
+    let hexagonal_routes = hexagonal_backend::configurator::configure_http_application(configured);
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/assets", get(list_assets))
@@ -153,6 +176,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let _ = market_clock.await;
     market_eod.abort();
     let _ = market_eod.await;
+    startup.abort();
+    let _ = startup.await;
     result?;
     Ok(())
 }
@@ -429,48 +454,58 @@ async fn run_market_session_clock(
 }
 
 async fn run_market_eod_scheduler(
-    application: hexagonal_backend::configurator::ConfiguredSynchronization,
+    application: std::sync::Arc<dyn ForRefreshingMarketData>,
     scheduling: hexagonal_backend::configurator::ConfiguredMarketScheduling,
+    mut startup_completion: tokio::sync::watch::Receiver<bool>,
 ) {
+    while !*startup_completion.borrow() {
+        if startup_completion.changed().await.is_err() {
+            return;
+        }
+    }
+    if let Ok(status) = application.data_refresh_status(1).await
+        && let Some(next_attempt_at) = status.latest.and_then(|run| run.next_attempt_at)
+        && let Ok(wait) = (next_attempt_at - chrono::Utc::now()).to_std()
+    {
+        tokio::time::sleep(wait).await;
+    }
+    let mut retry = false;
     loop {
         let now = chrono::Utc::now();
         let market_open = scheduling.market_is_open(now).unwrap_or(true);
         if !market_open {
             match scheduling.eligible_end_of_day_close(now) {
                 Ok(Some(market_close)) => {
-                    let history_since = market_close.date_naive();
-                    match hexagonal_backend::driving_adapters::scheduler::synchronize_end_of_day(
-                        &application,
-                        hexagonal_backend::driving_adapters::scheduler::EndOfDayRequest {
-                            market_close,
-                            history_since,
-                            volatility_indices: vec!["VIX".to_string()],
-                        },
-                    )
-                    .await
-                    {
-                        Ok(report) if report.failures.is_empty() => {
+                    let origin = if retry {
+                        hexagonal_backend::hexagon::domain::data_refresh::DataRefreshOrigin::Retry
+                    } else {
+                        hexagonal_backend::hexagon::domain::data_refresh::DataRefreshOrigin::Scheduled
+                    };
+                    match application.refresh_market_data(origin, now).await {
+                        Ok(hexagonal_backend::hexagon::driving_ports::for_refreshing_market_data::StartDataRefreshResult::Started(run)) if run.failure_count == 0 => {
                             println!(
                                 "EOD concluído para a sessão {market_close}: obtidos={}, persistidos={}",
-                                report.items_obtained, report.items_stored
+                                run.items_obtained, run.items_persisted
                             );
+                            retry = false;
                             tokio::time::sleep_until(next_eod_attempt_deadline(&scheduling)).await;
                             continue;
                         }
-                        Ok(report) => {
+                        Ok(hexagonal_backend::hexagon::driving_ports::for_refreshing_market_data::StartDataRefreshResult::Started(run)) => {
                             eprintln!(
                                 "EOD pendente para {market_close}: obtidos={}, persistidos={}, falhas={}",
-                                report.items_obtained,
-                                report.items_stored,
-                                report.failures.len(),
+                                run.items_obtained, run.items_persisted, run.failure_count,
                             );
-                            for failure in report.failures {
+                            for failure in run.failures {
                                 eprintln!(
                                     "{} [{}]: {}",
                                     failure.ticker, failure.operation, failure.error
                                 );
                             }
+                            retry = true;
                         }
+                        Ok(hexagonal_backend::hexagon::driving_ports::for_refreshing_market_data::StartDataRefreshResult::AlreadyRunning(_)) => {}
+                        Ok(hexagonal_backend::hexagon::driving_ports::for_refreshing_market_data::StartDataRefreshResult::NoEligibleSession) => {}
                         Err(error) => eprintln!("Falha na reconciliação EOD: {error}"),
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(EOD_RETRY_MINUTES * 60))

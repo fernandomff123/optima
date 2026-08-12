@@ -198,6 +198,17 @@ domain/application types; they perform no persistence or provider I/O. Every
 route obtains data and executes behavior through a driving port, so transport
 compatibility does not change the dependency direction.
 
+Market-data refresh executions are coordinated by `ForRefreshingMarketData` and
+persisted through `ForStoringDataRefreshRuns`/`ForLoadingDataRefreshRuns`. The
+startup task, EOD scheduler, and manual HTTP request share that single use case.
+Required system assets remain seeded in `tracked_tickers`; future user-added
+underlyings must be distinguished there without creating another ticker list.
+The bounded backfill policy applies to every active tracked ticker.
+
+The former `atualizar_dados.sh` was removed because it only downloaded SPY
+option JSON in an independent one-minute loop and never participated in the
+hexagonal scheduler or persistence lifecycle.
+
 ## Simulation conversation
 
 `ForSimulatingStrategies` is intentionally not a one-function-per-port design.

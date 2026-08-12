@@ -13,6 +13,7 @@ pub mod for_migrating_tracked_tickers;
 pub mod for_migrating_volatility_term_structures;
 pub mod for_migrating_yield_curves;
 pub mod for_preparing_intraday_simulations;
+pub mod for_refreshing_market_data;
 pub mod for_scheduling_market_operations;
 pub mod for_simulating_strategies;
 pub mod for_streaming_market_prices;

@@ -3,15 +3,20 @@
 //! No application module constructs an adapter. This outer component is the
 //! only place where provider and database choices are combined.
 
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::Router;
 use sqlx::SqlitePool;
 
+use crate::hexagon::driving_ports::for_refreshing_market_data::ForRefreshingMarketData;
 use crate::{
     driven_adapters::{
         cboe::{CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter},
         duckdb::{
+            data_refresh_runs::DuckDbDataRefreshRunsAdapter,
             index_history::DuckDbIndexHistoryAdapter, market_history::DuckDbMarketHistoryAdapter,
             option_chains::DuckDbOptionChainsAdapter, portfolio::DuckDbPortfolioAdapter,
             saved_strategies::DuckDbSavedStrategiesAdapter,
@@ -31,6 +36,7 @@ use crate::{
         yahoo::{YahooLivePricesAdapter, YahooMarketHistoryAdapter},
     },
     hexagon::application::{
+        data_refresh::DataRefreshApplication,
         index_history_migration::IndexHistoryMigrationApplication,
         interest_rates::InterestRatesApplication,
         intraday_simulation::IntradaySimulationApplication,
@@ -57,6 +63,42 @@ use crate::{
         yield_curve_migration::YieldCurveMigrationApplication,
     },
 };
+
+pub const DUCKDB_PATH_ENV: &str = "HEXAGONAL_BACKEND_DUCKDB_PATH";
+pub const DEFAULT_DUCKDB_PATH: &str = "data/market_data.duckdb";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompositionConfig {
+    duckdb_path: PathBuf,
+}
+
+impl Default for CompositionConfig {
+    fn default() -> Self {
+        Self {
+            duckdb_path: PathBuf::from(DEFAULT_DUCKDB_PATH),
+        }
+    }
+}
+
+impl CompositionConfig {
+    pub fn with_duckdb_path(path: impl Into<PathBuf>) -> Self {
+        Self {
+            duckdb_path: path.into(),
+        }
+    }
+    pub fn from_environment() -> Self {
+        Self::from_path_override(std::env::var_os(DUCKDB_PATH_ENV))
+    }
+    pub fn from_path_override(value: Option<std::ffi::OsString>) -> Self {
+        value
+            .filter(|path| !path.is_empty())
+            .map(Self::with_duckdb_path)
+            .unwrap_or_default()
+    }
+    pub fn duckdb_path(&self) -> &Path {
+        &self.duckdb_path
+    }
+}
 
 pub type ConfiguredMarketData = MarketDataApplication<
     DuckDbMarketHistoryAdapter,
@@ -150,6 +192,7 @@ pub struct ConfiguredApplication {
     pub sector_performance: ConfiguredSectorPerformance,
     pub simulation: SimulationApplication,
     pub synchronization: ConfiguredSynchronization,
+    pub data_refresh: Arc<dyn ForRefreshingMarketData>,
 }
 
 /// Prepares every schema owned by a SQLite driven adapter.
@@ -177,7 +220,13 @@ pub async fn initialize_storage(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 /// Prepares the analytical schemas selected by the production configurator.
 pub async fn initialize_analytical_storage() -> crate::hexagon::PortResult<()> {
-    let path = "data/market_data.duckdb";
+    initialize_analytical_storage_with_config(&CompositionConfig::from_environment()).await
+}
+
+pub async fn initialize_analytical_storage_with_config(
+    config: &CompositionConfig,
+) -> crate::hexagon::PortResult<()> {
+    let path = config.duckdb_path();
     DuckDbOptionChainsAdapter::new(path).initialize().await?;
     DuckDbMarketHistoryAdapter::new(path).initialize().await?;
     DuckDbIndexHistoryAdapter::new(path).initialize().await?;
@@ -187,29 +236,45 @@ pub async fn initialize_analytical_storage() -> crate::hexagon::PortResult<()> {
         .await?;
     DuckDbTrackedTickersAdapter::new(path).initialize().await?;
     DuckDbPortfolioAdapter::new(path).initialize().await?;
-    DuckDbSavedStrategiesAdapter::new(path).initialize().await
+    DuckDbSavedStrategiesAdapter::new(path).initialize().await?;
+    DuckDbDataRefreshRunsAdapter::new(path).initialize().await
 }
 
 /// Selects concrete production adapters and injects them through constructors.
 pub fn configure() -> ConfiguredApplication {
-    let portfolio_adapter = DuckDbPortfolioAdapter::new("data/market_data.duckdb");
-    let strategies_adapter = DuckDbSavedStrategiesAdapter::new("data/market_data.duckdb");
-    let tracked_tickers_adapter = DuckDbTrackedTickersAdapter::new("data/market_data.duckdb");
+    configure_with_config(&CompositionConfig::from_environment())
+}
+
+pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplication {
+    let path = config.duckdb_path();
+    let portfolio_adapter = DuckDbPortfolioAdapter::new(path);
+    let strategies_adapter = DuckDbSavedStrategiesAdapter::new(path);
+    let tracked_tickers_adapter = DuckDbTrackedTickersAdapter::new(path);
+    let synchronization = Arc::new(configure_synchronization(
+        path,
+        tracked_tickers_adapter.clone(),
+    ));
+    let refresh_runs = Arc::new(DuckDbDataRefreshRunsAdapter::new(path));
+    let data_refresh: Arc<dyn ForRefreshingMarketData> = Arc::new(DataRefreshApplication::new(
+        synchronization.clone(),
+        refresh_runs,
+        Arc::new(DuckDbMarketHistoryAdapter::new(path)),
+        Arc::new(tracked_tickers_adapter.clone()),
+        Arc::new(ExchangeTradingCalendarAdapter),
+    ));
     ConfiguredApplication {
         market_data: MarketDataApplication::new(
-            DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
-            DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
+            DuckDbMarketHistoryAdapter::new(path),
+            DuckDbIndexHistoryAdapter::new(path),
             YahooLivePricesAdapter,
         ),
         market_stream: configure_market_stream(),
         market_scheduling: MarketSchedulingApplication::new(ExchangeTradingCalendarAdapter),
-        interest_rates: InterestRatesApplication::new(DuckDbYieldCurvesAdapter::new(
-            "data/market_data.duckdb",
-        )),
+        interest_rates: InterestRatesApplication::new(DuckDbYieldCurvesAdapter::new(path)),
         market_volatility: MarketVolatilityApplication::new(
-            DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
-            DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
-            DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+            DuckDbIndexHistoryAdapter::new(path),
+            DuckDbVolatilityTermStructuresAdapter::new(path),
+            DuckDbMarketHistoryAdapter::new(path),
         ),
         intraday_simulation: IntradaySimulationApplication::new(
             CboeOptionChainsAdapter,
@@ -217,20 +282,20 @@ pub fn configure() -> ConfiguredApplication {
             ExchangeTradingCalendarAdapter,
         ),
         options: OptionsApplication::new(
-            DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
-            DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
-            DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
+            DuckDbOptionChainsAdapter::new(path),
+            DuckDbVolatilityTermStructuresAdapter::new(path),
+            DuckDbYieldCurvesAdapter::new(path),
             ExchangeTradingCalendarAdapter,
         ),
         portfolios: PortfolioApplication::new(portfolio_adapter.clone(), portfolio_adapter),
         portfolio_valuation: PortfolioValuationApplication::new(
-            DuckDbPortfolioAdapter::new("data/market_data.duckdb"),
+            DuckDbPortfolioAdapter::new(path),
             PricingCollaborators::new(
                 ExchangeTradingCalendarAdapter,
                 YahooLivePricesAdapter,
-                DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+                DuckDbMarketHistoryAdapter::new(path),
                 CboeOptionChainsAdapter,
-                DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
+                DuckDbOptionChainsAdapter::new(path),
             ),
         ),
         saved_strategies: SavedStrategiesApplication::new(
@@ -242,30 +307,38 @@ pub fn configure() -> ConfiguredApplication {
             tracked_tickers_adapter.clone(),
         ),
         sector_performance: SectorPerformanceApplication::new(
-            DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+            DuckDbMarketHistoryAdapter::new(path),
             ExchangeTradingCalendarAdapter,
         ),
         simulation: SimulationApplication,
-        synchronization: SynchronizationApplication::new(
-            YahooMarketHistoryAdapter,
-            CboeOptionChainsAdapter,
-            CboeVolatilityIndicesAdapter,
-            TreasuryYieldCurvesAdapter,
-            SynchronizationStores::new(
-                DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
-                DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
-                DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
-                DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
-                DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
-            ),
-            tracked_tickers_adapter,
-            OptionAnalysisCollaborators::new(
-                DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
-                DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
-                ExchangeTradingCalendarAdapter,
-            ),
-        ),
+        synchronization: configure_synchronization(path, tracked_tickers_adapter),
+        data_refresh,
     }
+}
+
+fn configure_synchronization(
+    path: &Path,
+    tracked_tickers_adapter: DuckDbTrackedTickersAdapter,
+) -> ConfiguredSynchronization {
+    SynchronizationApplication::new(
+        YahooMarketHistoryAdapter,
+        CboeOptionChainsAdapter,
+        CboeVolatilityIndicesAdapter,
+        TreasuryYieldCurvesAdapter,
+        SynchronizationStores::new(
+            DuckDbMarketHistoryAdapter::new(path),
+            DuckDbOptionChainsAdapter::new(path),
+            DuckDbVolatilityTermStructuresAdapter::new(path),
+            DuckDbIndexHistoryAdapter::new(path),
+            DuckDbYieldCurvesAdapter::new(path),
+        ),
+        tracked_tickers_adapter,
+        OptionAnalysisCollaborators::new(
+            DuckDbOptionChainsAdapter::new(path),
+            DuckDbYieldCurvesAdapter::new(path),
+            ExchangeTradingCalendarAdapter,
+        ),
+    )
 }
 
 /// Configures the live-price conversation, which has no storage dependency.
@@ -280,7 +353,7 @@ pub fn configure_market_stream() -> ConfiguredMarketStream {
 pub fn configure_option_chain_migration(pool: SqlitePool) -> ConfiguredOptionChainMigration {
     OptionChainMigrationApplication::new(
         SqliteOptionDataAdapter::new(pool),
-        DuckDbOptionChainsAdapter::new("data/market_data.duckdb"),
+        DuckDbOptionChainsAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
@@ -288,7 +361,7 @@ pub fn configure_option_chain_migration(pool: SqlitePool) -> ConfiguredOptionCha
 pub fn configure_market_history_migration(pool: SqlitePool) -> ConfiguredMarketHistoryMigration {
     MarketHistoryMigrationApplication::new(
         SqliteMarketHistoryAdapter::new(pool),
-        DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+        DuckDbMarketHistoryAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
@@ -296,7 +369,7 @@ pub fn configure_market_history_migration(pool: SqlitePool) -> ConfiguredMarketH
 pub fn configure_index_history_migration(pool: SqlitePool) -> ConfiguredIndexHistoryMigration {
     IndexHistoryMigrationApplication::new(
         SqliteIndexHistoryAdapter::new(pool),
-        DuckDbIndexHistoryAdapter::new("data/market_data.duckdb"),
+        DuckDbIndexHistoryAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
@@ -304,7 +377,7 @@ pub fn configure_index_history_migration(pool: SqlitePool) -> ConfiguredIndexHis
 pub fn configure_yield_curve_migration(pool: SqlitePool) -> ConfiguredYieldCurveMigration {
     YieldCurveMigrationApplication::new(
         SqliteYieldCurvesAdapter::new(pool),
-        DuckDbYieldCurvesAdapter::new("data/market_data.duckdb"),
+        DuckDbYieldCurvesAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
@@ -314,7 +387,9 @@ pub fn configure_volatility_term_structure_migration(
 ) -> ConfiguredVolatilityTermStructureMigration {
     VolatilityTermStructureMigrationApplication::new(
         SqliteOptionDataAdapter::new(pool),
-        DuckDbVolatilityTermStructuresAdapter::new("data/market_data.duckdb"),
+        DuckDbVolatilityTermStructuresAdapter::new(
+            CompositionConfig::from_environment().duckdb_path(),
+        ),
     )
 }
 
@@ -322,7 +397,7 @@ pub fn configure_volatility_term_structure_migration(
 pub fn configure_tracked_ticker_migration(pool: SqlitePool) -> ConfiguredTrackedTickerMigration {
     TrackedTickerMigrationApplication::new(
         SqliteTrackedTickersAdapter::new(pool),
-        DuckDbTrackedTickersAdapter::new("data/market_data.duckdb"),
+        DuckDbTrackedTickersAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
@@ -330,7 +405,7 @@ pub fn configure_tracked_ticker_migration(pool: SqlitePool) -> ConfiguredTracked
 pub fn configure_portfolio_migration(pool: SqlitePool) -> ConfiguredPortfolioMigration {
     PortfolioMigrationApplication::new(
         SqlitePortfolioAdapter::new(pool),
-        DuckDbPortfolioAdapter::new("data/market_data.duckdb"),
+        DuckDbPortfolioAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
@@ -338,14 +413,17 @@ pub fn configure_portfolio_migration(pool: SqlitePool) -> ConfiguredPortfolioMig
 pub fn configure_strategy_migration(pool: SqlitePool) -> ConfiguredStrategyMigration {
     StrategyMigrationApplication::new(
         SqliteSavedStrategiesAdapter::new(pool),
-        DuckDbSavedStrategiesAdapter::new("data/market_data.duckdb"),
+        DuckDbSavedStrategiesAdapter::new(CompositionConfig::from_environment().duckdb_path()),
     )
 }
 
 /// Connects the configured application to its production HTTP driving adapter.
 pub fn configure_http() -> Router {
-    let configured = configure();
-    crate::driving_adapters::http::router(
+    configure_http_application(configure())
+}
+
+pub fn configure_http_application(configured: ConfiguredApplication) -> Router {
+    crate::driving_adapters::http::router_with_data_refresh(
         crate::driving_adapters::http::MarketViewingPorts::new(
             Arc::new(configured.market_data),
             Arc::new(configured.sector_performance),
@@ -353,7 +431,10 @@ pub fn configure_http() -> Router {
         Arc::new(configured.options),
         Arc::new(configured.simulation),
         Arc::new(configured.portfolios),
-        Arc::new(configured.synchronization),
+        crate::driving_adapters::http::SynchronizationPorts::new(
+            Arc::new(configured.synchronization),
+            configured.data_refresh,
+        ),
         Arc::new(configured.saved_strategies),
         Arc::new(configured.tracked_tickers),
     )
