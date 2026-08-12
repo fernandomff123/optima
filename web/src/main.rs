@@ -1,6 +1,6 @@
 use api_models::{
     AssetLivePrice, DataState, Freshness, MarketSpxHistoryResponse, PriceHistoryOverview,
-    PriceHistoryPoint, ViewContext,
+    PriceHistoryPoint,
 };
 use futures_util::StreamExt;
 use gloo_net::{http::Request, websocket::futures::WebSocket};
@@ -12,17 +12,21 @@ const API_BASE_PATH: &str = "/api";
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Dashboard,
+    Sectors,
     Portfolio,
     Builder,
+    MarketAnalysis,
     Simulator,
     Settings,
 }
 
 impl Page {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 7] = [
         Self::Dashboard,
+        Self::Sectors,
         Self::Portfolio,
         Self::Builder,
+        Self::MarketAnalysis,
         Self::Simulator,
         Self::Settings,
     ];
@@ -30,8 +34,10 @@ impl Page {
     const fn label(self) -> &'static str {
         match self {
             Self::Dashboard => "Dashboard",
+            Self::Sectors => "Setores",
             Self::Portfolio => "Portfolio",
             Self::Builder => "Construtor",
+            Self::MarketAnalysis => "Análise de mercado",
             Self::Simulator => "Simulador",
             Self::Settings => "Configurações",
         }
@@ -40,20 +46,23 @@ impl Page {
     const fn icon(self) -> &'static str {
         match self {
             Self::Dashboard => "▦",
-            Self::Portfolio => "◫",
-            Self::Builder => "＋",
-            Self::Simulator => "⌁",
+            Self::Sectors => "◫",
+            Self::Portfolio => "▣",
+            Self::Builder => "⌘",
+            Self::MarketAnalysis => "⌁",
+            Self::Simulator => "◎",
             Self::Settings => "⚙",
         }
     }
 
-    const fn view_context(self) -> ViewContext {
+    const fn eyebrow(self) -> &'static str {
         match self {
-            Self::Dashboard => ViewContext::Market,
-            Self::Portfolio => ViewContext::Portfolio,
-            Self::Builder => ViewContext::Options,
-            Self::Simulator => ViewContext::Simulation,
-            Self::Settings => ViewContext::Market,
+            Self::Dashboard => "Visão geral",
+            Self::Sectors | Self::MarketAnalysis => "Mercado",
+            Self::Portfolio => "Património",
+            Self::Builder => "Estratégias",
+            Self::Simulator => "Cenários",
+            Self::Settings => "Preferências",
         }
     }
 }
@@ -65,26 +74,118 @@ fn main() {
 #[component]
 fn App() -> impl IntoView {
     let (active_page, set_active_page) = signal(Page::Dashboard);
+    let (menu_open, set_menu_open) = signal(false);
+    let menu_button = NodeRef::<leptos::html::Button>::new();
+    let first_nav_button = NodeRef::<leptos::html::Button>::new();
+
+    let close_menu = move || {
+        set_menu_open.set(false);
+        if let Some(button) = menu_button.get() {
+            let _ = button.focus();
+        }
+    };
+
+    Effect::new(move |_| {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let Some(document) = window.document() else {
+            return;
+        };
+        let Some(body) = document.body() else {
+            return;
+        };
+        if menu_open.get() {
+            let _ = body.set_attribute("data-mobile-menu-open", "");
+        } else {
+            let _ = body.remove_attribute("data-mobile-menu-open");
+        }
+    });
+
+    on_cleanup(|| {
+        if let Some(body) = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.body())
+        {
+            let _ = body.remove_attribute("data-mobile-menu-open");
+        }
+    });
 
     view! {
-        <div class="app-shell">
-            <aside class="sidebar">
-                <a class="brand" href="#" aria-label="Optima — início">
-                    <span class="brand-mark">"O"</span>
-                    <span>"Optima"</span>
-                </a>
+        <div
+            class="app-shell"
+            on:keydown=move |event| {
+                if menu_open.get() && event.key() == "Escape" {
+                    event.prevent_default();
+                    close_menu();
+                }
+            }
+        >
+            <header class="mobile-header">
+                <button
+                    node_ref=menu_button
+                    class="menu-button"
+                    type="button"
+                    aria-label=move || if menu_open.get() { "Fechar menu" } else { "Abrir menu" }
+                    aria-expanded=move || menu_open.get().to_string()
+                    aria-controls="primary-sidebar"
+                    on:click=move |_| {
+                        let should_open = !menu_open.get_untracked();
+                        set_menu_open.set(should_open);
+                        if should_open && let Some(button) = first_nav_button.get() {
+                            let _ = button.focus();
+                        }
+                    }
+                >
+                    <span aria-hidden="true">{move || if menu_open.get() { "×" } else { "☰" }}</span>
+                </button>
+                <span class="mobile-breadcrumb">
+                    <span>"Optima"</span><span aria-hidden="true">"/"</span><strong>{move || active_page.get().label()}</strong>
+                </span>
+                <MarketStatus />
+            </header>
+
+            <button
+                class="menu-backdrop"
+                type="button"
+                aria-label="Fechar menu"
+                tabindex=move || if menu_open.get() { "0" } else { "-1" }
+                on:click=move |_| close_menu()
+            ></button>
+
+            <aside id="primary-sidebar" class:menu-open=move || menu_open.get() class="sidebar">
+                <button
+                    class="brand"
+                    type="button"
+                    aria-label="Ir para o Dashboard"
+                    on:click=move |_| {
+                        set_active_page.set(Page::Dashboard);
+                        if menu_open.get_untracked() {
+                            close_menu();
+                        }
+                    }
+                >
+                    <span class="brand-mark" aria-hidden="true">"Ω"</span>
+                    <span class="brand-copy"><strong>"Optima"</strong><small>"Options workstation"</small></span>
+                </button>
 
                 <nav aria-label="Navegação principal">
                     {Page::ALL.map(|page| {
                         view! {
                             <button
+                                node_ref=if page == Page::Dashboard { first_nav_button } else { NodeRef::new() }
                                 type="button"
                                 aria-label=page.label()
                                 class:active=move || active_page.get() == page
                                 aria-current=move || {
                                     (active_page.get() == page).then_some("page")
                                 }
-                                on:click=move |_| set_active_page.set(page)
+                                on:click=move |_| {
+                                    set_active_page.set(page);
+                                    if menu_open.get_untracked() {
+                                        close_menu();
+                                    }
+                                }
                             >
                                 <span class="nav-icon" aria-hidden="true">{page.icon()}</span>
                                 <span>{page.label()}</span>
@@ -96,55 +197,87 @@ fn App() -> impl IntoView {
                 <div class="sidebar-status">
                     <span class="status-dot"></span>
                     <div>
-                        <strong>"Frontend local"</strong>
-                        <small>{format!("API via {API_BASE_PATH}")}</small>
+                        <strong>"Backend"</strong>
+                        <small>{format!("Ligação via {API_BASE_PATH}")}</small>
                     </div>
                 </div>
             </aside>
 
             <main>
-                <div class="topbar">
-                    <span class="eyebrow">"OPTIMA · MERCADO SPX"</span>
-                    <span class="live-pill">"SPX ligado à API"</span>
-                </div>
+                <header class="topbar">
+                    <div class="breadcrumb" aria-label="Breadcrumb">
+                        <span>"Optima"</span><span aria-hidden="true">"/"</span><strong>{move || active_page.get().label()}</strong>
+                    </div>
+                    <MarketStatus />
+                </header>
                 {move || match active_page.get() {
                     Page::Dashboard => view! { <DashboardPage /> }.into_any(),
+                    Page::Sectors => view! {
+                        <ShellPlaceholderPage
+                            eyebrow=Page::Sectors.eyebrow()
+                            title="Setores"
+                            subtitle="Mapa de calor e força relativa dos setores do S&P 500"
+                        />
+                    }.into_any(),
                     Page::Portfolio => view! { <PortfolioPage /> }.into_any(),
                     Page::Builder => view! { <BuilderPage /> }.into_any(),
+                    Page::MarketAnalysis => view! {
+                        <ShellPlaceholderPage
+                            eyebrow=Page::MarketAnalysis.eyebrow()
+                            title="Análise de mercado"
+                            subtitle="Visão agregada de índices, volatilidade e condições de mercado"
+                        />
+                    }.into_any(),
                     Page::Simulator => view! { <SimulatorPage /> }.into_any(),
                     Page::Settings => view! { <SettingsPage /> }.into_any(),
                 }}
-                <footer>
-                    {move || {
-                        let page = active_page.get();
-                        format!(
-                            "Contexto público: {:?} · {}",
-                            page.view_context(),
-                            if page == Page::Dashboard {
-                                "SPX via /api; restantes dados são placeholders"
-                            } else {
-                                "conteúdo placeholder, sem ligação à API"
-                            }
-                        )
-                    }}
-                </footer>
             </main>
         </div>
     }
 }
 
 #[component]
-fn PageHeader(title: &'static str, subtitle: &'static str) -> impl IntoView {
+fn MarketStatus() -> impl IntoView {
+    view! {
+        <span class="market-status" role="status">
+            <span class="market-status-dot" aria-hidden="true"></span>
+            <span class="market-status-label">"Estado do mercado indisponível"</span>
+        </span>
+    }
+}
+
+#[component]
+fn PageHeader(
+    title: &'static str,
+    subtitle: &'static str,
+    #[prop(default = "Visão geral")] eyebrow: &'static str,
+) -> impl IntoView {
     view! {
         <header class="page-header">
             <div>
+                <span class="page-eyebrow">{eyebrow}</span>
                 <h1>{title}</h1>
                 <p>{subtitle}</p>
             </div>
-            <button class="secondary-button" type="button" disabled>
-                "Atualizar dados"
-            </button>
         </header>
+    }
+}
+
+#[component]
+fn ShellPlaceholderPage(
+    eyebrow: &'static str,
+    title: &'static str,
+    subtitle: &'static str,
+) -> impl IntoView {
+    view! {
+        <section class="page placeholder-page">
+            <PageHeader eyebrow=eyebrow title=title subtitle=subtitle />
+            <div class="empty-page-state" role="status">
+                <span class="empty-page-icon" aria-hidden="true">"◇"</span>
+                <strong>"Página preparada no novo shell"</strong>
+                <p>"Conteúdo ainda não implementado. Não existem dados financeiros associados a esta vista."</p>
+            </div>
+        </section>
     }
 }
 
@@ -489,7 +622,7 @@ fn format_number(value: f64) -> String {
 fn PortfolioPage() -> impl IntoView {
     view! {
         <section class="page">
-            <PageHeader title="Portfolio" subtitle="Posições, exposição e movimentos" />
+            <PageHeader eyebrow="Património" title="Portfolio" subtitle="Posições, exposição e movimentos" />
             <PlaceholderNotice />
             <div class="metric-grid three">
                 <MetricCard label="Capital" value="€ 24 680" trend="Placeholder" positive=true />
@@ -517,7 +650,7 @@ fn PortfolioPage() -> impl IntoView {
 fn BuilderPage() -> impl IntoView {
     view! {
         <section class="page">
-            <PageHeader title="Construtor" subtitle="Composição visual de estratégias de opções" />
+            <PageHeader eyebrow="Estratégias" title="Construtor" subtitle="Composição visual de estratégias de opções" />
             <PlaceholderNotice />
             <div class="content-grid">
                 <article class="card">
@@ -541,7 +674,7 @@ fn BuilderPage() -> impl IntoView {
 fn SimulatorPage() -> impl IntoView {
     view! {
         <section class="page">
-            <PageHeader title="Simulador" subtitle="Cenários e sensibilidade de opções" />
+            <PageHeader eyebrow="Cenários" title="Simulador" subtitle="Cenários e sensibilidade de opções" />
             <PlaceholderNotice />
             <div class="content-grid form-layout">
                 <article class="card form-card">
@@ -570,7 +703,7 @@ fn SimulatorPage() -> impl IntoView {
 fn SettingsPage() -> impl IntoView {
     view! {
         <section class="page">
-            <PageHeader title="Configurações" subtitle="Preferências locais da interface" />
+            <PageHeader eyebrow="Preferências" title="Configurações" subtitle="Preferências locais da interface" />
             <PlaceholderNotice />
             <article class="card settings-list">
                 <SettingRow title="Modo escuro" detail="Tema inicial da fundação visual" />

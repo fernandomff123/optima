@@ -9,4 +9,4 @@ futures-util = "0.3"
 gloo-net = { version = "0.6", features = ["http", "websocket"] }
 leptos = { version = "0.8.20", features = ["csr"] }
 serde_json = "1.0"
-web-sys = { version = "0.3", features = ["Location", "Window"] }
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlElement", "KeyboardEvent", "Location", "Window"] }
