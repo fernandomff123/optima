@@ -40,19 +40,17 @@ impl ForStoringDataRefreshRuns for DuckDbDataRefreshRunsAdapter {
         let run = run.clone();
         run_blocking(move || store(&path, &run)).await
     }
-    async fn recover_interrupted_data_refresh_runs(
-        &self,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> PortResult<u64> {
-        let path = self.database_path.clone();
-        run_blocking(move || recover(&path, now)).await
-    }
 }
 #[async_trait::async_trait]
 impl ForLoadingDataRefreshRuns for DuckDbDataRefreshRunsAdapter {
     async fn load_recent_data_refresh_runs(&self, limit: usize) -> PortResult<Vec<DataRefreshRun>> {
         let path = self.database_path.clone();
         run_blocking(move || load_recent(&path, limit)).await
+    }
+    async fn load_running_data_refresh_runs(&self) -> PortResult<Vec<DataRefreshRun>> {
+        let path = self.database_path.clone();
+        run_blocking(move || load_with_query(&path,
+            "SELECT id, origin, state, started_at, finished_at, target_session, items_obtained, items_persisted, failure_count, next_attempt_at, summary FROM data_refresh_runs WHERE state = 'running' ORDER BY started_at DESC, id DESC", None)).await
     }
 }
 
@@ -103,49 +101,46 @@ fn store(
     Ok(())
 }
 
-fn recover(
-    path: &PathBuf,
-    now: chrono::DateTime<chrono::Utc>,
-) -> Result<u64, Box<dyn std::error::Error + Send + Sync>> {
-    let mut runs = load_recent(path, i64::MAX as usize)?;
-    let mut recovered = 0;
-    for run in &mut runs {
-        if run.state == DataRefreshState::Running {
-            run.interrupt(now).map_err(|e| e.to_string())?;
-            run.next_attempt_at = Some(now);
-            store(path, run)?;
-            recovered += 1;
-        }
-    }
-    Ok(recovered)
-}
-
 fn load_recent(
     path: &PathBuf,
     limit: usize,
 ) -> Result<Vec<DataRefreshRun>, Box<dyn std::error::Error + Send + Sync>> {
+    load_with_query(path, "SELECT id, origin, state, started_at, finished_at, target_session,
+        items_obtained, items_persisted, failure_count, next_attempt_at, summary FROM data_refresh_runs
+        ORDER BY started_at DESC, id DESC LIMIT ?", Some(limit))
+}
+
+fn load_with_query(
+    path: &PathBuf,
+    query: &str,
+    limit: Option<usize>,
+) -> Result<Vec<DataRefreshRun>, Box<dyn std::error::Error + Send + Sync>> {
     let connection = Connection::open(path)?;
     initialize_schema(&connection)?;
-    let mut statement=connection.prepare("SELECT id, origin, state, started_at, finished_at, target_session,
-        items_obtained, items_persisted, failure_count, next_attempt_at, summary FROM data_refresh_runs
-        ORDER BY started_at DESC, id DESC LIMIT ?")?;
-    let rows = statement
-        .query_map([limit as u64], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-                row.get(9)?,
-                row.get(10)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut statement = connection.prepare(query)?;
+    let mapper = |row: &duckdb::Row<'_>| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get(5)?,
+            row.get(6)?,
+            row.get(7)?,
+            row.get(8)?,
+            row.get(9)?,
+            row.get(10)?,
+        ))
+    };
+    let rows = match limit {
+        Some(limit) => statement
+            .query_map([limit as u64], mapper)?
+            .collect::<Result<Vec<_>, _>>()?,
+        None => statement
+            .query_map([], mapper)?
+            .collect::<Result<Vec<_>, _>>()?,
+    };
     let mut result = Vec::with_capacity(rows.len());
     for (
         id,

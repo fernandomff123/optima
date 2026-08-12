@@ -1,7 +1,4 @@
-use crate::hexagon::{
-    PortResult,
-    domain::data_refresh::{DataRefreshOrigin, DataRefreshRun},
-};
+use crate::hexagon::{PortResult, domain::data_refresh::DataRefreshRun};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 
@@ -19,19 +16,22 @@ pub struct DataRefreshStatus {
     pub recent: Vec<DataRefreshRun>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataRefreshTrigger {
+    Startup,
+    Scheduler,
+    Manual,
+}
+
 #[async_trait]
 pub trait ForRefreshingMarketData: Send + Sync {
     async fn recover_interrupted_data_refreshes(&self, now: DateTime<Utc>) -> PortResult<u64>;
 
-    fn eligible_data_refresh_session(
+    async fn request_data_refresh(
         &self,
-        now: DateTime<Utc>,
-    ) -> PortResult<Option<chrono::NaiveDate>>;
-
-    async fn refresh_market_data(
-        &self,
-        origin: DataRefreshOrigin,
+        trigger: DataRefreshTrigger,
         now: DateTime<Utc>,
     ) -> PortResult<StartDataRefreshResult>;
+    async fn next_data_refresh_attempt(&self, now: DateTime<Utc>) -> PortResult<DateTime<Utc>>;
     async fn data_refresh_status(&self, recent_limit: usize) -> PortResult<DataRefreshStatus>;
 }

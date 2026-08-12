@@ -13,6 +13,22 @@ use crate::hexagon::{
     },
 };
 
+use crate::hexagon::driving_ports::for_refreshing_market_data::ForRefreshingMarketData;
+use std::time::Duration;
+
+/// Asks the use case when the scheduler should wake; contains no retry policy.
+pub async fn next_data_refresh_delay(
+    application: &dyn ForRefreshingMarketData,
+    now: DateTime<Utc>,
+) -> PortResult<Duration> {
+    application
+        .next_data_refresh_attempt(now)
+        .await?
+        .signed_duration_since(now)
+        .to_std()
+        .map_err(|error| crate::hexagon::PortError::Unavailable(error.to_string()))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EndOfDayRequest {
     pub market_close: DateTime<Utc>,

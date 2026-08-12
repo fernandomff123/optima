@@ -15,6 +15,7 @@ use crate::hexagon::driving_ports::for_refreshing_market_data::ForRefreshingMark
 use crate::{
     driven_adapters::{
         cboe::{CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter},
+        data_refresh_tasks::TokioDataRefreshTaskRunner,
         duckdb::{
             data_refresh_runs::DuckDbDataRefreshRunsAdapter,
             index_history::DuckDbIndexHistoryAdapter, market_history::DuckDbMarketHistoryAdapter,
@@ -261,6 +262,7 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
         Arc::new(DuckDbMarketHistoryAdapter::new(path)),
         Arc::new(tracked_tickers_adapter.clone()),
         Arc::new(ExchangeTradingCalendarAdapter),
+        Arc::new(TokioDataRefreshTaskRunner),
     ));
     ConfiguredApplication {
         market_data: MarketDataApplication::new(

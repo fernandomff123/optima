@@ -13,7 +13,7 @@ use hexagonal_backend::{
 };
 
 #[tokio::test]
-async fn duckdb_initialization_storage_failures_order_limit_and_recovery_are_idempotent() {
+async fn duckdb_initialization_storage_failures_order_limit_and_running_load_are_idempotent() {
     let path = std::env::temp_dir().join(format!("refresh-runs-{}.duckdb", std::process::id()));
     let adapter = DuckDbDataRefreshRunsAdapter::new(&path);
     adapter.initialize().await.expect("initialize");
@@ -51,27 +51,29 @@ async fn duckdb_initialization_storage_failures_order_limit_and_recovery_are_ide
         .store_data_refresh_run(&running)
         .await
         .expect("store running");
-    assert_eq!(
-        adapter
-            .recover_interrupted_data_refresh_runs(now + Duration::seconds(1))
-            .await
-            .expect("recover"),
-        1
-    );
-    assert_eq!(
-        adapter
-            .recover_interrupted_data_refresh_runs(now + Duration::seconds(2))
-            .await
-            .expect("idempotent recover"),
-        0
-    );
+    let running_runs = adapter
+        .load_running_data_refresh_runs()
+        .await
+        .expect("load running");
+    assert_eq!(running_runs, vec![running.clone()]);
     let recent = adapter
         .load_recent_data_refresh_runs(1)
         .await
         .expect("load");
     assert_eq!(recent.len(), 1);
     assert_eq!(recent[0].id, "running");
-    assert_eq!(recent[0].state, DataRefreshState::Failed);
-    assert_eq!(recent[0].failures.len(), 1);
+    assert_eq!(recent[0].state, DataRefreshState::Running);
     std::fs::remove_file(path).expect("remove temporary database");
+}
+
+#[test]
+fn duckdb_adapter_only_loads_and_stores_refresh_runs() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/driven_adapters/duckdb/data_refresh_runs.rs"),
+    )
+    .expect("adapter source");
+    assert!(!source.contains(".interrupt("));
+    assert!(!source.contains("recover_interrupted"));
+    assert!(!source.contains("next_attempt_at ="));
 }

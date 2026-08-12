@@ -2,8 +2,11 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Duration, Utc};
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use tokio::sync::Notify;
 
 use crate::hexagon::{
     PortError, PortResult,
@@ -15,11 +18,12 @@ use crate::hexagon::{
         for_loading_data_refresh_runs::ForLoadingDataRefreshRuns,
         for_loading_market_history::ForLoadingMarketHistory,
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
+        for_running_data_refresh_tasks::ForRunningDataRefreshTasks,
         for_storing_data_refresh_runs::ForStoringDataRefreshRuns,
     },
     driving_ports::{
         for_refreshing_market_data::{
-            DataRefreshStatus, ForRefreshingMarketData, StartDataRefreshResult,
+            DataRefreshStatus, DataRefreshTrigger, ForRefreshingMarketData, StartDataRefreshResult,
         },
         for_synchronizing_market_data::ForSynchronizingMarketData,
     },
@@ -68,12 +72,18 @@ impl MarketHistoryBackfillPolicy {
 }
 
 pub struct DataRefreshApplication {
+    core: Arc<DataRefreshCore>,
+    tasks: Arc<dyn ForRunningDataRefreshTasks>,
+}
+
+struct DataRefreshCore {
     synchronization: Arc<dyn ForSynchronizingMarketData>,
     runs: Arc<dyn DataRefreshRunRepository>,
     histories: Arc<dyn ForLoadingMarketHistory>,
     tickers: Arc<dyn ForLoadingTrackedTickers>,
     calendar: Arc<dyn ForConsultingTradingCalendar>,
-    execution: Mutex<()>,
+    active: AtomicBool,
+    changed: Notify,
     backfill: MarketHistoryBackfillPolicy,
 }
 
@@ -87,32 +97,43 @@ impl DataRefreshApplication {
         histories: Arc<dyn ForLoadingMarketHistory>,
         tickers: Arc<dyn ForLoadingTrackedTickers>,
         calendar: Arc<dyn ForConsultingTradingCalendar>,
+        tasks: Arc<dyn ForRunningDataRefreshTasks>,
     ) -> Self {
         Self {
-            synchronization,
-            runs,
-            histories,
-            tickers,
-            calendar,
-            execution: Mutex::new(()),
-            backfill: MarketHistoryBackfillPolicy,
+            core: Arc::new(DataRefreshCore {
+                synchronization,
+                runs,
+                histories,
+                tickers,
+                calendar,
+                active: AtomicBool::new(false),
+                changed: Notify::new(),
+                backfill: MarketHistoryBackfillPolicy,
+            }),
+            tasks,
         }
     }
 
     pub async fn recover_interrupted(&self, now: DateTime<Utc>) -> PortResult<u64> {
-        self.runs.recover_interrupted_data_refresh_runs(now).await
+        let mut running = self.core.runs.load_running_data_refresh_runs().await?;
+        for run in &mut running {
+            run.interrupt(now)?;
+            run.next_attempt_at = Some(now);
+            self.core.runs.store_data_refresh_run(run).await?;
+        }
+        self.core.active.store(false, Ordering::Release);
+        self.core.changed.notify_one();
+        Ok(running.len() as u64)
     }
+}
 
+impl DataRefreshCore {
     async fn execute(
         &self,
-        origin: DataRefreshOrigin,
-        now: DateTime<Utc>,
+        mut run: DataRefreshRun,
         target_close: DateTime<Utc>,
     ) -> PortResult<DataRefreshRun> {
         let target = target_close.date_naive();
-        let id = format!("{}-{}", now.timestamp_micros(), origin_name(origin));
-        let mut run = DataRefreshRun::running(id, origin, now, target);
-        self.runs.store_data_refresh_run(&run).await?;
         let mut obtained = 0_u64;
         let mut persisted = 0_u64;
         let mut failures = Vec::new();
@@ -207,8 +228,10 @@ impl DataRefreshApplication {
             Some(finished_at + Duration::minutes(RETRY_MINUTES))
         };
         run.finish(finished_at, obtained, persisted, failures, next_attempt)?;
-        self.runs.store_data_refresh_run(&run).await?;
-        Ok(run)
+        let result = self.runs.store_data_refresh_run(&run).await.map(|()| run);
+        self.active.store(false, Ordering::Release);
+        self.changed.notify_one();
+        result
     }
 }
 
@@ -218,45 +241,95 @@ impl ForRefreshingMarketData for DataRefreshApplication {
         self.recover_interrupted(now).await
     }
 
-    fn eligible_data_refresh_session(
+    async fn request_data_refresh(
         &self,
-        now: DateTime<Utc>,
-    ) -> PortResult<Option<chrono::NaiveDate>> {
-        self.calendar
-            .eligible_session_close(now, PUBLICATION_DELAY_MINUTES)
-            .map(|close| close.map(|value| value.date_naive()))
-    }
-
-    async fn refresh_market_data(
-        &self,
-        origin: DataRefreshOrigin,
+        trigger: DataRefreshTrigger,
         now: DateTime<Utc>,
     ) -> PortResult<StartDataRefreshResult> {
-        let guard = match self.execution.try_lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                let running = self
-                    .runs
-                    .load_recent_data_refresh_runs(1)
-                    .await?
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| {
-                        PortError::Conflict("a data refresh is already running".to_string())
-                    })?;
-                return Ok(StartDataRefreshResult::AlreadyRunning(running));
-            }
-        };
-        let Some(target_close) = self
+        if self
+            .core
+            .active
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            let running = self
+                .core
+                .runs
+                .load_running_data_refresh_runs()
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    PortError::Conflict("a data refresh is already running".to_string())
+                })?;
+            return Ok(StartDataRefreshResult::AlreadyRunning(running));
+        }
+        let eligible = self
+            .core
             .calendar
-            .eligible_session_close(now, PUBLICATION_DELAY_MINUTES)?
-        else {
-            drop(guard);
+            .eligible_session_close(now, PUBLICATION_DELAY_MINUTES);
+        let Some(target_close) = (match eligible {
+            Ok(close) => close,
+            Err(error) => {
+                self.core.active.store(false, Ordering::Release);
+                return Err(error);
+            }
+        }) else {
+            self.core.active.store(false, Ordering::Release);
             return Ok(StartDataRefreshResult::NoEligibleSession);
         };
-        let run = self.execute(origin, now, target_close).await?;
-        drop(guard);
+        let origin = match self.origin_for(trigger, now).await {
+            Ok(origin) => origin,
+            Err(error) => {
+                self.core.active.store(false, Ordering::Release);
+                return Err(error);
+            }
+        };
+        let run = DataRefreshRun::running(
+            format!("{}-{}", now.timestamp_micros(), origin_name(origin)),
+            origin,
+            now,
+            target_close.date_naive(),
+        );
+        if let Err(error) = self.core.runs.store_data_refresh_run(&run).await {
+            self.core.active.store(false, Ordering::Release);
+            return Err(error);
+        }
+        let core = self.core.clone();
+        let task_run = run.clone();
+        self.tasks.run_data_refresh_task(Box::pin(async move {
+            if let Err(error) = core.execute(task_run.clone(), target_close).await {
+                let mut failed = task_run;
+                if failed.interrupt(Utc::now()).is_ok() {
+                    failed.summary = format!("Atualização falhou: {error}");
+                    failed.next_attempt_at = Some(Utc::now() + Duration::minutes(RETRY_MINUTES));
+                    let _ = core.runs.store_data_refresh_run(&failed).await;
+                }
+                core.active.store(false, Ordering::Release);
+                core.changed.notify_one();
+            }
+        }));
         Ok(StartDataRefreshResult::Started(run))
+    }
+
+    async fn next_data_refresh_attempt(&self, now: DateTime<Utc>) -> PortResult<DateTime<Utc>> {
+        while self.core.active.load(Ordering::Acquire) {
+            self.core.changed.notified().await;
+        }
+        if let Some(run) = self
+            .core
+            .runs
+            .load_recent_data_refresh_runs(1)
+            .await?
+            .into_iter()
+            .next()
+            && let Some(next) = run.next_attempt_at
+        {
+            return Ok(next.max(now));
+        }
+        self.core
+            .calendar
+            .next_end_of_day_attempt(now, PUBLICATION_DELAY_MINUTES)
     }
 
     async fn data_refresh_status(&self, recent_limit: usize) -> PortResult<DataRefreshStatus> {
@@ -266,6 +339,7 @@ impl ForRefreshingMarketData for DataRefreshApplication {
             ));
         }
         let recent = self
+            .core
             .runs
             .load_recent_data_refresh_runs(recent_limit)
             .await?;
@@ -277,6 +351,40 @@ impl ForRefreshingMarketData for DataRefreshApplication {
             latest,
             recent,
         })
+    }
+}
+
+impl DataRefreshApplication {
+    async fn origin_for(
+        &self,
+        trigger: DataRefreshTrigger,
+        now: DateTime<Utc>,
+    ) -> PortResult<DataRefreshOrigin> {
+        match trigger {
+            DataRefreshTrigger::Startup => Ok(DataRefreshOrigin::Startup),
+            DataRefreshTrigger::Manual => Ok(DataRefreshOrigin::Manual),
+            DataRefreshTrigger::Scheduler => {
+                let latest = self
+                    .core
+                    .runs
+                    .load_recent_data_refresh_runs(1)
+                    .await?
+                    .into_iter()
+                    .next();
+                Ok(
+                    if latest.is_some_and(|run| {
+                        matches!(
+                            run.state,
+                            DataRefreshState::Partial | DataRefreshState::Failed
+                        ) && run.next_attempt_at.is_some_and(|next| next <= now)
+                    }) {
+                        DataRefreshOrigin::Retry
+                    } else {
+                        DataRefreshOrigin::Scheduled
+                    },
+                )
+            }
+        }
     }
 }
 

@@ -47,7 +47,6 @@ struct HttpState {
     tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
     sector_performance: Arc<dyn ForViewingSectorPerformance>,
     data_refresh: Option<Arc<dyn ForRefreshingMarketData>>,
-    manual_refresh_start: Arc<tokio::sync::Mutex<()>>,
 }
 
 pub struct MarketViewingPorts {
@@ -193,7 +192,6 @@ pub fn router_with_data_refresh(
             tracked_tickers,
             sector_performance: market_viewing.sector_performance,
             data_refresh: synchronization.data_refresh,
-            manual_refresh_start: Arc::new(tokio::sync::Mutex::new(())),
         })
 }
 
@@ -210,72 +208,39 @@ async fn data_refresh_status(
 async fn request_data_refresh(
     State(state): State<HttpState>,
 ) -> Result<(StatusCode, Json<api_models::DataRefreshRequestResponse>), HttpError> {
-    let _start_guard = state.manual_refresh_start.lock().await;
-    let refresh = refresh_port(&state)?;
-    if refresh
-        .eligible_data_refresh_session(chrono::Utc::now())
+    use crate::hexagon::driving_ports::for_refreshing_market_data::{
+        DataRefreshTrigger, StartDataRefreshResult,
+    };
+    match refresh_port(&state)?
+        .request_data_refresh(DataRefreshTrigger::Manual, chrono::Utc::now())
+        .await
         .map_err(HttpError)?
-        .is_none()
     {
-        return Ok((
+        StartDataRefreshResult::Started(run) => Ok((
+            StatusCode::ACCEPTED,
+            Json(api_models::DataRefreshRequestResponse {
+                result: api_models::DataRefreshRequestState::Started,
+                run: Some(map_refresh_run(run)),
+                message: "Atualização manual iniciada".to_string(),
+            }),
+        )),
+        StartDataRefreshResult::AlreadyRunning(run) => Ok((
+            StatusCode::CONFLICT,
+            Json(api_models::DataRefreshRequestResponse {
+                result: api_models::DataRefreshRequestState::AlreadyRunning,
+                run: Some(map_refresh_run(run)),
+                message: "Já existe uma atualização em curso".to_string(),
+            }),
+        )),
+        StartDataRefreshResult::NoEligibleSession => Ok((
             StatusCode::CONFLICT,
             Json(api_models::DataRefreshRequestResponse {
                 result: api_models::DataRefreshRequestState::NoEligibleSession,
                 run: None,
                 message: "Não existe uma sessão de mercado concluída elegível".to_string(),
             }),
-        ));
+        )),
     }
-    let status = state
-        .data_refresh
-        .as_ref()
-        .ok_or_else(|| {
-            HttpError(PortError::Unavailable(
-                "data refresh is not configured".to_string(),
-            ))
-        })?
-        .data_refresh_status(1)
-        .await
-        .map_err(HttpError)?;
-    if status.running {
-        return Ok((
-            StatusCode::CONFLICT,
-            Json(api_models::DataRefreshRequestResponse {
-                result: api_models::DataRefreshRequestState::AlreadyRunning,
-                run: status.latest.map(map_refresh_run),
-                message: "Já existe uma atualização em curso".to_string(),
-            }),
-        ));
-    }
-    let application = refresh.clone();
-    tokio::spawn(async move {
-        if let Err(error) = application
-            .refresh_market_data(
-                crate::hexagon::domain::data_refresh::DataRefreshOrigin::Manual,
-                chrono::Utc::now(),
-            )
-            .await
-        {
-            eprintln!("Falha ao iniciar atualização manual: {error}");
-        }
-    });
-    // Keep the boundary-level start decision serialized until the application
-    // has persisted the run. The long-running refresh remains detached.
-    for _ in 0..100 {
-        let status = refresh.data_refresh_status(1).await.map_err(HttpError)?;
-        if status.running {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(api_models::DataRefreshRequestResponse {
-            result: api_models::DataRefreshRequestState::Started,
-            run: None,
-            message: "Atualização manual iniciada".to_string(),
-        }),
-    ))
 }
 
 fn refresh_port(state: &HttpState) -> Result<&Arc<dyn ForRefreshingMarketData>, HttpError> {
