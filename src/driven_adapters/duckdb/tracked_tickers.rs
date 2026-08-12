@@ -79,10 +79,13 @@ fn initialize_schema(connection: &Connection) -> Result<(), duckdb::Error> {
 }
 
 fn seed_defaults(connection: &Connection) -> Result<(), duckdb::Error> {
-    for ticker in ["AAPL", "IBM", "GOOGL", "MSFT", "JPM", "SPY", "SPX"] {
+    for ticker in [
+        "AAPL", "IBM", "GOOGL", "MSFT", "JPM", "SPY", "SPX", "XLK", "XLF", "XLE", "XLI", "XLV",
+        "XLY", "XLC", "XLP", "XLB", "XLU", "XLRE",
+    ] {
         connection.execute(
-            "INSERT INTO tracked_tickers VALUES (?, true, true, true) ON CONFLICT DO NOTHING",
-            [ticker],
+            "INSERT INTO tracked_tickers VALUES (?, true, true, ?) ON CONFLICT DO NOTHING",
+            params![ticker, !ticker.starts_with("XL")],
         )?;
     }
     Ok(())

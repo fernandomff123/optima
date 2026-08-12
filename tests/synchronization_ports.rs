@@ -39,6 +39,48 @@ struct OptionDataMock;
 struct TradingCalendarMock;
 struct OptionTrackedTickersMock;
 struct OptionsSuccessMock;
+struct PartiallyFailingHistoryMock;
+struct TwoHistoryTickersMock;
+
+#[async_trait]
+impl ForLoadingTrackedTickers for TwoHistoryTickersMock {
+    async fn load_active_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        Ok(["XLE", "XLK"]
+            .into_iter()
+            .map(
+                |ticker| hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
+                    ticker: ticker.to_string(),
+                    active: true,
+                    historical_prices: true,
+                    option_snapshots: false,
+                },
+            )
+            .collect())
+    }
+}
+
+#[async_trait]
+impl ForObtainingMarketHistory for PartiallyFailingHistoryMock {
+    async fn obtain_market_history(
+        &self,
+        ticker: &str,
+        _since: NaiveDate,
+    ) -> PortResult<MarketHistory> {
+        if ticker == "XLE" {
+            return Err(PortError::Unavailable("provider failure".to_string()));
+        }
+        Ok(MarketHistory {
+            ticker: ticker.to_string(),
+            currency: Some("USD".to_string()),
+            exchange_timezone: None,
+            daily_quotes: Vec::new(),
+            dividends: Vec::new(),
+            splits: Vec::new(),
+        })
+    }
+}
 
 #[async_trait]
 impl ForLoadingTrackedTickers for OptionTrackedTickersMock {
@@ -358,4 +400,39 @@ async fn batch_reports_term_structure_separately_after_storing_option_chain() {
     assert_eq!(report.items_stored, 1);
     assert_eq!(report.failures.len(), 1);
     assert_eq!(report.failures[0].operation, "term_structure");
+}
+
+#[tokio::test]
+async fn batch_isolates_one_ticker_history_failure_and_continues() {
+    let application = SynchronizationApplication::new(
+        PartiallyFailingHistoryMock,
+        OptionsMock,
+        IndicesMock,
+        CurvesMock,
+        SynchronizationStores::new(
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+            StoreMock::default(),
+        ),
+        TwoHistoryTickersMock,
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+    );
+
+    let report = application
+        .synchronize_tracked_tickers(
+            hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers {
+                since: NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid date"),
+                market_close: Utc::now(),
+            },
+        )
+        .await
+        .expect("batch must aggregate ticker failures");
+
+    assert_eq!(report.tickers, 2);
+    assert_eq!(report.items_stored, 1);
+    assert_eq!(report.failures.len(), 1);
+    assert_eq!(report.failures[0].ticker, "XLE");
+    assert_eq!(report.failures[0].operation, "market_history");
 }

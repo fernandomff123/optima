@@ -40,6 +40,7 @@ use hexagonal_backend::{
                 TrackedTickersSynchronizationReport,
             },
             for_viewing_market_data::ForViewingMarketData,
+            for_viewing_sector_performance::ForViewingSectorPerformance,
         },
     },
 };
@@ -95,6 +96,28 @@ struct SimulationMock;
 struct SynchronizationMock;
 struct SavedStrategiesMock;
 struct TrackedTickersMock;
+struct SectorPerformanceMock;
+
+fn market_ports(market_data: Arc<MarketDataMock>) -> http::MarketViewingPorts {
+    http::MarketViewingPorts::new(market_data, Arc::new(SectorPerformanceMock))
+}
+
+#[async_trait]
+impl ForViewingSectorPerformance for SectorPerformanceMock {
+    async fn sector_performance(
+        &self,
+        period: hexagonal_backend::hexagon::domain::sector_performance::SectorPerformancePeriod,
+        requested_at: DateTime<Utc>,
+    ) -> PortResult<hexagonal_backend::hexagon::domain::sector_performance::SectorPerformanceView>
+    {
+        Ok(hexagonal_backend::hexagon::domain::sector_performance::SectorPerformanceView {
+            as_of: requested_at.date_naive(),
+            period,
+            benchmark: hexagonal_backend::hexagon::domain::sector_performance::PerformanceState::Unavailable,
+            sectors: Vec::new(),
+        })
+    }
+}
 
 #[async_trait]
 impl ForManagingTrackedTickers for TrackedTickersMock {
@@ -296,7 +319,7 @@ impl ForAnalyzingOptions for OptionsMock {
 async fn http_adapter_drives_a_mock_application() {
     let market = Arc::new(MarketDataMock::default());
     let app = http::router(
-        market.clone(),
+        market_ports(market.clone()),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         Arc::new(PortfoliosMock::default()),
@@ -325,7 +348,7 @@ async fn http_adapter_drives_a_mock_application() {
 #[tokio::test]
 async fn http_adapter_translates_application_errors() {
     let app = http::router(
-        Arc::new(MarketDataMock::default()),
+        market_ports(Arc::new(MarketDataMock::default())),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         Arc::new(PortfoliosMock::default()),
@@ -350,7 +373,7 @@ async fn http_adapter_translates_application_errors() {
 #[tokio::test]
 async fn http_adapter_drives_the_simulation_port_and_maps_validation_errors() {
     let app = http::router(
-        Arc::new(MarketDataMock::default()),
+        market_ports(Arc::new(MarketDataMock::default())),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         Arc::new(PortfoliosMock::default()),
@@ -386,7 +409,7 @@ async fn http_adapter_drives_the_simulation_port_and_maps_validation_errors() {
 async fn http_adapter_drives_the_complete_portfolio_port() {
     let portfolios = Arc::new(PortfoliosMock::default());
     let app = http::router(
-        Arc::new(MarketDataMock::default()),
+        market_ports(Arc::new(MarketDataMock::default())),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         portfolios.clone(),
@@ -425,7 +448,7 @@ async fn http_adapter_drives_the_complete_portfolio_port() {
 #[tokio::test]
 async fn http_adapter_drives_the_synchronization_port() {
     let app = http::router(
-        Arc::new(MarketDataMock::default()),
+        market_ports(Arc::new(MarketDataMock::default())),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         Arc::new(PortfoliosMock::default()),
@@ -464,7 +487,7 @@ async fn http_adapter_drives_the_synchronization_port() {
 #[tokio::test]
 async fn http_adapter_drives_saved_strategy_management() {
     let app = http::router(
-        Arc::new(MarketDataMock::default()),
+        market_ports(Arc::new(MarketDataMock::default())),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         Arc::new(PortfoliosMock::default()),
@@ -501,7 +524,7 @@ async fn http_adapter_drives_saved_strategy_management() {
 #[tokio::test]
 async fn http_adapter_drives_tracked_ticker_management() {
     let app = http::router(
-        Arc::new(MarketDataMock::default()),
+        market_ports(Arc::new(MarketDataMock::default())),
         Arc::new(OptionsMock),
         Arc::new(SimulationMock),
         Arc::new(PortfoliosMock::default()),
@@ -528,4 +551,49 @@ async fn http_adapter_drives_tracked_ticker_management() {
         .expect("router must respond");
 
     assert_eq!(response.status(), 204);
+}
+
+#[tokio::test]
+async fn sector_endpoint_accepts_supported_periods_and_returns_json() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    for period in ["1w", "2w", "1m"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/market/sectors?period={period}"))
+                    .body(Body::empty())
+                    .expect("valid test request"),
+            )
+            .await
+            .expect("router must respond");
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.headers()["content-type"], "application/json");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["period"], period);
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/market/sectors?period=30d")
+                .body(Body::empty())
+                .expect("valid test request"),
+        )
+        .await
+        .expect("router must respond");
+    assert_eq!(response.status(), 400);
+    assert_eq!(response.headers()["content-type"], "application/json");
 }

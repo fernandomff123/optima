@@ -20,7 +20,7 @@ static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn history() -> MarketHistory {
     MarketHistory {
-        ticker: "SPY".to_string(),
+        ticker: "XLK".to_string(),
         currency: Some("USD".to_string()),
         exchange_timezone: Some("America/New_York".to_string()),
         daily_quotes: vec![DailyQuote {
@@ -64,10 +64,10 @@ async fn assert_contract(adapter: &(impl ForLoadingMarketHistory + ForStoringMar
         3
     );
     let loaded = adapter
-        .load_market_history(" spy ")
+        .load_market_history(" xlk ")
         .await
         .expect("history must load");
-    assert_eq!(loaded.ticker, "SPY");
+    assert_eq!(loaded.ticker, "XLK");
     assert_eq!(loaded.daily_quotes, expected.daily_quotes);
     assert_eq!(loaded.dividends, expected.dividends);
     assert_eq!(loaded.splits, expected.splits);

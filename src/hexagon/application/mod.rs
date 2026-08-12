@@ -14,6 +14,7 @@ pub mod portfolio;
 pub mod portfolio_migration;
 pub mod portfolio_valuation;
 pub mod saved_strategies;
+pub mod sector_performance;
 pub mod simulation;
 pub mod strategy_migration;
 pub mod synchronization;

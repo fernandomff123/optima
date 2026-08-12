@@ -9,6 +9,7 @@ pub mod options;
 pub mod portfolio;
 pub mod portfolio_valuation;
 pub mod saved_strategy;
+pub mod sector_performance;
 pub mod simulation;
 pub mod tracked_ticker;
 pub mod treasury;

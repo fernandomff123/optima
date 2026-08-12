@@ -223,6 +223,45 @@ pub struct MarketRatesResponse {
     pub rates: DataState<RatesOverview>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SectorPerformancePeriod {
+    #[serde(rename = "1w")]
+    OneWeek,
+    #[serde(rename = "2w")]
+    TwoWeeks,
+    #[serde(rename = "1m")]
+    OneMonth,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarketSectorPerformanceResponse {
+    pub as_of: NaiveDate,
+    pub period: SectorPerformancePeriod,
+    pub benchmark: DataState<SectorBenchmarkOverview>,
+    pub sectors: Vec<SectorPerformanceOverview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectorBenchmarkOverview {
+    pub metadata: ViewMetadata,
+    pub ticker: String,
+    pub return_percent: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectorPerformanceOverview {
+    pub name: String,
+    pub etf: String,
+    pub performance: DataState<SectorReturnOverview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectorReturnOverview {
+    pub metadata: ViewMetadata,
+    pub return_percent: f64,
+    pub relative_strength_percentage_points: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BenchmarkOverview {
     pub metadata: ViewMetadata,
@@ -616,5 +655,21 @@ mod tests {
 
         assert_eq!(json, r#"{"state":"stale","data":17.25}"#);
         assert_eq!(decoded, state);
+    }
+
+    #[test]
+    fn sector_periods_have_stable_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&SectorPerformancePeriod::OneWeek).unwrap(),
+            "\"1w\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SectorPerformancePeriod::TwoWeeks).unwrap(),
+            "\"2w\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SectorPerformancePeriod::OneMonth).unwrap(),
+            "\"1m\""
+        );
     }
 }
