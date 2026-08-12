@@ -2284,7 +2284,11 @@ name = "optima_web"
 version = "0.1.0"
 dependencies = [
  "api_models",
+ "futures-util",
+ "gloo-net",
  "leptos",
+ "serde_json",
+ "web-sys",
 ]
 
 [[package]]

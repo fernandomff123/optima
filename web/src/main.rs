@@ -1,5 +1,11 @@
-use api_models::ViewContext;
+use api_models::{
+    AssetLivePrice, DataState, Freshness, MarketSpxHistoryResponse, PriceHistoryOverview,
+    PriceHistoryPoint, ViewContext,
+};
+use futures_util::StreamExt;
+use gloo_net::{http::Request, websocket::futures::WebSocket};
 use leptos::prelude::*;
+use std::fmt;
 
 const API_BASE_PATH: &str = "/api";
 
@@ -98,8 +104,8 @@ fn App() -> impl IntoView {
 
             <main>
                 <div class="topbar">
-                    <span class="eyebrow">"OPTIMA · FUNDAÇÃO LEPTOS"</span>
-                    <span class="placeholder-pill">"Dados de demonstração"</span>
+                    <span class="eyebrow">"OPTIMA · MERCADO SPX"</span>
+                    <span class="live-pill">"SPX ligado à API"</span>
                 </div>
                 {move || match active_page.get() {
                     Page::Dashboard => view! { <DashboardPage /> }.into_any(),
@@ -109,10 +115,18 @@ fn App() -> impl IntoView {
                     Page::Settings => view! { <SettingsPage /> }.into_any(),
                 }}
                 <footer>
-                    {move || format!(
-                        "Contexto público: {:?} · conteúdo placeholder, sem ligação à API",
-                        active_page.get().view_context()
-                    )}
+                    {move || {
+                        let page = active_page.get();
+                        format!(
+                            "Contexto público: {:?} · {}",
+                            page.view_context(),
+                            if page == Page::Dashboard {
+                                "SPX via /api; restantes dados são placeholders"
+                            } else {
+                                "conteúdo placeholder, sem ligação à API"
+                            }
+                        )
+                    }}
                 </footer>
             </main>
         </div>
@@ -136,29 +150,78 @@ fn PageHeader(title: &'static str, subtitle: &'static str) -> impl IntoView {
 
 #[component]
 fn DashboardPage() -> impl IntoView {
+    let history = LocalResource::new(load_spx_history);
+    let (live_price, set_live_price) = signal::<Option<Result<AssetLivePrice, String>>>(None);
+
+    Effect::new(move |_| {
+        leptos::task::spawn_local(async move {
+            let socket_url = match spx_websocket_url() {
+                Ok(url) => url,
+                Err(error) => {
+                    set_live_price.set(Some(Err(error)));
+                    return;
+                }
+            };
+            let socket = match WebSocket::open(&socket_url) {
+                Ok(socket) => socket,
+                Err(_) => {
+                    set_live_price.set(Some(Err(
+                        "Não foi possível ligar ao canal de cotações.".to_string()
+                    )));
+                    return;
+                }
+            };
+            let (_, mut messages) = socket.split();
+            while let Some(message) = messages.next().await {
+                match message {
+                    Ok(gloo_net::websocket::Message::Text(payload)) => {
+                        match serde_json::from_str::<AssetLivePrice>(&payload) {
+                            Ok(price) => set_live_price.set(Some(Ok(price))),
+                            Err(_) => set_live_price.set(Some(Err(
+                                "A cotação recebida não tem o formato esperado.".to_string(),
+                            ))),
+                        }
+                    }
+                    Ok(gloo_net::websocket::Message::Bytes(_)) => {}
+                    Err(_) => {
+                        set_live_price.set(Some(Err(
+                            "A ligação ao canal de cotações foi interrompida.".to_string(),
+                        )));
+                        break;
+                    }
+                }
+            }
+        });
+    });
+
     view! {
         <section class="page">
             <PageHeader
                 title="Dashboard"
-                subtitle="Visão geral dos mercados, volatilidade e carteira"
+                subtitle="Cotação corrente e últimas 90 sessões disponíveis do S&P 500"
             />
-            <PlaceholderNotice />
             <div class="metric-grid">
-                <MetricCard label="S&P 500" value="5 240,03" trend="+0,42%" positive=true />
-                <MetricCard label="VIX" value="14,71" trend="-2,13%" positive=true />
-                <MetricCard label="Taxa 10Y" value="4,38%" trend="+0,03" positive=false />
-                <MetricCard label="Valor da carteira" value="€ 24 680" trend="+1,18%" positive=true />
+                <LiveSpxCard price=live_price />
+                <MetricCard label="VIX · placeholder" value="14,71" trend="Não ligado" positive=true />
+                <MetricCard label="Taxa 10Y · placeholder" value="4,38%" trend="Não ligado" positive=false />
+                <MetricCard label="Carteira · placeholder" value="€ 24 680" trend="Não ligado" positive=true />
             </div>
             <div class="content-grid wide-left">
                 <article class="card chart-card">
-                    <CardTitle title="Mercado" detail="S&P 500 · 30 dias" />
-                    <div class="chart-placeholder" aria-label="Placeholder para gráfico de mercado">
-                        <span>"Visualização de série temporal"</span>
-                        <div class="fake-line"></div>
-                    </div>
+                    <CardTitle title="S&P 500" detail="Últimas 90 sessões disponíveis" />
+                    <Suspense fallback=move || view! { <DataStatus kind="loading" message="A carregar histórico do SPX…".to_string() /> }>
+                        {move || Suspend::new(async move {
+                            match history.await {
+                                Ok(response) => history_view(response).into_any(),
+                                Err(error) => view! {
+                                    <DataStatus kind="error" message=format!("Não foi possível carregar o histórico. {error}") />
+                                }.into_any(),
+                            }
+                        })}
+                    </Suspense>
                 </article>
                 <article class="card">
-                    <CardTitle title="Volatilidade" detail="Estrutura temporal" />
+                    <CardTitle title="Volatilidade" detail="Placeholder · ainda não ligado" />
                     <div class="term-list">
                         <TermRow label="VIX" value="14,71" />
                         <TermRow label="VIX3M" value="16,08" />
@@ -169,6 +232,257 @@ fn DashboardPage() -> impl IntoView {
             </div>
         </section>
     }
+}
+
+#[derive(Clone, Debug)]
+enum HistoryLoadError {
+    Request,
+    Http(u16),
+    EmptyBody(u16),
+    ContentType { status: u16, received: String },
+    InvalidJson(u16),
+}
+
+impl fmt::Display for HistoryLoadError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Request => write!(formatter, "A API não respondeu."),
+            Self::Http(status) => write!(formatter, "A API respondeu com HTTP {status}."),
+            Self::EmptyBody(status) => {
+                write!(
+                    formatter,
+                    "A API respondeu com HTTP {status}, mas sem conteúdo."
+                )
+            }
+            Self::ContentType { status, received } => write!(
+                formatter,
+                "A API respondeu com HTTP {status}, mas com Content-Type inesperado ({received})."
+            ),
+            Self::InvalidJson(status) => write!(
+                formatter,
+                "A API respondeu com HTTP {status}, mas o JSON não corresponde ao contrato público."
+            ),
+        }
+    }
+}
+
+async fn load_spx_history() -> Result<MarketSpxHistoryResponse, HistoryLoadError> {
+    let response = Request::get("/api/market/spx-history")
+        .send()
+        .await
+        .map_err(|_| HistoryLoadError::Request)?;
+    let status = response.status();
+    if !response.ok() {
+        return Err(HistoryLoadError::Http(status));
+    }
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .unwrap_or_else(|| "ausente".to_string());
+    let body = response
+        .text()
+        .await
+        .map_err(|_| HistoryLoadError::Request)?;
+    if body.trim().is_empty() {
+        return Err(HistoryLoadError::EmptyBody(status));
+    }
+    if !content_type
+        .split(';')
+        .next()
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+    {
+        return Err(HistoryLoadError::ContentType {
+            status,
+            received: content_type,
+        });
+    }
+    serde_json::from_str(&body).map_err(|_| HistoryLoadError::InvalidJson(status))
+}
+
+fn spx_websocket_url() -> Result<String, String> {
+    let window = web_sys::window()
+        .ok_or_else(|| "O browser não disponibilizou a janela da aplicação.".to_string())?;
+    let location = window.location();
+    let protocol = location
+        .protocol()
+        .map_err(|_| "Não foi possível determinar o protocolo da aplicação.".to_string())?;
+    let host = location
+        .host()
+        .map_err(|_| "Não foi possível determinar o endereço da aplicação.".to_string())?;
+    let websocket_protocol = if protocol == "https:" { "wss" } else { "ws" };
+    Ok(format!(
+        "{websocket_protocol}://{host}/api/assets/live?ticker=SPX"
+    ))
+}
+
+fn history_view(response: MarketSpxHistoryResponse) -> AnyView {
+    match response.spx_history {
+        DataState::Available(history) => view! { <HistorySuccess history stale=false /> }.into_any(),
+        DataState::Stale(history) => view! { <HistorySuccess history stale=true /> }.into_any(),
+        DataState::Unavailable => view! {
+            <DataStatus kind="unavailable" message="O backend não tem sessões do SPX disponíveis.".to_string() />
+        }
+        .into_any(),
+    }
+}
+
+#[component]
+fn LiveSpxCard(price: ReadSignal<Option<Result<AssetLivePrice, String>>>) -> impl IntoView {
+    view! {
+        <article class="metric-card live-metric" aria-live="polite">
+            {move || match price.get() {
+                None => view! {
+                    <span>"S&P 500 · cotação"</span>
+                    <strong class="skeleton">"A carregar…"</strong>
+                    <small>"A ligar ao mercado"</small>
+                }.into_any(),
+                Some(Err(error)) => view! {
+                    <span>"S&P 500 · erro"</span>
+                    <strong>"Indisponível"</strong>
+                    <small class="negative">{error}</small>
+                }.into_any(),
+                Some(Ok(price)) => {
+                    let is_live = price.market_hours == 1;
+                    let trend_class = if price.change_percent >= 0.0 { "positive" } else { "negative" };
+                    view! {
+                        <span>{if is_live { "S&P 500 · mercado aberto" } else { "S&P 500 · último valor/EOD" }}</span>
+                        <strong>{format_number(price.price)}</strong>
+                        <small class=trend_class>
+                            {format!("{:+.2}% · {}", price.change_percent, if is_live { "tempo real" } else { "mercado fechado" })}
+                        </small>
+                    }.into_any()
+                }
+            }}
+        </article>
+    }
+}
+
+#[component]
+fn HistorySuccess(history: PriceHistoryOverview, stale: bool) -> AnyView {
+    let points = history
+        .points
+        .into_iter()
+        .rev()
+        .take(90)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    let stale = stale || history.metadata.freshness == Freshness::Stale;
+    let session_date = history.metadata.session_date;
+    let source = history.metadata.source;
+
+    if points.is_empty() {
+        return view! {
+            <DataStatus kind="unavailable" message="O histórico do SPX não contém sessões completas.".to_string() />
+        }
+        .into_any();
+    }
+
+    view! {
+        <div class="history-content">
+            {stale.then(|| view! {
+                <div class="stale-notice" role="status">
+                    {format!("Dados EOD anteriores/desatualizados · última sessão {session_date}")}
+                </div>
+            })}
+            <SpxChart points=points />
+            <div class="chart-meta">
+                <span>{format!("Fonte: {source}")}</span>
+                <span>{format!("Sessão mais recente: {session_date}")}</span>
+            </div>
+        </div>
+    }
+    .into_any()
+}
+
+#[component]
+fn SpxChart(points: Vec<PriceHistoryPoint>) -> impl IntoView {
+    const WIDTH: f64 = 900.0;
+    const HEIGHT: f64 = 210.0;
+    const PAD_X: f64 = 22.0;
+    const PAD_TOP: f64 = 22.0;
+    const PAD_BOTTOM: f64 = 50.0;
+
+    let min = points
+        .iter()
+        .map(|point| point.close)
+        .fold(f64::INFINITY, f64::min);
+    let max = points
+        .iter()
+        .map(|point| point.close)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let range = (max - min).max(1.0);
+    let denominator = points.len().saturating_sub(1).max(1) as f64;
+    let polyline = points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let x = PAD_X + index as f64 / denominator * (WIDTH - PAD_X * 2.0);
+            let y = PAD_TOP + (max - point.close) / range * (HEIGHT - PAD_TOP - PAD_BOTTOM);
+            format!("{x:.2},{y:.2}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let first = points.first().map(|point| point.date);
+    let last = points.last().map(|point| point.date);
+    let first_label = first.map(|date| date.to_string()).unwrap_or_default();
+    let last_label = last.map(|date| date.to_string()).unwrap_or_default();
+    let description = format!(
+        "{} sessões, de {first_label} a {last_label}, entre {min:.2} e {max:.2} pontos",
+        points.len()
+    );
+
+    view! {
+        <figure class="spx-chart">
+            <svg viewBox=format!("0 0 {WIDTH} {HEIGHT}") role="img" aria-labelledby="spx-chart-title spx-chart-desc">
+                <title id="spx-chart-title">"Histórico de fechos do S&P 500"</title>
+                <desc id="spx-chart-desc">{description}</desc>
+                <g class="chart-grid" aria-hidden="true">
+                    <line x1="22" y1="22" x2="878" y2="22" />
+                    <line x1="22" y1="91" x2="878" y2="91" />
+                    <line x1="22" y1="160" x2="878" y2="160" />
+                </g>
+                <polyline class="spx-line" points=polyline />
+                <text x="22" y="16" class="chart-value">{format_number(max)}</text>
+                <text x="22" y="174" class="chart-value">{format_number(min)}</text>
+                <text x="22" y="200" class="chart-date">{first_label.clone()}</text>
+                <text x="878" y="200" text-anchor="end" class="chart-date">{last_label.clone()}</text>
+                <text x="450" y="200" text-anchor="middle" class="chart-session-count">{format!("{} sessões", points.len())}</text>
+            </svg>
+        </figure>
+    }
+}
+
+#[component]
+fn DataStatus(kind: &'static str, message: String) -> impl IntoView {
+    view! {
+        <div class=format!("data-status {kind}") role=if kind == "error" { "alert" } else { "status" }>
+            <span class="status-symbol" aria-hidden="true">{if kind == "loading" { "◌" } else { "!" }}</span>
+            <span>{message}</span>
+        </div>
+    }
+}
+
+fn format_number(value: f64) -> String {
+    let raw = format!("{value:.2}");
+    let (integer, decimals) = raw.split_once('.').unwrap_or((&raw, "00"));
+    let grouped = integer
+        .chars()
+        .rev()
+        .enumerate()
+        .flat_map(|(index, character)| {
+            if index > 0 && index % 3 == 0 {
+                vec![' ', character]
+            } else {
+                vec![character]
+            }
+        })
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{grouped},{decimals}")
 }
 
 #[component]

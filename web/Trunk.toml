@@ -8,10 +8,10 @@ port = 8180
 open = false
 
 [[proxy]]
-backend = "http://127.0.0.1:3100/api/"
-rewrite = "/api/"
-
-[[proxy]]
 backend = "ws://127.0.0.1:3100/api/assets/live"
 rewrite = "/api/assets/live"
 ws = true
+
+[[proxy]]
+backend = "http://127.0.0.1:3100/api/"
+rewrite = "/api/"
