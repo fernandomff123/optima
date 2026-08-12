@@ -55,17 +55,6 @@ impl Page {
             Self::Settings => "⚙",
         }
     }
-
-    const fn eyebrow(self) -> &'static str {
-        match self {
-            Self::Dashboard => "Visão geral",
-            Self::Sectors | Self::MarketAnalysis => "Mercado",
-            Self::Portfolio => "Património",
-            Self::Builder => "Estratégias",
-            Self::Simulator => "Cenários",
-            Self::Settings => "Preferências",
-        }
-    }
 }
 
 fn main() {
@@ -213,13 +202,7 @@ fn App() -> impl IntoView {
                 </header>
                 {move || match active_page.get() {
                     Page::Dashboard => view! { <DashboardPage /> }.into_any(),
-                    Page::Sectors => view! {
-                        <ShellPlaceholderPage
-                            eyebrow=Page::Sectors.eyebrow()
-                            title="Setores"
-                            subtitle="Mapa de calor e força relativa dos setores do S&P 500"
-                        />
-                    }.into_any(),
+                    Page::Sectors => view! { <SectorsPage /> }.into_any(),
                     Page::Portfolio => view! { <PortfolioPage /> }.into_any(),
                     Page::Builder => view! { <BuilderPage /> }.into_any(),
                     Page::MarketAnalysis => view! { <MarketAnalysisPage /> }.into_any(),
@@ -258,21 +241,293 @@ fn PageHeader(
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SectorPeriod {
+    Week,
+    TwoWeeks,
+    Month,
+}
+
+impl SectorPeriod {
+    const ALL: [Self; 3] = [Self::Week, Self::TwoWeeks, Self::Month];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Week => "1 semana",
+            Self::TwoWeeks => "2 semanas",
+            Self::Month => "1 mês",
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Week => 0,
+            Self::TwoWeeks => 1,
+            Self::Month => 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SectorMarketDemo {
+    name: &'static str,
+    etf: &'static str,
+    description: &'static str,
+    changes: [f64; 3],
+    spx_changes: [f64; 3],
+    relative_strength: [&'static str; 3],
+    histograms: [[i8; 8]; 3],
+    size_class: &'static str,
+}
+
+const SECTOR_MARKET_DEMO: [SectorMarketDemo; 11] = [
+    SectorMarketDemo {
+        name: "Tecnologia",
+        etf: "XLK",
+        description: "Liderança apoiada por software e semicondutores, com momentum acima do mercado.",
+        changes: [2.8, 3.6, 5.2],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Forte", "Forte", "Muito forte"],
+        histograms: [
+            [2, 3, -1, 4, 5, 3, 6, 7],
+            [1, 3, 2, 5, 4, 6, 7, 8],
+            [-2, 1, 3, 4, 6, 5, 7, 8],
+        ],
+        size_class: "sector-tile-xl",
+    },
+    SectorMarketDemo {
+        name: "Financeiro",
+        etf: "XLF",
+        description: "Bancos e serviços financeiros avançam, beneficiando de uma curva de taxas mais favorável.",
+        changes: [1.7, 2.4, 3.1],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Moderada", "Forte", "Neutra"],
+        histograms: [
+            [-1, 2, 2, 3, 1, 4, 3, 5],
+            [1, -1, 3, 4, 3, 5, 4, 6],
+            [-2, 1, 2, 4, 3, 5, 4, 5],
+        ],
+        size_class: "sector-tile-lg",
+    },
+    SectorMarketDemo {
+        name: "Energia",
+        etf: "XLE",
+        description: "O setor acompanha a recuperação das matérias-primas, ainda com oscilações relevantes.",
+        changes: [-1.9, -0.8, 1.4],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Fraca", "Fraca", "Neutra"],
+        histograms: [
+            [2, -3, -5, -2, 1, -4, -2, -3],
+            [-3, -2, 1, -1, 2, -2, 1, -1],
+            [-2, -1, 1, 3, 2, 4, 3, 4],
+        ],
+        size_class: "sector-tile-lg",
+    },
+    SectorMarketDemo {
+        name: "Industrial",
+        etf: "XLI",
+        description: "Procura consistente em transportes e bens de capital sustenta um avanço gradual.",
+        changes: [0.9, 1.5, 2.7],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Neutra", "Neutra", "Neutra"],
+        histograms: [
+            [-1, 1, 2, 1, 3, 2, 2, 4],
+            [1, 2, -1, 3, 2, 4, 3, 4],
+            [-1, 1, 3, 2, 4, 5, 4, 6],
+        ],
+        size_class: "sector-tile-md",
+    },
+    SectorMarketDemo {
+        name: "Saúde",
+        etf: "XLV",
+        description: "Desempenho defensivo e estável, com dispersão entre farmacêuticas e biotecnologia.",
+        changes: [0.3, 0.6, 1.1],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Neutra", "Fraca", "Fraca"],
+        histograms: [
+            [1, -1, 2, 1, -1, 2, 1, 2],
+            [-1, 1, 2, -1, 2, 1, 3, 2],
+            [-1, 2, 1, 3, 2, 3, 2, 4],
+        ],
+        size_class: "sector-tile-md",
+    },
+    SectorMarketDemo {
+        name: "Consumo discricionário",
+        etf: "XLY",
+        description: "Retalho e automóvel recuperam, embora o consumo permaneça seletivo.",
+        changes: [1.2, 2.1, 3.8],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Neutra", "Moderada", "Forte"],
+        histograms: [
+            [-2, 1, 3, 2, 4, 3, 2, 5],
+            [-1, 2, 1, 4, 3, 5, 4, 6],
+            [-2, 1, 3, 5, 4, 6, 7, 8],
+        ],
+        size_class: "sector-tile-lg",
+    },
+    SectorMarketDemo {
+        name: "Comunicações",
+        etf: "XLC",
+        description: "Media e plataformas digitais mantêm desempenho positivo próximo do índice.",
+        changes: [0.6, 1.3, 2.9],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Neutra", "Neutra", "Neutra"],
+        histograms: [
+            [1, 2, -1, 2, 3, 1, 3, 3],
+            [-1, 2, 3, 2, 4, 3, 4, 5],
+            [-1, 2, 3, 4, 3, 5, 5, 6],
+        ],
+        size_class: "sector-tile-md",
+    },
+    SectorMarketDemo {
+        name: "Bens essenciais",
+        etf: "XLP",
+        description: "Perfil defensivo limita a volatilidade e também a participação no movimento do mercado.",
+        changes: [-0.2, 0.1, 0.8],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Fraca", "Fraca", "Fraca"],
+        histograms: [
+            [1, -1, 1, -2, 1, -1, 1, -1],
+            [-1, 1, -1, 2, -1, 1, 1, 1],
+            [-1, 1, 2, 1, 2, 1, 3, 2],
+        ],
+        size_class: "sector-tile-md",
+    },
+    SectorMarketDemo {
+        name: "Materiais",
+        etf: "XLB",
+        description: "Metais e químicos recuam com sinais mistos na procura industrial global.",
+        changes: [-0.8, -1.4, -0.5],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Fraca", "Fraca", "Fraca"],
+        histograms: [
+            [1, -2, -1, -3, 1, -2, -1, -3],
+            [-1, -3, -2, 1, -4, -2, -3, -4],
+            [-2, -1, 1, -2, -1, 1, -2, -1],
+        ],
+        size_class: "sector-tile-sm",
+    },
+    SectorMarketDemo {
+        name: "Utilities",
+        etf: "XLU",
+        description: "Sensibilidade às taxas mantém o setor sob pressão apesar do seu caráter defensivo.",
+        changes: [-1.3, -2.2, -3.1],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Fraca", "Muito fraca", "Muito fraca"],
+        histograms: [
+            [1, -2, -3, -1, -4, -2, -3, -4],
+            [-2, -3, 1, -4, -3, -5, -4, -6],
+            [-1, -3, -2, -5, -4, -6, -5, -7],
+        ],
+        size_class: "sector-tile-sm",
+    },
+    SectorMarketDemo {
+        name: "Imobiliário",
+        etf: "XLRE",
+        description: "REITs refletem custos de financiamento elevados e menor procura por ativos de rendimento.",
+        changes: [-2.4, -3.0, -3.7],
+        spx_changes: [1.1, 1.8, 3.0],
+        relative_strength: ["Muito fraca", "Muito fraca", "Muito fraca"],
+        histograms: [
+            [-1, -3, -2, -5, -4, -6, -5, -7],
+            [-2, -4, -3, -5, -6, -5, -7, -8],
+            [-2, -3, -5, -4, -6, -7, -6, -8],
+        ],
+        size_class: "sector-tile-sm",
+    },
+];
+
+fn signed_percent(value: f64) -> String {
+    format!("{value:+.1}%").replace('.', ",")
+}
+
+fn heat_tone(value: f64) -> &'static str {
+    if value <= -2.0 {
+        "heat-negative-strong"
+    } else if value < -0.35 {
+        "heat-negative"
+    } else if value <= 0.35 {
+        "heat-neutral"
+    } else if value < 2.0 {
+        "heat-positive"
+    } else {
+        "heat-positive-strong"
+    }
+}
+
 #[component]
-fn ShellPlaceholderPage(
-    eyebrow: &'static str,
-    title: &'static str,
-    subtitle: &'static str,
-) -> impl IntoView {
+fn SectorsPage() -> impl IntoView {
+    let (period, set_period) = signal(SectorPeriod::Week);
+    let (selected, set_selected) = signal(0_usize);
+
     view! {
-        <section class="page placeholder-page">
-            <PageHeader eyebrow=eyebrow title=title subtitle=subtitle />
-            <div class="empty-page-state" role="status">
-                <span class="empty-page-icon" aria-hidden="true">"◇"</span>
-                <strong>"Página preparada no novo shell"</strong>
-                <p>"Conteúdo ainda não implementado. Não existem dados financeiros associados a esta vista."</p>
+        <section class="page sectors-page">
+            <header class="page-header sectors-header">
+                <div>
+                    <span class="page-eyebrow">"Mercado"</span>
+                    <h1>"Setores"</h1>
+                    <p>"Mapa de calor e força relativa dos setores do S&P 500"</p>
+                </div>
+                <div class="period-filter" role="group" aria-label="Período do desempenho demonstrativo">
+                    {SectorPeriod::ALL.map(|option| view! {
+                        <button type="button" class:active=move || period.get() == option aria-pressed=move || period.get() == option on:click=move |_| set_period.set(option)>{option.label()}</button>
+                    })}
+                </div>
+            </header>
+            <div class="sectors-demo-notice" role="note"><span aria-hidden="true">"◇"</span>"Valores exclusivamente demonstrativos · não representam dados da API"</div>
+            <div class="sectors-layout">
+                <article class="heatmap-card">
+                    <div class="sector-card-heading"><div><h2>"Mapa de calor"</h2><p>{move || format!("Variação demonstrativa · {}", period.get().label())}</p></div><span>"S&P 500"</span></div>
+                    <div class="sector-heatmap" aria-label="Selecionar setor">
+                        {SECTOR_MARKET_DEMO.into_iter().enumerate().map(|(index, sector)| view! {
+                            <button type="button" class=move || format!("sector-tile {} {}{}", sector.size_class, heat_tone(sector.changes[period.get().index()]), if selected.get() == index { " active" } else { "" }) aria-pressed=move || selected.get() == index on:click=move |_| set_selected.set(index)>
+                                <span>{sector.name}</span><strong>{move || signed_percent(sector.changes[period.get().index()])}</strong>
+                            </button>
+                        }).collect_view()}
+                    </div>
+                    <div class="heat-scale" aria-label="Escala de desempenho demonstrativo de menos quatro a mais quatro por cento"><span>"−4%"</span><i></i><span>"0%"</span><i></i><span>"+4%"</span></div>
+                </article>
+                <SectorDetailPanel selected=selected period=period />
             </div>
         </section>
+    }
+}
+
+#[component]
+fn SectorDetailPanel(
+    selected: ReadSignal<usize>,
+    period: ReadSignal<SectorPeriod>,
+) -> impl IntoView {
+    view! {
+        <article class="sector-detail" aria-live="polite">
+            {move || {
+                let sector = SECTOR_MARKET_DEMO[selected.get()];
+                let index = period.get().index();
+                let change = sector.changes[index];
+                let histogram_description = format!("Histograma demonstrativo de oito intervalos para {} no período de {}", sector.name, period.get().label());
+                view! {
+                    <div class="sector-detail-top"><div><span>"Setor selecionado"</span><h2>{sector.name}</h2></div><b>{sector.etf}</b></div>
+                    <strong class=format!("sector-main-change {}", if change >= 0.0 { "positive" } else { "negative" })>{signed_percent(change)}</strong>
+                    <span class="sector-period-copy">{format!("Desempenho demonstrativo · {}", period.get().label())}</span>
+                    <p class="sector-comment">{sector.description}</p>
+                    <dl class="sector-stats">
+                        <div><dt>"Referência S&P 500"</dt><dd>{signed_percent(sector.spx_changes[index])}</dd></div>
+                        <div><dt>"Força relativa"</dt><dd>{sector.relative_strength[index]}</dd></div>
+                    </dl>
+                    <figure class="sector-histogram">
+                        <figcaption><span>"Momentum"</span><small>"Histograma demonstrativo"</small></figcaption>
+                        <div class="histogram-plot" role="img" aria-label=histogram_description>
+                            <i class="histogram-zero"></i>
+                            {sector.histograms[index].into_iter().map(|value| view! {
+                                <span class=if value < 0 { "negative" } else { "positive" } style=format!("--bar-size: {}%", value.unsigned_abs() * 10)><i></i></span>
+                            }).collect_view()}
+                        </div>
+                    </figure>
+                    <button class="sector-future-action" type="button" disabled aria-label="Ver ativos do setor — funcionalidade futura">"Ver ativos do setor"<span aria-hidden="true">"→"</span></button>
+                    <small class="future-note">"Funcionalidade futura"</small>
+                }
+            }}
+        </article>
     }
 }
 
