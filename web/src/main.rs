@@ -4,6 +4,7 @@ use api_models::{
 };
 use futures_util::StreamExt;
 use gloo_net::{http::Request, websocket::futures::WebSocket};
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use std::fmt;
 
@@ -221,13 +222,7 @@ fn App() -> impl IntoView {
                     }.into_any(),
                     Page::Portfolio => view! { <PortfolioPage /> }.into_any(),
                     Page::Builder => view! { <BuilderPage /> }.into_any(),
-                    Page::MarketAnalysis => view! {
-                        <ShellPlaceholderPage
-                            eyebrow=Page::MarketAnalysis.eyebrow()
-                            title="Análise de mercado"
-                            subtitle="Visão agregada de índices, volatilidade e condições de mercado"
-                        />
-                    }.into_any(),
+                    Page::MarketAnalysis => view! { <MarketAnalysisPage /> }.into_any(),
                     Page::Simulator => view! { <SimulatorPage /> }.into_any(),
                     Page::Settings => view! { <SettingsPage /> }.into_any(),
                 }}
@@ -281,8 +276,473 @@ fn ShellPlaceholderPage(
     }
 }
 
+#[derive(Clone, Copy)]
+struct DemoMetric {
+    label: &'static str,
+    value: &'static str,
+    trend: &'static str,
+    bars: [u8; 8],
+}
+#[derive(Clone, Copy)]
+struct SectorDemo {
+    name: &'static str,
+    tickers: &'static str,
+    percent: u8,
+    width: u8,
+    tone: &'static str,
+}
+#[derive(Clone, Copy)]
+struct GreekDemo {
+    name: &'static str,
+    detail: &'static str,
+    value: &'static str,
+    width: u8,
+    tone: &'static str,
+}
+#[derive(Clone, Copy)]
+struct AlertDemo {
+    title: &'static str,
+    detail: &'static str,
+    tone: &'static str,
+}
+#[derive(Clone, Copy)]
+struct MaturityDemo {
+    range: &'static str,
+    count: u8,
+    height: u8,
+    tone: &'static str,
+}
+#[derive(Clone, Copy)]
+struct ActivityDemo {
+    time: &'static str,
+    title: &'static str,
+    detail: &'static str,
+    value: Option<&'static str>,
+    icon: &'static str,
+    tone: &'static str,
+}
+#[derive(Clone, Copy)]
+struct RiskPositionDemo {
+    ticker: &'static str,
+    strategy: &'static str,
+    strike: &'static str,
+    expiry: &'static str,
+    dte: u8,
+    pnl: &'static str,
+    pnl_tone: &'static str,
+    reason: &'static str,
+    risk: &'static str,
+    risk_tone: &'static str,
+}
+#[derive(Clone, Copy)]
+struct PnlDemo {
+    portfolio: &'static str,
+    benchmark: &'static str,
+    difference: &'static str,
+}
+
+struct DashboardDemo {
+    metrics: [DemoMetric; 2],
+    sectors: [SectorDemo; 4],
+    greeks: [GreekDemo; 5],
+    pnl: PnlDemo,
+    alerts: [AlertDemo; 3],
+    maturities: [MaturityDemo; 5],
+    activities: [ActivityDemo; 4],
+    positions: [RiskPositionDemo; 5],
+}
+
+impl DashboardDemo {
+    const fn get() -> Self {
+        Self {
+            metrics: [
+                DemoMetric {
+                    label: "Valor do portfolio",
+                    value: "€124 580",
+                    trend: "+€3 240 · 2,67%",
+                    bars: [28, 35, 32, 46, 43, 56, 61, 68],
+                },
+                DemoMetric {
+                    label: "P&L não realizado",
+                    value: "€8 420",
+                    trend: "Theta +€145 / dia",
+                    bars: [32, 38, 29, 42, 49, 45, 62, 73],
+                },
+            ],
+            sectors: [
+                SectorDemo {
+                    name: "Tecnologia",
+                    tickers: "AAPL · MSFT · NVDA",
+                    percent: 42,
+                    width: 72,
+                    tone: "tone-blue",
+                },
+                SectorDemo {
+                    name: "Financeiro",
+                    tickers: "JPM · BAC",
+                    percent: 21,
+                    width: 44,
+                    tone: "tone-violet",
+                },
+                SectorDemo {
+                    name: "Energia",
+                    tickers: "XLE · OXY",
+                    percent: 12,
+                    width: 27,
+                    tone: "tone-green",
+                },
+                SectorDemo {
+                    name: "Índices",
+                    tickers: "SPX · SPY",
+                    percent: 25,
+                    width: 51,
+                    tone: "tone-cyan",
+                },
+            ],
+            greeks: [
+                GreekDemo {
+                    name: "Delta",
+                    detail: "Direção · atenção",
+                    value: "+0,42",
+                    width: 42,
+                    tone: "tone-amber",
+                },
+                GreekDemo {
+                    name: "Gamma",
+                    detail: "Convexidade · risco",
+                    value: "−0,018",
+                    width: 18,
+                    tone: "tone-red",
+                },
+                GreekDemo {
+                    name: "Theta",
+                    detail: "Prémio por dia",
+                    value: "+€145/dia",
+                    width: 58,
+                    tone: "tone-green",
+                },
+                GreekDemo {
+                    name: "Vega",
+                    detail: "Sensibilidade à volatilidade",
+                    value: "+€680",
+                    width: 68,
+                    tone: "tone-blue",
+                },
+                GreekDemo {
+                    name: "Rho",
+                    detail: "Sensibilidade à taxa",
+                    value: "+€84",
+                    width: 24,
+                    tone: "tone-blue",
+                },
+            ],
+            pnl: PnlDemo {
+                portfolio: "+6,8%",
+                benchmark: "+3,1%",
+                difference: "+3,7 pp",
+            },
+            alerts: [
+                AlertDemo {
+                    title: "Gamma elevado",
+                    detail: "NVDA · expiração dentro de 2 dias",
+                    tone: "red",
+                },
+                AlertDemo {
+                    title: "Vega concentrada",
+                    detail: "60% da exposição em earnings esta semana",
+                    tone: "amber",
+                },
+                AlertDemo {
+                    title: "Theta acelerado",
+                    detail: "Posições short acima de €200/dia",
+                    tone: "blue",
+                },
+            ],
+            maturities: [
+                MaturityDemo {
+                    range: "0–7",
+                    count: 3,
+                    height: 42,
+                    tone: "tone-red",
+                },
+                MaturityDemo {
+                    range: "8–14",
+                    count: 2,
+                    height: 31,
+                    tone: "tone-amber",
+                },
+                MaturityDemo {
+                    range: "15–30",
+                    count: 4,
+                    height: 58,
+                    tone: "tone-blue",
+                },
+                MaturityDemo {
+                    range: "31–60",
+                    count: 2,
+                    height: 35,
+                    tone: "tone-green",
+                },
+                MaturityDemo {
+                    range: "60+",
+                    count: 1,
+                    height: 22,
+                    tone: "tone-violet",
+                },
+            ],
+            activities: [
+                ActivityDemo {
+                    time: "Agora",
+                    title: "P&L atualizado",
+                    detail: "Portfolio valorizou €340 desde a última atualização",
+                    value: Some("+€340"),
+                    icon: "↗",
+                    tone: "green",
+                },
+                ActivityDemo {
+                    time: "Há 18 min",
+                    title: "Nova posição aberta",
+                    detail: "AAPL 220 Call · 5 contratos",
+                    value: None,
+                    icon: "+",
+                    tone: "blue",
+                },
+                ActivityDemo {
+                    time: "Há 32 min",
+                    title: "Alerta de Gamma elevado",
+                    detail: "NVDA · expiração dentro de 2 dias",
+                    value: None,
+                    icon: "!",
+                    tone: "red",
+                },
+                ActivityDemo {
+                    time: "Hoje, 09:42",
+                    title: "Preços recalculados",
+                    detail: "14 posições atualizadas com dados de mercado",
+                    value: None,
+                    icon: "◆",
+                    tone: "amber",
+                },
+            ],
+            positions: [
+                RiskPositionDemo {
+                    ticker: "NVDA",
+                    strategy: "Call short",
+                    strike: "$125",
+                    expiry: "15 Ago 2026",
+                    dte: 7,
+                    pnl: "+€2 400",
+                    pnl_tone: "positive",
+                    reason: "Gamma elevado",
+                    risk: "Crítico",
+                    risk_tone: "red",
+                },
+                RiskPositionDemo {
+                    ticker: "GOOGL",
+                    strategy: "Call short",
+                    strike: "$165",
+                    expiry: "22 Ago 2026",
+                    dte: 14,
+                    pnl: "+€1 260",
+                    pnl_tone: "positive",
+                    reason: "Vega concentrada",
+                    risk: "Alto",
+                    risk_tone: "amber",
+                },
+                RiskPositionDemo {
+                    ticker: "AMD",
+                    strategy: "Put short",
+                    strike: "$140",
+                    expiry: "15 Ago 2026",
+                    dte: 7,
+                    pnl: "+€880",
+                    pnl_tone: "positive",
+                    reason: "Vencimento próximo",
+                    risk: "Alto",
+                    risk_tone: "amber",
+                },
+                RiskPositionDemo {
+                    ticker: "AAPL",
+                    strategy: "Put long",
+                    strike: "$210",
+                    expiry: "22 Ago 2026",
+                    dte: 14,
+                    pnl: "−€700",
+                    pnl_tone: "negative",
+                    reason: "Perda não realizada",
+                    risk: "Médio",
+                    risk_tone: "blue",
+                },
+                RiskPositionDemo {
+                    ticker: "SPY",
+                    strategy: "Bull call",
+                    strike: "$540 / $545",
+                    expiry: "20 Set 2026",
+                    dte: 43,
+                    pnl: "+€1 120",
+                    pnl_tone: "positive",
+                    reason: "Risco limitado",
+                    risk: "Baixo",
+                    risk_tone: "green",
+                },
+            ],
+        }
+    }
+}
+
+#[component]
+fn DashboardPanel(
+    class: &'static str,
+    title: &'static str,
+    subtitle: &'static str,
+    children: Children,
+) -> impl IntoView {
+    view! { <article class=format!("dashboard-panel {class}")><div class="dashboard-panel-title"><div><h2>{title}</h2><p>{subtitle}</p></div></div>{children()}</article> }
+}
+
+#[component]
+fn DemoMetric(metric: DemoMetric) -> impl IntoView {
+    view! { <article class="demo-metric"><div><span>{metric.label}</span><i aria-hidden="true"></i></div><strong>{metric.value}</strong><small class="positive">{metric.trend}</small><div class="demo-spark" aria-hidden="true">{metric.bars.map(|bar| view! { <i style=format!("height:{bar}%")></i> })}</div></article> }
+}
+
+#[component]
+fn DemoPnlChart(data: PnlDemo) -> impl IntoView {
+    view! {
+        <figure class="demo-pnl-chart">
+            <div class="pnl-summary"><span><i class="portfolio-key"></i>"Portfolio "<b>{data.portfolio}</b></span><span><i class="benchmark-key"></i>"S&P 500 "<b>{data.benchmark}</b></span><strong>{data.difference}</strong></div>
+            <svg viewBox="0 0 440 170" role="img" aria-labelledby="demo-pnl-title demo-pnl-desc">
+                <title id="demo-pnl-title">"P&L demonstrativo do portfolio comparado com o S&P 500"</title>
+                <desc id="demo-pnl-desc">"Séries simuladas dos últimos 30 dias, de 12 de julho a 11 de agosto: portfolio mais 6,8 por cento e benchmark mais 3,1 por cento."</desc>
+                <defs><linearGradient id="demo-pnl-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#27d3a2" stop-opacity=".28"/><stop offset="1" stop-color="#27d3a2" stop-opacity="0"/></linearGradient></defs>
+                <g class="demo-chart-grid" aria-hidden="true"><line x1="0" y1="20" x2="420" y2="20"/><line x1="0" y1="60" x2="420" y2="60"/><line x1="0" y1="100" x2="420" y2="100"/><line x1="0" y1="140" x2="420" y2="140"/></g>
+                <polygon points="0,150 0,139 28,131 56,134 84,112 112,117 140,93 168,101 196,77 224,83 252,58 280,64 308,39 336,46 364,24 392,29 420,16 420,150" fill="url(#demo-pnl-fill)"/>
+                <polyline points="0,139 28,136 56,126 84,129 112,115 140,119 168,106 196,101 224,94 252,90 280,82 308,77 336,70 364,66 392,58 420,54" class="demo-benchmark-line"/>
+                <polyline points="0,139 28,131 56,134 84,112 112,117 140,93 168,101 196,77 224,83 252,58 280,64 308,39 336,46 364,24 392,29 420,16" class="demo-portfolio-line"/>
+                <circle cx="420" cy="16" r="4" class="demo-portfolio-point"/><circle cx="420" cy="54" r="4" class="demo-benchmark-point"/>
+                <g class="demo-chart-dates"><text x="0" y="166">"12 Jul"</text><text x="210" y="166" text-anchor="middle">"27 Jul"</text><text x="420" y="166" text-anchor="end">"11 Ago"</text></g>
+            </svg><figcaption>"Valores simulados; não representam desempenho real."</figcaption>
+        </figure>
+    }
+}
+
+fn risk_table_row(position: RiskPositionDemo) -> impl IntoView {
+    view! { <tr><td><strong class="ticker">{position.ticker}</strong></td><td><span class="strategy-pill">{position.strategy}</span></td><td>{position.strike}</td><td>{position.expiry}</td><td><b>{position.dte}</b></td><td><b class=position.pnl_tone>{position.pnl}</b></td><td>{position.reason}</td><td><span class=format!("risk-level {}", position.risk_tone)>{position.risk}</span></td></tr> }
+}
+
+fn risk_mobile_card(position: RiskPositionDemo) -> impl IntoView {
+    view! { <article class="risk-position-card"><header><strong class="ticker">{position.ticker}</strong><span class=format!("risk-level {}", position.risk_tone)>{position.risk}</span></header><dl><div><dt>"Estratégia"</dt><dd>{position.strategy}</dd></div><div><dt>"Strike"</dt><dd>{position.strike}</dd></div><div><dt>"Vencimento"</dt><dd>{position.expiry}</dd></div><div><dt>"DTE"</dt><dd>{position.dte}</dd></div><div><dt>"P&L atual"</dt><dd class=position.pnl_tone>{position.pnl}</dd></div><div class="risk-reason"><dt>"Motivo principal"</dt><dd>{position.reason}</dd></div></dl></article> }
+}
+
 #[component]
 fn DashboardPage() -> impl IntoView {
+    let data = DashboardDemo::get();
+
+    view! {
+        <section class="page dashboard-page" aria-describedby="dashboard-demo-note">
+            <header class="page-header dashboard-header">
+                <div>
+                    <span class="page-eyebrow">"Visão geral"</span>
+                    <h1>"Dashboard"</h1>
+                    <p>"O pulso do seu livro de opções, num só lugar."</p>
+                </div>
+                <div class="environment-switch" aria-label="Ambiente visual; não altera fontes de dados">
+                    <button type="button" disabled><small>"AMBIENTE"</small>"Real"</button>
+                    <button type="button" class="active" aria-pressed="true"><small>"AMBIENTE"</small>"Simulação"</button>
+                </div>
+            </header>
+            <p id="dashboard-demo-note" class="demo-notice" role="note">
+                <span aria-hidden="true">"◇"</span>
+                "Simulação · todos os valores, sinais e atividades desta página são demonstrativos."
+            </p>
+
+            <div class="dashboard-metrics">
+                {data.metrics.into_iter().map(|metric| view! { <DemoMetric metric=metric /> }).collect_view()}
+            </div>
+
+            <div class="official-dashboard-grid">
+                <DashboardPanel class="exposure-panel" title="Exposição por setor" subtitle="Percentagem do valor de mercado · simulação">
+                    <div class="sector-list">
+                        {data.sectors.into_iter().map(|sector| view! {
+                            <div class="sector-row">
+                                <div class="sector-copy"><b>{sector.name}</b><small>{sector.tickers}</small><strong>{format!("{}%", sector.percent)}</strong></div>
+                                <div class="demo-progress" role="img" aria-label=format!("{}: {} por cento", sector.name, sector.percent)>
+                                    <i class=sector.tone style=format!("width:{}%", sector.width)></i>
+                                </div>
+                            </div>
+                        }).collect_view()}
+                    </div>
+                </DashboardPanel>
+
+                <DashboardPanel class="greek-panel" title="Gregas do portfolio" subtitle="Exposição líquida · dados demonstrativos">
+                    <div class="greek-list">
+                        {data.greeks.into_iter().map(|greek| view! {
+                            <div class="greek-row">
+                                <div><span><b>{greek.name}</b><small>{greek.detail}</small></span><strong>{greek.value}</strong></div>
+                                <div class="demo-progress" role="img" aria-label=format!("{} demonstrativo: {}", greek.name, greek.value)>
+                                    <i class=greek.tone style=format!("width:{}%", greek.width)></i>
+                                </div>
+                            </div>
+                        }).collect_view()}
+                    </div>
+                </DashboardPanel>
+
+                <DashboardPanel class="pnl-panel" title="P&L vs benchmark" subtitle="Evolução acumulada · últimos 30 dias · simulação">
+                    <DemoPnlChart data=data.pnl />
+                </DashboardPanel>
+
+                <DashboardPanel class="alerts-panel" title="Alertas de risco" subtitle="3 sinais demonstrativos requerem atenção">
+                    <div class="alert-list">
+                        {data.alerts.into_iter().map(|alert| view! {
+                            <div class=format!("risk-alert {}", alert.tone)>
+                                <span aria-hidden="true">"!"</span>
+                                <div><b>{alert.title}</b><small>{alert.detail}</small></div>
+                                <em>"Simulação"</em>
+                            </div>
+                        }).collect_view()}
+                    </div>
+                </DashboardPanel>
+
+                <DashboardPanel class="maturity-panel" title="Escada de vencimentos" subtitle="Posições por intervalo de DTE · simulação">
+                    <div class="ladder-bars" role="img" aria-label="Distribuição demonstrativa: 3 posições de 0 a 7 DTE, 2 de 8 a 14, 4 de 15 a 30, 2 de 31 a 60 e 1 acima de 60">
+                        {data.maturities.into_iter().map(|item| view! {
+                            <div class="ladder-column"><b>{item.count}</b><div><i class=item.tone style=format!("height:{}px", item.height)></i></div><span>{item.range}</span></div>
+                        }).collect_view()}
+                    </div>
+                    <small class="ladder-axis">"Dias até ao vencimento (DTE)"</small>
+                    <div class="ladder-note"><b>"5 posições"</b><span>"vencem nos próximos 14 dias"</span></div>
+                </DashboardPanel>
+
+                <DashboardPanel class="activity-panel" title="Atividade recente" subtitle="Registo demonstrativo; nenhuma ação real">
+                    <div class="activity-list">
+                        {data.activities.into_iter().map(|activity| view! {
+                            <div class="activity-row">
+                                <span class=format!("activity-icon {}", activity.tone) aria-hidden="true">{activity.icon}</span>
+                                <div><small>{activity.time}</small><b>{activity.title}</b><p>{activity.detail}</p></div>
+                                {activity.value.map(|value| view! { <strong class="positive">{value}</strong> })}
+                            </div>
+                        }).collect_view()}
+                    </div>
+                </DashboardPanel>
+
+                <DashboardPanel class="risk-positions-panel" title="Posições em maior risco" subtitle="Ranking explicável · dados demonstrativos">
+                    <div class="risk-method"><span>"Score simulado"</span><b>"35% DTE"</b><b>"30% Gamma"</b><b>"20% Vega"</b><b>"15% perda"</b></div>
+                    <div class="risk-table-desktop">
+                        <table class="risk-table">
+                            <thead><tr><th>"Posição"</th><th>"Estratégia"</th><th>"Strike"</th><th>"Vencimento"</th><th>"DTE"</th><th>"P&L atual"</th><th>"Motivo principal"</th><th>"Risco"</th></tr></thead>
+                            <tbody>{data.positions.into_iter().map(risk_table_row).collect_view()}</tbody>
+                        </table>
+                    </div>
+                    <div class="risk-cards-mobile" aria-label="Posições em maior risco">
+                        {data.positions.into_iter().map(risk_mobile_card).collect_view()}
+                    </div>
+                </DashboardPanel>
+            </div>
+        </section>
+    }
+}
+
+#[component]
+fn MarketAnalysisPage() -> impl IntoView {
     let history = LocalResource::new(load_spx_history);
     let (live_price, set_live_price) = signal::<Option<Result<AssetLivePrice, String>>>(None);
 
@@ -295,51 +755,52 @@ fn DashboardPage() -> impl IntoView {
                     return;
                 }
             };
-            let socket = match WebSocket::open(&socket_url) {
-                Ok(socket) => socket,
-                Err(_) => {
-                    set_live_price.set(Some(Err(
-                        "Não foi possível ligar ao canal de cotações.".to_string()
-                    )));
-                    return;
-                }
-            };
-            let (_, mut messages) = socket.split();
-            while let Some(message) = messages.next().await {
-                match message {
-                    Ok(gloo_net::websocket::Message::Text(payload)) => {
-                        match serde_json::from_str::<AssetLivePrice>(&payload) {
-                            Ok(price) => set_live_price.set(Some(Ok(price))),
-                            Err(_) => set_live_price.set(Some(Err(
-                                "A cotação recebida não tem o formato esperado.".to_string(),
-                            ))),
+            loop {
+                match WebSocket::open(&socket_url) {
+                    Ok(socket) => {
+                        let (_, mut messages) = socket.split();
+                        while let Some(message) = messages.next().await {
+                            match message {
+                                Ok(gloo_net::websocket::Message::Text(payload)) => {
+                                    match serde_json::from_str::<AssetLivePrice>(&payload) {
+                                        Ok(price) => set_live_price.set(Some(Ok(price))),
+                                        Err(_) => set_live_price.set(Some(Err(
+                                            "A cotação recebida não tem o formato esperado."
+                                                .to_string(),
+                                        ))),
+                                    }
+                                }
+                                Ok(gloo_net::websocket::Message::Bytes(_)) => {}
+                                Err(_) => break,
+                            }
                         }
+                        set_live_price.set(Some(Err(
+                            "A ligação foi interrompida; nova tentativa em curso.".to_string(),
+                        )));
                     }
-                    Ok(gloo_net::websocket::Message::Bytes(_)) => {}
                     Err(_) => {
                         set_live_price.set(Some(Err(
-                            "A ligação ao canal de cotações foi interrompida.".to_string(),
+                            "Não foi possível ligar; nova tentativa em curso.".to_string(),
                         )));
-                        break;
                     }
                 }
+                TimeoutFuture::new(3_000).await;
             }
         });
     });
 
     view! {
-        <section class="page">
+        <section class="page market-analysis-page">
             <PageHeader
-                title="Dashboard"
-                subtitle="Cotação corrente e últimas 90 sessões disponíveis do S&P 500"
+                eyebrow="Mercado"
+                title="Análise de mercado"
+                subtitle="Dados reais do S&P 500 quando disponíveis através da API"
             />
-            <div class="metric-grid">
+            <div class="real-data-notice" role="note">"Dados reais quando disponíveis · cotação e histórico servidos exclusivamente por /api"</div>
+            <div class="metric-grid market-metrics">
                 <LiveSpxCard price=live_price />
-                <MetricCard label="VIX · placeholder" value="14,71" trend="Não ligado" positive=true />
-                <MetricCard label="Taxa 10Y · placeholder" value="4,38%" trend="Não ligado" positive=false />
-                <MetricCard label="Carteira · placeholder" value="€ 24 680" trend="Não ligado" positive=true />
             </div>
-            <div class="content-grid wide-left">
+            <div class="content-grid market-history-grid">
                 <article class="card chart-card">
                     <CardTitle title="S&P 500" detail="Últimas 90 sessões disponíveis" />
                     <Suspense fallback=move || view! { <DataStatus kind="loading" message="A carregar histórico do SPX…".to_string() /> }>
@@ -352,15 +813,6 @@ fn DashboardPage() -> impl IntoView {
                             }
                         })}
                     </Suspense>
-                </article>
-                <article class="card">
-                    <CardTitle title="Volatilidade" detail="Placeholder · ainda não ligado" />
-                    <div class="term-list">
-                        <TermRow label="VIX" value="14,71" />
-                        <TermRow label="VIX3M" value="16,08" />
-                        <TermRow label="VIX6M" value="17,42" />
-                        <TermRow label="VVIX" value="86,30" />
-                    </div>
                 </article>
             </div>
         </section>
@@ -745,11 +1197,6 @@ fn CardTitle(title: &'static str, detail: &'static str) -> impl IntoView {
     view! {
         <div class="card-title"><h2>{title}</h2><span>{detail}</span></div>
     }
-}
-
-#[component]
-fn TermRow(label: &'static str, value: &'static str) -> impl IntoView {
-    view! { <div class="term-row"><span>{label}</span><strong>{value}</strong></div> }
 }
 
 #[component]
