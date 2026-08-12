@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["crates/api_models"]
+members = ["crates/api_models", "web"]
 exclude = ["crates/exchange-calendars-rs"]
 resolver = "2"
 
