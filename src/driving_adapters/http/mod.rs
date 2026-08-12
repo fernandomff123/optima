@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
 };
@@ -25,6 +25,7 @@ use crate::hexagon::{
         for_synchronizing_market_data::ForSynchronizingMarketData,
         for_synchronizing_market_data::SynchronizeTrackedTickers,
         for_viewing_market_data::ForViewingMarketData,
+        for_viewing_sector_performance::ForViewingSectorPerformance,
     },
 };
 
@@ -32,6 +33,7 @@ pub mod legacy_asset_views;
 pub mod legacy_market_views;
 pub mod legacy_portfolio_views;
 pub mod legacy_simulation_views;
+pub mod sector_performance_views;
 
 #[derive(Clone)]
 struct HttpState {
@@ -42,11 +44,29 @@ struct HttpState {
     synchronization: Arc<dyn ForSynchronizingMarketData>,
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
     tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
+    sector_performance: Arc<dyn ForViewingSectorPerformance>,
+}
+
+pub struct MarketViewingPorts {
+    market_data: Arc<dyn ForViewingMarketData>,
+    sector_performance: Arc<dyn ForViewingSectorPerformance>,
+}
+
+impl MarketViewingPorts {
+    pub fn new(
+        market_data: Arc<dyn ForViewingMarketData>,
+        sector_performance: Arc<dyn ForViewingSectorPerformance>,
+    ) -> Self {
+        Self {
+            market_data,
+            sector_performance,
+        }
+    }
 }
 
 /// Builds an HTTP adapter around application-provided interfaces.
 pub fn router(
-    market_data: Arc<dyn ForViewingMarketData>,
+    market_viewing: MarketViewingPorts,
     options: Arc<dyn ForAnalyzingOptions>,
     simulation: Arc<dyn ForSimulatingStrategies>,
     portfolios: Arc<dyn ForManagingPortfolios>,
@@ -113,19 +133,51 @@ pub fn router(
             axum::routing::delete(delete_strategy),
         )
         .route("/tracked-tickers", get(list_tracked_tickers))
+        .route("/api/market/sectors", get(view_sector_performance))
         .route(
             "/tracked-tickers/{ticker}",
             axum::routing::put(configure_tracked_ticker),
         )
         .with_state(HttpState {
-            market_data,
+            market_data: market_viewing.market_data,
             options,
             simulation,
             portfolios,
             synchronization,
             saved_strategies,
             tracked_tickers,
+            sector_performance: market_viewing.sector_performance,
         })
+}
+
+#[derive(Deserialize)]
+struct SectorPerformanceQuery {
+    period: String,
+}
+
+async fn view_sector_performance(
+    State(state): State<HttpState>,
+    Query(query): Query<SectorPerformanceQuery>,
+) -> Result<Json<api_models::MarketSectorPerformanceResponse>, HttpError> {
+    use crate::hexagon::domain::sector_performance::SectorPerformancePeriod;
+
+    let period = match query.period.as_str() {
+        "1w" => SectorPerformancePeriod::OneWeek,
+        "2w" => SectorPerformancePeriod::TwoWeeks,
+        "1m" => SectorPerformancePeriod::OneMonth,
+        _ => {
+            return Err(HttpError(PortError::InvalidRequest(
+                "period must be one of: 1w, 2w, 1m".to_string(),
+            )));
+        }
+    };
+    state
+        .sector_performance
+        .sector_performance(period, chrono::Utc::now())
+        .await
+        .map(sector_performance_views::response)
+        .map(Json)
+        .map_err(HttpError)
 }
 
 async fn synchronize_tracked_tickers(

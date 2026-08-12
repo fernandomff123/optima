@@ -76,6 +76,7 @@ times is an external conversation represented by
 | Actor/intention | Driving port |
 | --- | --- |
 | Market viewer (historical and current prices) | `ForViewingMarketData` |
+| S&P 500 sector-performance viewer | `ForViewingSectorPerformance` |
 | Options analyst | `ForAnalyzingOptions` |
 | Intraday options viewer | `ForViewingIntradayOptions` |
 | Intraday simulation client | `ForPreparingIntradaySimulations` |
@@ -158,6 +159,23 @@ data; SQLite remains an inactive, contract-tested proof of concept.
 Provider aliases and wire formats are translated at the adapter boundary. For
 example, the Yahoo adapter maps the domain ticker `SPX` to `^GSPC` and restores
 `SPX` before returning the domain object. Neither alias is present in a port.
+
+Sector performance reuses `ForLoadingMarketHistory` and derives 5-, 10-, or
+21-session returns from `market_prices`; no derived sector table exists. The
+benchmark is the tradable S&P 500 ETF `SPY`, not the `SPX` index, so benchmark
+and sector ETFs share the same generic Yahoo history and persistence flow.
+Initialization adds the eleven sector ETFs and `SPY` to tracked tickers with
+historical prices enabled. Sector ETFs have option snapshots disabled, adding
+eleven history requests but no sector-specific provider or pipeline (`SPY`
+was already tracked).
+
+The public periods `1w`, `2w`, and `1m` mean 5, 10, and 21 completed trading
+session intervals respectively. A return uses the latest completed session at
+or before `as_of` and the observation N sessions earlier, therefore requiring
+N+1 valid observations. Its formula is `(end / start - 1) * 100`, preferring
+adjusted close and falling back to close. Each sector must have observations
+on the benchmark's exact start and end dates. Relative strength is the sector
+return minus the `SPY` return, in percentage points.
 
 ## Dependency direction
 

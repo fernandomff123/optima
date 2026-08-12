@@ -21,4 +21,5 @@ pub mod for_viewing_interest_rates;
 pub mod for_viewing_intraday_options;
 pub mod for_viewing_market_data;
 pub mod for_viewing_portfolio_positions;
+pub mod for_viewing_sector_performance;
 pub mod for_viewing_volatility;

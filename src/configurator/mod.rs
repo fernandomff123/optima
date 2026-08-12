@@ -45,6 +45,7 @@ use crate::{
         portfolio_migration::PortfolioMigrationApplication,
         portfolio_valuation::{PortfolioValuationApplication, PricingCollaborators},
         saved_strategies::SavedStrategiesApplication,
+        sector_performance::SectorPerformanceApplication,
         simulation::SimulationApplication,
         strategy_migration::StrategyMigrationApplication,
         synchronization::{
@@ -97,6 +98,8 @@ pub type ConfiguredSavedStrategies =
     SavedStrategiesApplication<DuckDbSavedStrategiesAdapter, DuckDbSavedStrategiesAdapter>;
 pub type ConfiguredTrackedTickers =
     TrackedTickersApplication<DuckDbTrackedTickersAdapter, DuckDbTrackedTickersAdapter>;
+pub type ConfiguredSectorPerformance =
+    SectorPerformanceApplication<DuckDbMarketHistoryAdapter, ExchangeTradingCalendarAdapter>;
 pub type ConfiguredSynchronization = SynchronizationApplication<
     YahooMarketHistoryAdapter,
     CboeOptionChainsAdapter,
@@ -144,6 +147,7 @@ pub struct ConfiguredApplication {
     pub portfolio_valuation: ConfiguredPortfolioValuation,
     pub saved_strategies: ConfiguredSavedStrategies,
     pub tracked_tickers: ConfiguredTrackedTickers,
+    pub sector_performance: ConfiguredSectorPerformance,
     pub simulation: SimulationApplication,
     pub synchronization: ConfiguredSynchronization,
 }
@@ -236,6 +240,10 @@ pub fn configure() -> ConfiguredApplication {
         tracked_tickers: TrackedTickersApplication::new(
             tracked_tickers_adapter.clone(),
             tracked_tickers_adapter.clone(),
+        ),
+        sector_performance: SectorPerformanceApplication::new(
+            DuckDbMarketHistoryAdapter::new("data/market_data.duckdb"),
+            ExchangeTradingCalendarAdapter,
         ),
         simulation: SimulationApplication,
         synchronization: SynchronizationApplication::new(
@@ -338,7 +346,10 @@ pub fn configure_strategy_migration(pool: SqlitePool) -> ConfiguredStrategyMigra
 pub fn configure_http() -> Router {
     let configured = configure();
     crate::driving_adapters::http::router(
-        Arc::new(configured.market_data),
+        crate::driving_adapters::http::MarketViewingPorts::new(
+            Arc::new(configured.market_data),
+            Arc::new(configured.sector_performance),
+        ),
         Arc::new(configured.options),
         Arc::new(configured.simulation),
         Arc::new(configured.portfolios),

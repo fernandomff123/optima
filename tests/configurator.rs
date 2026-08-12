@@ -17,6 +17,7 @@ use hexagonal_backend::{
             for_viewing_intraday_options::ForViewingIntradayOptions,
             for_viewing_market_data::ForViewingMarketData,
             for_viewing_portfolio_positions::ForViewingPortfolioPositions,
+            for_viewing_sector_performance::ForViewingSectorPerformance,
             for_viewing_volatility::ForViewingVolatility,
         },
     },
@@ -40,6 +41,7 @@ async fn configurator_wires_every_application_to_its_driving_port() {
     fn tracked_tickers(_: &impl ForManagingTrackedTickers) {}
     fn simulation(_: &impl ForSimulatingStrategies) {}
     fn synchronization(_: &impl ForSynchronizingMarketData) {}
+    fn sector_performance(_: &impl ForViewingSectorPerformance) {}
 
     market_data(&configured.market_data);
     market_stream(&configured.market_stream);
@@ -55,6 +57,7 @@ async fn configurator_wires_every_application_to_its_driving_port() {
     tracked_tickers(&configured.tracked_tickers);
     simulation(&configured.simulation);
     synchronization(&configured.synchronization);
+    sector_performance(&configured.sector_performance);
 
     let error = configured
         .simulation

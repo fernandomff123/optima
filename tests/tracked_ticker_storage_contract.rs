@@ -74,3 +74,47 @@ async fn duckdb_satisfies_tracked_ticker_contract() {
     assert_contract(&adapter).await;
     std::fs::remove_file(path).expect("temporary DuckDB must be removable");
 }
+
+#[tokio::test]
+async fn duckdb_seeds_sector_history_tickers_idempotently_without_overwriting_configuration() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-sector-tickers-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbTrackedTickersAdapter::new(&path);
+    adapter.initialize().await.expect("DuckDB must initialize");
+    let configured = TrackedTicker {
+        ticker: "XLK".to_string(),
+        active: false,
+        historical_prices: false,
+        option_snapshots: true,
+    };
+    adapter
+        .store_tracked_ticker(&configured)
+        .await
+        .expect("configuration must store");
+    adapter
+        .initialize()
+        .await
+        .expect("reinitialization must be safe");
+
+    let active = adapter
+        .load_active_tickers()
+        .await
+        .expect("tickers must load");
+    for ticker in [
+        "SPY", "XLF", "XLE", "XLI", "XLV", "XLY", "XLC", "XLP", "XLB", "XLU", "XLRE",
+    ] {
+        let tracked = active
+            .iter()
+            .find(|item| item.ticker == ticker)
+            .expect("default must exist");
+        assert!(tracked.historical_prices);
+        if ticker.starts_with("XL") {
+            assert!(!tracked.option_snapshots);
+        }
+    }
+    assert!(!active.iter().any(|item| item.ticker == "XLK"));
+    std::fs::remove_file(path).expect("temporary DuckDB must be removable");
+}
