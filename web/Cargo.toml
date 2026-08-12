@@ -1,0 +1,8 @@
+[package]
+name = "optima_web"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+api_models = { path = "../crates/api_models" }
+leptos = { version = "0.8.20", features = ["csr"] }
