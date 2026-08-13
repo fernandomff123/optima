@@ -7,22 +7,24 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{Request, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use chrono::NaiveDate;
-use serde::{Deserialize, Serialize};
 
 use crate::hexagon::{
     PortError,
     driving_ports::{
         for_analyzing_options::{ForAnalyzingOptions, GreeksRequest},
         for_managing_portfolios::{CreatePortfolio, ForManagingPortfolios},
-        for_managing_saved_strategies::{ForManagingSavedStrategies, SaveStrategy},
+        for_managing_saved_strategies::ForManagingSavedStrategies,
         for_managing_tracked_tickers::ForManagingTrackedTickers,
         for_refreshing_market_data::ForRefreshingMarketData,
-        for_simulating_strategies::{ForSimulatingStrategies, ScenarioGridRequest},
+        for_simulating_strategies::ForSimulatingStrategies,
         for_synchronizing_market_data::ForSynchronizingMarketData,
         for_synchronizing_market_data::SynchronizeTrackedTickers,
         for_viewing_market_data::ForViewingMarketData,
@@ -30,12 +32,154 @@ use crate::hexagon::{
     },
 };
 
+mod canonical_models;
 pub mod legacy_asset_views;
 pub mod legacy_market_views;
 pub mod legacy_portfolio_views;
 pub mod legacy_server;
 pub mod legacy_simulation_views;
 pub mod sector_performance_views;
+
+/// Canonical route, temporary alias, method and shared handler.
+pub const CANONICAL_ALIASES: &[(&str, &str, &str, &str)] = &[
+    (
+        "/api/market-data/{ticker}/history",
+        "/market-data/{ticker}/history",
+        "GET",
+        "market_history",
+    ),
+    (
+        "/api/market-data/{ticker}/live-price",
+        "/market-data/{ticker}/live-price",
+        "GET",
+        "live_price",
+    ),
+    (
+        "/api/options/{ticker}/chain",
+        "/options/{ticker}/chain",
+        "GET",
+        "option_chain",
+    ),
+    (
+        "/api/options/{ticker}/term-structure",
+        "/options/{ticker}/term-structure",
+        "GET",
+        "term_structure",
+    ),
+    (
+        "/api/options/{ticker}/surface",
+        "/options/{ticker}/surface",
+        "GET",
+        "volatility_surface",
+    ),
+    (
+        "/api/options/{ticker}/skew/{expiration}",
+        "/options/{ticker}/skew/{expiration}",
+        "GET",
+        "volatility_skew",
+    ),
+    (
+        "/api/options/{ticker}/contracts/{occ_symbol}/greeks",
+        "/options/{ticker}/contracts/{occ_symbol}/greeks",
+        "GET",
+        "greeks",
+    ),
+    (
+        "/api/strategy-simulation/grid",
+        "/simulation/grid",
+        "POST",
+        "build_scenario_grid",
+    ),
+    (
+        "/api/strategy-simulation",
+        "/simulation",
+        "POST",
+        "simulate_strategy",
+    ),
+    ("/api/portfolios", "/portfolios", "POST", "create_portfolio"),
+    (
+        "/api/portfolios/{id}/cash-movements",
+        "/portfolios/{id}/cash-movements",
+        "POST",
+        "record_cash_movement",
+    ),
+    (
+        "/api/portfolios/{id}/option-trades",
+        "/portfolios/{id}/option-trades",
+        "POST",
+        "record_option_trade",
+    ),
+    (
+        "/api/portfolios/{id}/currency-exchanges",
+        "/portfolios/{id}/currency-exchanges",
+        "POST",
+        "record_currency_exchange",
+    ),
+    (
+        "/api/portfolios/{id}/balance",
+        "/portfolios/{id}/balance",
+        "GET",
+        "check_balance",
+    ),
+    (
+        "/api/portfolios/{id}/positions",
+        "/portfolios/{id}/positions",
+        "GET",
+        "list_positions",
+    ),
+    (
+        "/api/portfolios/{id}/transactions",
+        "/portfolios/{id}/transactions",
+        "GET",
+        "list_transactions",
+    ),
+    (
+        "/api/saved-strategies",
+        "/saved-strategies",
+        "GET",
+        "list_saved_strategies",
+    ),
+    (
+        "/api/saved-strategies",
+        "/saved-strategies",
+        "POST",
+        "save_strategy",
+    ),
+    (
+        "/api/saved-strategies/{id}",
+        "/saved-strategies/{id}",
+        "DELETE",
+        "delete_strategy",
+    ),
+    (
+        "/api/tracked-tickers",
+        "/tracked-tickers",
+        "GET",
+        "list_tracked_tickers",
+    ),
+    (
+        "/api/tracked-tickers/{ticker}",
+        "/tracked-tickers/{ticker}",
+        "PUT",
+        "configure_tracked_ticker",
+    ),
+];
+
+pub const EXISTING_CANONICAL_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/api/market/sectors"),
+    ("GET", "/api/data-refresh/status"),
+    ("POST", "/api/data-refresh"),
+    ("GET", "/api/assets/live"),
+];
+
+pub const NON_CANONICAL_SYNCHRONIZATION_ALIASES: &[(&str, &str)] = &[
+    ("POST", "/synchronization/market-history/{ticker}"),
+    ("POST", "/synchronization/tracked-tickers"),
+    ("POST", "/synchronization/option-chain/{ticker}"),
+    ("POST", "/synchronization/term-structure/{ticker}"),
+    ("POST", "/synchronization/volatility-index/{ticker}"),
+    ("POST", "/synchronization/yield-curves/{year}"),
+];
 
 #[derive(Clone)]
 struct HttpState {
@@ -117,7 +261,58 @@ pub fn router_with_data_refresh(
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
     tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
 ) -> Router {
-    Router::new()
+    let canonical = Router::new()
+        .route("/api/market-data/{ticker}/history", get(market_history))
+        .route("/api/market-data/{ticker}/live-price", get(live_price))
+        .route("/api/options/{ticker}/chain", get(option_chain))
+        .route("/api/options/{ticker}/term-structure", get(term_structure))
+        .route("/api/options/{ticker}/surface", get(volatility_surface))
+        .route(
+            "/api/options/{ticker}/skew/{expiration}",
+            get(volatility_skew),
+        )
+        .route(
+            "/api/options/{ticker}/contracts/{occ_symbol}/greeks",
+            get(greeks),
+        )
+        .route("/api/strategy-simulation/grid", post(build_scenario_grid))
+        .route("/api/strategy-simulation", post(simulate_strategy))
+        .route("/api/portfolios", post(create_portfolio))
+        .route(
+            "/api/portfolios/{id}/cash-movements",
+            post(record_cash_movement),
+        )
+        .route(
+            "/api/portfolios/{id}/option-trades",
+            post(record_option_trade),
+        )
+        .route(
+            "/api/portfolios/{id}/currency-exchanges",
+            post(record_currency_exchange),
+        )
+        .route("/api/portfolios/{id}/balance", get(check_balance))
+        .route("/api/portfolios/{id}/positions", get(list_positions))
+        .route("/api/portfolios/{id}/transactions", get(list_transactions))
+        .route(
+            "/api/saved-strategies",
+            get(list_saved_strategies).post(save_strategy),
+        )
+        .route(
+            "/api/saved-strategies/{id}",
+            axum::routing::delete(delete_strategy),
+        )
+        .route("/api/tracked-tickers", get(list_tracked_tickers))
+        .route(
+            "/api/tracked-tickers/{ticker}",
+            axum::routing::put(configure_tracked_ticker),
+        )
+        .route("/api/market/sectors", get(view_sector_performance))
+        .route("/api/data-refresh/status", get(data_refresh_status))
+        .route("/api/data-refresh", post(request_data_refresh))
+        .layer(middleware::from_fn(canonical_error_boundary));
+
+    let compatibility = Router::new()
+        // Deprecated structural aliases retain their historical wire contracts.
         .route("/market-data/{ticker}/history", get(market_history))
         .route("/market-data/{ticker}/live-price", get(live_price))
         .route("/options/{ticker}/chain", get(option_chain))
@@ -176,24 +371,66 @@ pub fn router_with_data_refresh(
             axum::routing::delete(delete_strategy),
         )
         .route("/tracked-tickers", get(list_tracked_tickers))
-        .route("/api/market/sectors", get(view_sector_performance))
-        .route("/api/data-refresh/status", get(data_refresh_status))
-        .route("/api/data-refresh", post(request_data_refresh))
         .route(
             "/tracked-tickers/{ticker}",
             axum::routing::put(configure_tracked_ticker),
-        )
-        .with_state(HttpState {
-            market_data: market_viewing.market_data,
-            options,
-            simulation,
-            portfolios,
-            synchronization: synchronization.synchronization,
-            saved_strategies,
-            tracked_tickers,
-            sector_performance: market_viewing.sector_performance,
-            data_refresh: synchronization.data_refresh,
-        })
+        );
+
+    canonical.merge(compatibility).with_state(HttpState {
+        market_data: market_viewing.market_data,
+        options,
+        simulation,
+        portfolios,
+        synchronization: synchronization.synchronization,
+        saved_strategies,
+        tracked_tickers,
+        sector_performance: market_viewing.sector_performance,
+        data_refresh: synchronization.data_refresh,
+    })
+}
+
+async fn canonical_error_boundary(request: Request<Body>, next: Next) -> Response {
+    let response = next.run(request).await;
+    if !response.status().is_client_error() && !response.status().is_server_error() {
+        return response;
+    }
+    if response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/json"))
+    {
+        return response;
+    }
+
+    let status = response.status();
+    let bytes = match axum::body::to_bytes(response.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(api_models::ApiError {
+                    error: error.to_string(),
+                }),
+            )
+                .into_response();
+        }
+    };
+    let message = String::from_utf8_lossy(&bytes).into_owned();
+    (
+        status,
+        Json(api_models::ApiError {
+            error: if message.is_empty() {
+                status
+                    .canonical_reason()
+                    .unwrap_or("request failed")
+                    .to_string()
+            } else {
+                message
+            },
+        }),
+    )
+        .into_response()
 }
 
 async fn data_refresh_status(
@@ -299,14 +536,9 @@ fn map_refresh_run(
     }
 }
 
-#[derive(Deserialize)]
-struct SectorPerformanceQuery {
-    period: String,
-}
-
 async fn view_sector_performance(
     State(state): State<HttpState>,
-    Query(query): Query<SectorPerformanceQuery>,
+    Query(query): Query<api_models::SectorPerformanceQuery>,
 ) -> Result<Json<api_models::MarketSectorPerformanceResponse>, HttpError> {
     use crate::hexagon::domain::sector_performance::SectorPerformancePeriod;
 
@@ -331,52 +563,45 @@ async fn view_sector_performance(
 
 async fn synchronize_tracked_tickers(
     State(state): State<HttpState>,
-    Json(request): Json<SynchronizeTrackedTickers>,
-) -> Result<
-    Json<
-        crate::hexagon::driving_ports::for_synchronizing_market_data::TrackedTickersSynchronizationReport,
-    >,
-    HttpError,
->{
+    Json(request): Json<api_models::SynchronizeTrackedTickersRequest>,
+) -> Result<Json<api_models::TrackedTickersSynchronizationReport>, HttpError> {
     state
         .synchronization
-        .synchronize_tracked_tickers(request)
+        .synchronize_tracked_tickers(SynchronizeTrackedTickers {
+            since: request.since,
+            market_close: request.market_close,
+        })
         .await
+        .map(canonical_models::tracked_synchronization_report)
         .map(Json)
         .map_err(HttpError)
 }
 
 async fn list_tracked_tickers(
     State(state): State<HttpState>,
-) -> Result<Json<Vec<crate::hexagon::domain::tracked_ticker::TrackedTicker>>, HttpError> {
+) -> Result<Json<Vec<api_models::TrackedTicker>>, HttpError> {
     state
         .tracked_tickers
         .list_active_tickers()
         .await
+        .map(|tickers| {
+            tickers
+                .into_iter()
+                .map(canonical_models::tracked_ticker)
+                .collect()
+        })
         .map(Json)
         .map_err(HttpError)
-}
-
-#[derive(Deserialize)]
-struct ConfigureTrackedTickerBody {
-    active: bool,
-    historical_prices: bool,
-    option_snapshots: bool,
 }
 
 async fn configure_tracked_ticker(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-    Json(body): Json<ConfigureTrackedTickerBody>,
+    Json(body): Json<api_models::ConfigureTrackedTickerRequest>,
 ) -> Result<StatusCode, HttpError> {
     state
         .tracked_tickers
-        .configure_ticker(crate::hexagon::domain::tracked_ticker::TrackedTicker {
-            ticker,
-            active: body.active,
-            historical_prices: body.historical_prices,
-            option_snapshots: body.option_snapshots,
-        })
+        .configure_ticker(canonical_models::domain_tracked_ticker(ticker, body))
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(HttpError)
@@ -384,23 +609,30 @@ async fn configure_tracked_ticker(
 
 async fn list_saved_strategies(
     State(state): State<HttpState>,
-) -> Result<Json<Vec<crate::hexagon::domain::saved_strategy::SavedStrategy>>, HttpError> {
+) -> Result<Json<Vec<api_models::SavedStrategy>>, HttpError> {
     state
         .saved_strategies
         .list_strategies()
         .await
+        .map(|strategies| {
+            strategies
+                .into_iter()
+                .map(canonical_models::saved_strategy)
+                .collect()
+        })
         .map(Json)
         .map_err(HttpError)
 }
 
 async fn save_strategy(
     State(state): State<HttpState>,
-    Json(command): Json<SaveStrategy>,
-) -> Result<Json<crate::hexagon::domain::saved_strategy::SavedStrategy>, HttpError> {
+    Json(command): Json<api_models::SaveStrategy>,
+) -> Result<Json<api_models::SavedStrategy>, HttpError> {
     state
         .saved_strategies
-        .save_strategy(command)
+        .save_strategy(canonical_models::save_strategy(command))
         .await
+        .map(canonical_models::saved_strategy)
         .map(Json)
         .map_err(HttpError)
 }
@@ -417,44 +649,30 @@ async fn delete_strategy(
         .map_err(HttpError)
 }
 
-#[derive(Deserialize)]
-struct MarketHistorySynchronizationBody {
-    since: NaiveDate,
-}
-
 async fn synchronize_market_history(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-    Json(body): Json<MarketHistorySynchronizationBody>,
-) -> Result<
-    Json<crate::hexagon::driving_ports::for_synchronizing_market_data::SynchronizationReport>,
-    HttpError,
-> {
+    Json(body): Json<api_models::MarketHistorySynchronizationRequest>,
+) -> Result<Json<api_models::SynchronizationReport>, HttpError> {
     state
         .synchronization
         .synchronize_market_history(&ticker, body.since)
         .await
+        .map(canonical_models::synchronization_report)
         .map(Json)
         .map_err(HttpError)
-}
-
-#[derive(Deserialize)]
-struct OptionChainSynchronizationBody {
-    market_close: chrono::DateTime<chrono::Utc>,
 }
 
 async fn synchronize_option_chain(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-    Json(body): Json<OptionChainSynchronizationBody>,
-) -> Result<
-    Json<crate::hexagon::driving_ports::for_synchronizing_market_data::SynchronizationReport>,
-    HttpError,
-> {
+    Json(body): Json<api_models::OptionChainSynchronizationRequest>,
+) -> Result<Json<api_models::SynchronizationReport>, HttpError> {
     state
         .synchronization
         .synchronize_option_chain(&ticker, body.market_close)
         .await
+        .map(canonical_models::synchronization_report)
         .map(Json)
         .map_err(HttpError)
 }
@@ -462,14 +680,12 @@ async fn synchronize_option_chain(
 async fn synchronize_term_structure(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<
-    Json<crate::hexagon::driving_ports::for_synchronizing_market_data::SynchronizationReport>,
-    HttpError,
-> {
+) -> Result<Json<api_models::SynchronizationReport>, HttpError> {
     state
         .synchronization
         .synchronize_term_structure(&ticker)
         .await
+        .map(canonical_models::synchronization_report)
         .map(Json)
         .map_err(HttpError)
 }
@@ -477,14 +693,12 @@ async fn synchronize_term_structure(
 async fn synchronize_volatility_index(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<
-    Json<crate::hexagon::driving_ports::for_synchronizing_market_data::SynchronizationReport>,
-    HttpError,
-> {
+) -> Result<Json<api_models::SynchronizationReport>, HttpError> {
     state
         .synchronization
         .synchronize_volatility_index(&ticker)
         .await
+        .map(canonical_models::synchronization_report)
         .map(Json)
         .map_err(HttpError)
 }
@@ -492,28 +706,19 @@ async fn synchronize_volatility_index(
 async fn synchronize_yield_curves(
     State(state): State<HttpState>,
     Path(year): Path<i32>,
-) -> Result<
-    Json<crate::hexagon::driving_ports::for_synchronizing_market_data::SynchronizationReport>,
-    HttpError,
-> {
+) -> Result<Json<api_models::SynchronizationReport>, HttpError> {
     state
         .synchronization
         .synchronize_yield_curves(year)
         .await
+        .map(canonical_models::synchronization_report)
         .map(Json)
         .map_err(HttpError)
 }
 
-#[derive(Deserialize)]
-struct CreatePortfolioBody {
-    id: String,
-    name: String,
-    base_currency: String,
-}
-
 async fn create_portfolio(
     State(state): State<HttpState>,
-    Json(body): Json<CreatePortfolioBody>,
+    Json(body): Json<api_models::CreatePortfolioRequest>,
 ) -> Result<StatusCode, HttpError> {
     let base_currency = crate::hexagon::domain::portfolio::Currency::new(&body.base_currency)
         .map_err(|error| HttpError(PortError::InvalidRequest(error.to_string())))?;
@@ -532,11 +737,14 @@ async fn create_portfolio(
 async fn record_cash_movement(
     State(state): State<HttpState>,
     Path(id): Path<String>,
-    Json(movement): Json<crate::hexagon::domain::portfolio::CashMovement>,
+    Json(movement): Json<api_models::CashMovement>,
 ) -> Result<StatusCode, HttpError> {
     state
         .portfolios
-        .record_cash_movement(&id, movement)
+        .record_cash_movement(
+            &id,
+            canonical_models::cash_movement(movement).map_err(HttpError)?,
+        )
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(HttpError)
@@ -545,11 +753,11 @@ async fn record_cash_movement(
 async fn record_option_trade(
     State(state): State<HttpState>,
     Path(id): Path<String>,
-    Json(trade): Json<crate::hexagon::domain::portfolio::Trade>,
+    Json(trade): Json<api_models::Trade>,
 ) -> Result<StatusCode, HttpError> {
     state
         .portfolios
-        .record_option_trade(&id, trade)
+        .record_option_trade(&id, canonical_models::trade(trade).map_err(HttpError)?)
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(HttpError)
@@ -558,11 +766,14 @@ async fn record_option_trade(
 async fn record_currency_exchange(
     State(state): State<HttpState>,
     Path(id): Path<String>,
-    Json(exchange): Json<crate::hexagon::domain::portfolio::CurrencyExchange>,
+    Json(exchange): Json<api_models::CurrencyExchange>,
 ) -> Result<StatusCode, HttpError> {
     state
         .portfolios
-        .record_currency_exchange(&id, exchange)
+        .record_currency_exchange(
+            &id,
+            canonical_models::currency_exchange(exchange).map_err(HttpError)?,
+        )
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(HttpError)
@@ -571,7 +782,7 @@ async fn record_currency_exchange(
 async fn check_balance(
     State(state): State<HttpState>,
     Path(id): Path<String>,
-) -> Result<Json<std::collections::BTreeMap<String, rust_decimal::Decimal>>, HttpError> {
+) -> Result<Json<api_models::PortfolioBalance>, HttpError> {
     state
         .portfolios
         .check_balance(&id)
@@ -583,11 +794,17 @@ async fn check_balance(
 async fn list_positions(
     State(state): State<HttpState>,
     Path(id): Path<String>,
-) -> Result<Json<Vec<crate::hexagon::domain::portfolio::Position>>, HttpError> {
+) -> Result<Json<Vec<api_models::Position>>, HttpError> {
     state
         .portfolios
         .list_positions(&id)
         .await
+        .map(|positions| {
+            positions
+                .into_iter()
+                .map(canonical_models::position)
+                .collect()
+        })
         .map(Json)
         .map_err(HttpError)
 }
@@ -595,35 +812,43 @@ async fn list_positions(
 async fn list_transactions(
     State(state): State<HttpState>,
     Path(id): Path<String>,
-) -> Result<Json<Vec<crate::hexagon::domain::portfolio::PortfolioEvent>>, HttpError> {
+) -> Result<Json<Vec<api_models::PortfolioEvent>>, HttpError> {
     state
         .portfolios
         .list_transactions(&id)
         .await
+        .map(|events| {
+            events
+                .into_iter()
+                .map(canonical_models::portfolio_event)
+                .collect()
+        })
         .map(Json)
         .map_err(HttpError)
 }
 
 async fn build_scenario_grid(
     State(state): State<HttpState>,
-    Json(request): Json<ScenarioGridRequest>,
-) -> Result<Json<crate::hexagon::domain::simulation::ScenarioGrid>, HttpError> {
+    Json(request): Json<api_models::ScenarioGridRequest>,
+) -> Result<Json<api_models::ScenarioGrid>, HttpError> {
     state
         .simulation
-        .build_scenario_grid(request)
+        .build_scenario_grid(canonical_models::scenario_grid_request(request))
         .await
+        .map(canonical_models::scenario_grid)
         .map(Json)
         .map_err(HttpError)
 }
 
 async fn simulate_strategy(
     State(state): State<HttpState>,
-    Json(request): Json<crate::hexagon::domain::simulation::SimulationRequest>,
-) -> Result<Json<crate::hexagon::domain::simulation::SimulationResult>, HttpError> {
+    Json(request): Json<api_models::StrategySimulationRequest>,
+) -> Result<Json<api_models::StrategySimulationResult>, HttpError> {
     state
         .simulation
-        .simulate_strategy(request)
+        .simulate_strategy(canonical_models::simulation_request(request))
         .await
+        .map(canonical_models::simulation_result)
         .map(Json)
         .map_err(HttpError)
 }
@@ -631,11 +856,12 @@ async fn simulate_strategy(
 async fn market_history(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<Json<crate::hexagon::domain::market_history::MarketHistory>, HttpError> {
+) -> Result<Json<api_models::MarketHistory>, HttpError> {
     state
         .market_data
         .market_history(&ticker)
         .await
+        .map(canonical_models::market_history)
         .map(Json)
         .map_err(HttpError)
 }
@@ -643,11 +869,12 @@ async fn market_history(
 async fn live_price(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<Json<crate::hexagon::domain::live_price::LivePrice>, HttpError> {
+) -> Result<Json<api_models::LivePrice>, HttpError> {
     state
         .market_data
         .live_price(&ticker)
         .await
+        .map(canonical_models::live_price)
         .map(Json)
         .map_err(HttpError)
 }
@@ -655,11 +882,12 @@ async fn live_price(
 async fn option_chain(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<Json<crate::hexagon::domain::options::Snapshot>, HttpError> {
+) -> Result<Json<api_models::OptionSnapshot>, HttpError> {
     state
         .options
         .option_chain(&ticker)
         .await
+        .map(canonical_models::option_snapshot)
         .map(Json)
         .map_err(HttpError)
 }
@@ -667,11 +895,12 @@ async fn option_chain(
 async fn term_structure(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<Json<crate::hexagon::domain::volatility::TermStructure>, HttpError> {
+) -> Result<Json<api_models::TermStructure>, HttpError> {
     state
         .options
         .term_structure(&ticker)
         .await
+        .map(canonical_models::term_structure)
         .map(Json)
         .map_err(HttpError)
 }
@@ -679,11 +908,12 @@ async fn term_structure(
 async fn volatility_surface(
     State(state): State<HttpState>,
     Path(ticker): Path<String>,
-) -> Result<Json<crate::hexagon::domain::volatility_surface::VolatilitySurface>, HttpError> {
+) -> Result<Json<api_models::VolatilitySurface>, HttpError> {
     state
         .options
         .volatility_surface(&ticker)
         .await
+        .map(canonical_models::volatility_surface)
         .map(Json)
         .map_err(HttpError)
 }
@@ -691,13 +921,14 @@ async fn volatility_surface(
 async fn volatility_skew(
     State(state): State<HttpState>,
     Path((ticker, expiration)): Path<(String, String)>,
-) -> Result<Json<crate::hexagon::domain::volatility_surface::VolatilitySkew>, HttpError> {
+) -> Result<Json<api_models::VolatilitySkew>, HttpError> {
     let expiration = NaiveDate::parse_from_str(&expiration, "%Y-%m-%d")
         .map_err(|_| HttpError(PortError::InvalidRequest("invalid expiration".into())))?;
     state
         .options
         .volatility_skew(&ticker, expiration)
         .await
+        .map(canonical_models::volatility_skew)
         .map(Json)
         .map_err(HttpError)
 }
@@ -705,22 +936,18 @@ async fn volatility_skew(
 async fn greeks(
     State(state): State<HttpState>,
     Path((ticker, occ_symbol)): Path<(String, String)>,
-) -> Result<Json<crate::hexagon::domain::simulation::Greeks>, HttpError> {
+) -> Result<Json<api_models::Greeks>, HttpError> {
     state
         .options
         .greeks(GreeksRequest { ticker, occ_symbol })
         .await
+        .map(canonical_models::greeks)
         .map(Json)
         .map_err(HttpError)
 }
 
 #[derive(Debug)]
 struct HttpError(PortError);
-
-#[derive(Serialize)]
-struct ErrorBody {
-    error: String,
-}
 
 impl axum::response::IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
@@ -730,7 +957,7 @@ impl axum::response::IntoResponse for HttpError {
             PortError::Conflict(_) => StatusCode::CONFLICT,
             PortError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         };
-        let body = ErrorBody {
+        let body = api_models::ApiError {
             error: self.0.to_string(),
         };
         (status, Json(body)).into_response()
