@@ -26,7 +26,11 @@ use hexagonal_backend::hexagon::{
         },
     },
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicUsize, Ordering},
+};
+use tokio::sync::Notify;
 
 #[derive(Default)]
 struct Runs(Mutex<Vec<DataRefreshRun>>);
@@ -85,6 +89,81 @@ struct ImmediateTasks;
 impl ForRunningDataRefreshTasks for ImmediateTasks {
     fn run_data_refresh_task(&self, task: DataRefreshTask) {
         tokio::spawn(task);
+    }
+}
+
+struct ControlledRuns {
+    runs: Mutex<Vec<DataRefreshRun>>,
+    stores: AtomicUsize,
+    block_store: usize,
+    fail_blocked_store: bool,
+    entered: Notify,
+    release: Notify,
+}
+impl ControlledRuns {
+    fn new(block_store: usize, fail_blocked_store: bool) -> Self {
+        Self {
+            runs: Mutex::new(Vec::new()),
+            stores: AtomicUsize::new(0),
+            block_store,
+            fail_blocked_store,
+            entered: Notify::new(),
+            release: Notify::new(),
+        }
+    }
+    async fn wait_until_blocked(&self) {
+        self.entered.notified().await;
+    }
+    fn release(&self) {
+        self.release.notify_one();
+    }
+}
+#[async_trait]
+impl ForStoringDataRefreshRuns for ControlledRuns {
+    async fn store_data_refresh_run(&self, run: &DataRefreshRun) -> PortResult<()> {
+        let store = self.stores.fetch_add(1, Ordering::SeqCst) + 1;
+        if store == self.block_store {
+            self.entered.notify_one();
+            self.release.notified().await;
+            if self.fail_blocked_store {
+                return Err(hexagonal_backend::hexagon::PortError::Unavailable(
+                    "controlled persistence failure".into(),
+                ));
+            }
+        }
+        let mut runs = self
+            .runs
+            .lock()
+            .map_err(|e| hexagonal_backend::hexagon::PortError::Unavailable(e.to_string()))?;
+        if let Some(saved) = runs.iter_mut().find(|saved| saved.id == run.id) {
+            *saved = run.clone()
+        } else {
+            runs.push(run.clone())
+        }
+        Ok(())
+    }
+}
+#[async_trait]
+impl ForLoadingDataRefreshRuns for ControlledRuns {
+    async fn load_recent_data_refresh_runs(&self, limit: usize) -> PortResult<Vec<DataRefreshRun>> {
+        let mut runs = self
+            .runs
+            .lock()
+            .map_err(|e| hexagonal_backend::hexagon::PortError::Unavailable(e.to_string()))?
+            .clone();
+        runs.sort_by_key(|run| std::cmp::Reverse(run.started_at));
+        runs.truncate(limit);
+        Ok(runs)
+    }
+    async fn load_running_data_refresh_runs(&self) -> PortResult<Vec<DataRefreshRun>> {
+        Ok(self
+            .runs
+            .lock()
+            .map_err(|e| hexagonal_backend::hexagon::PortError::Unavailable(e.to_string()))?
+            .iter()
+            .filter(|run| run.state == DataRefreshState::Running)
+            .cloned()
+            .collect())
     }
 }
 struct Histories;
@@ -288,4 +367,84 @@ async fn next_attempt_waits_for_the_current_result_and_uses_its_persisted_schedu
     assert_eq!(terminal.state, DataRefreshState::Completed);
     assert_eq!(terminal.next_attempt_at, Some(next));
     assert!(next > current + Duration::hours(19));
+}
+
+#[tokio::test]
+async fn concurrent_request_waits_for_blocked_initial_persistence_and_returns_same_run() {
+    let runs = Arc::new(ControlledRuns::new(1, false));
+    let tasks = Arc::new(Tasks::new());
+    let application = Arc::new(DataRefreshApplication::new(
+        Arc::new(Sync),
+        runs.clone(),
+        Arc::new(Histories),
+        Arc::new(Tickers),
+        Arc::new(Calendar),
+        tasks,
+    ));
+    let first = {
+        let application = application.clone();
+        tokio::spawn(async move {
+            application
+                .request_data_refresh(DataRefreshTrigger::Startup, now())
+                .await
+        })
+    };
+    runs.wait_until_blocked().await;
+    let second = {
+        let application = application.clone();
+        tokio::spawn(async move {
+            application
+                .request_data_refresh(DataRefreshTrigger::Manual, now())
+                .await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    assert!(!second.is_finished());
+    runs.release();
+    let started = first.await.expect("first task").expect("started");
+    let concurrent = second.await.expect("second task").expect("concurrent");
+    let (
+        StartDataRefreshResult::Started(created),
+        StartDataRefreshResult::AlreadyRunning(existing),
+    ) = (started, concurrent)
+    else {
+        panic!("one started and one already running")
+    };
+    assert_eq!(created.id, existing.id);
+    assert_eq!(runs.stores.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn next_attempt_waits_for_terminal_persistence_and_observes_persisted_retry_after_failure() {
+    let runs = Arc::new(ControlledRuns::new(2, true));
+    let application = Arc::new(DataRefreshApplication::new(
+        Arc::new(Sync),
+        runs.clone(),
+        Arc::new(Histories),
+        Arc::new(Tickers),
+        Arc::new(Calendar),
+        Arc::new(ImmediateTasks),
+    ));
+    application
+        .request_data_refresh(DataRefreshTrigger::Scheduler, Utc::now())
+        .await
+        .expect("start");
+    runs.wait_until_blocked().await;
+    let next = {
+        let application = application.clone();
+        tokio::spawn(async move { application.next_data_refresh_attempt(Utc::now()).await })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    assert!(!next.is_finished());
+    runs.release();
+    let next_attempt = next.await.expect("next task").expect("next attempt");
+    let terminal = runs
+        .load_recent_data_refresh_runs(1)
+        .await
+        .expect("terminal")
+        .remove(0);
+    assert_eq!(terminal.state, DataRefreshState::Failed);
+    assert_eq!(terminal.next_attempt_at, Some(next_attempt));
+    assert!(next_attempt < Utc::now() + Duration::minutes(6));
+    assert_eq!(runs.stores.load(Ordering::SeqCst), 3);
 }

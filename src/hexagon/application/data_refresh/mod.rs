@@ -6,7 +6,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::sync::Notify;
+use tokio::sync::{Mutex, Notify};
 
 use crate::hexagon::{
     PortError, PortResult,
@@ -74,6 +74,7 @@ impl MarketHistoryBackfillPolicy {
 pub struct DataRefreshApplication {
     core: Arc<DataRefreshCore>,
     tasks: Arc<dyn ForRunningDataRefreshTasks>,
+    start: Mutex<()>,
 }
 
 struct DataRefreshCore {
@@ -111,6 +112,7 @@ impl DataRefreshApplication {
                 backfill: MarketHistoryBackfillPolicy,
             }),
             tasks,
+            start: Mutex::new(()),
         }
     }
 
@@ -121,13 +123,17 @@ impl DataRefreshApplication {
             run.next_attempt_at = Some(now);
             self.core.runs.store_data_refresh_run(run).await?;
         }
-        self.core.active.store(false, Ordering::Release);
-        self.core.changed.notify_one();
+        self.core.release_active();
         Ok(running.len() as u64)
     }
 }
 
 impl DataRefreshCore {
+    fn release_active(&self) {
+        self.active.store(false, Ordering::Release);
+        self.changed.notify_waiters();
+    }
+
     async fn execute(
         &self,
         mut run: DataRefreshRun,
@@ -228,10 +234,7 @@ impl DataRefreshCore {
             Some(finished_at + Duration::minutes(RETRY_MINUTES))
         };
         run.finish(finished_at, obtained, persisted, failures, next_attempt)?;
-        let result = self.runs.store_data_refresh_run(&run).await.map(|()| run);
-        self.active.store(false, Ordering::Release);
-        self.changed.notify_one();
-        result
+        Ok(run)
     }
 }
 
@@ -246,6 +249,7 @@ impl ForRefreshingMarketData for DataRefreshApplication {
         trigger: DataRefreshTrigger,
         now: DateTime<Utc>,
     ) -> PortResult<StartDataRefreshResult> {
+        let _start = self.start.lock().await;
         if self
             .core
             .active
@@ -271,17 +275,17 @@ impl ForRefreshingMarketData for DataRefreshApplication {
         let Some(target_close) = (match eligible {
             Ok(close) => close,
             Err(error) => {
-                self.core.active.store(false, Ordering::Release);
+                self.core.release_active();
                 return Err(error);
             }
         }) else {
-            self.core.active.store(false, Ordering::Release);
+            self.core.release_active();
             return Ok(StartDataRefreshResult::NoEligibleSession);
         };
         let origin = match self.origin_for(trigger, now).await {
             Ok(origin) => origin,
             Err(error) => {
-                self.core.active.store(false, Ordering::Release);
+                self.core.release_active();
                 return Err(error);
             }
         };
@@ -292,22 +296,21 @@ impl ForRefreshingMarketData for DataRefreshApplication {
             target_close.date_naive(),
         );
         if let Err(error) = self.core.runs.store_data_refresh_run(&run).await {
-            self.core.active.store(false, Ordering::Release);
+            self.core.release_active();
             return Err(error);
         }
         let core = self.core.clone();
         let task_run = run.clone();
         self.tasks.run_data_refresh_task(Box::pin(async move {
-            if let Err(error) = core.execute(task_run.clone(), target_close).await {
-                let mut failed = task_run;
-                if failed.interrupt(Utc::now()).is_ok() {
-                    failed.summary = format!("Atualização falhou: {error}");
-                    failed.next_attempt_at = Some(Utc::now() + Duration::minutes(RETRY_MINUTES));
-                    let _ = core.runs.store_data_refresh_run(&failed).await;
-                }
-                core.active.store(false, Ordering::Release);
-                core.changed.notify_one();
+            let terminal = core.execute(task_run.clone(), target_close).await;
+            let terminal_attempt = match terminal {
+                Ok(run) => core.runs.store_data_refresh_run(&run).await,
+                Err(error) => persist_failed_run(&core, task_run.clone(), error).await,
+            };
+            if let Err(error) = terminal_attempt {
+                let _ = persist_failed_run(&core, task_run, error).await;
             }
+            core.release_active();
         }));
         Ok(StartDataRefreshResult::Started(run))
     }
@@ -395,6 +398,19 @@ fn failure(ticker: &str, operation: &str, error: PortError) -> DataRefreshFailur
         error: error.to_string(),
     }
 }
+
+async fn persist_failed_run(
+    core: &DataRefreshCore,
+    mut run: DataRefreshRun,
+    error: PortError,
+) -> PortResult<()> {
+    let failed_at = Utc::now();
+    run.interrupt(failed_at)?;
+    run.summary = format!("Atualização falhou: {error}");
+    run.next_attempt_at = Some(failed_at + Duration::minutes(RETRY_MINUTES));
+    core.runs.store_data_refresh_run(&run).await
+}
+
 fn origin_name(origin: DataRefreshOrigin) -> &'static str {
     match origin {
         DataRefreshOrigin::Startup => "startup",
