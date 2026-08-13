@@ -33,6 +33,7 @@ use crate::hexagon::{
 pub mod legacy_asset_views;
 pub mod legacy_market_views;
 pub mod legacy_portfolio_views;
+pub mod legacy_server;
 pub mod legacy_simulation_views;
 pub mod sector_performance_views;
 
