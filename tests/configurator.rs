@@ -1,6 +1,9 @@
 use chrono::NaiveDate;
 use hexagonal_backend::{
-    configurator::{configure, configure_http},
+    configurator::{
+        CompositionConfig, DEFAULT_DUCKDB_PATH, configure, configure_http, configure_with_config,
+        initialize_analytical_storage_with_config,
+    },
     hexagon::{
         PortError,
         driving_ports::{
@@ -72,6 +75,51 @@ async fn configurator_wires_every_application_to_its_driving_port() {
         .await
         .expect_err("configured application must execute use-case validation");
     assert!(matches!(error, PortError::InvalidRequest(_)));
+}
+
+#[test]
+fn composition_database_path_has_a_production_default_and_explicit_override() {
+    assert_eq!(
+        CompositionConfig::default().duckdb_path(),
+        std::path::Path::new(DEFAULT_DUCKDB_PATH)
+    );
+    let override_path = std::path::Path::new("/tmp/optima-test/override.duckdb");
+    assert_eq!(
+        CompositionConfig::with_duckdb_path(override_path).duckdb_path(),
+        override_path
+    );
+    assert_eq!(
+        CompositionConfig::from_path_override(None).duckdb_path(),
+        std::path::Path::new(DEFAULT_DUCKDB_PATH)
+    );
+    assert_eq!(
+        CompositionConfig::from_path_override(Some(override_path.as_os_str().to_owned()))
+            .duckdb_path(),
+        override_path
+    );
+}
+
+#[tokio::test]
+async fn every_configured_adapter_uses_the_override_and_refresh_arc_is_shared() {
+    let directory = std::env::temp_dir().join(format!("composition-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).expect("temporary directory");
+    let database = directory.join("override.duckdb");
+    let config = CompositionConfig::with_duckdb_path(&database);
+    initialize_analytical_storage_with_config(&config)
+        .await
+        .expect("initialize override");
+    let configured = configure_with_config(&config);
+    let startup = configured.data_refresh.clone();
+    let scheduler = configured.data_refresh.clone();
+    let http = configured.data_refresh.clone();
+    assert!(std::sync::Arc::ptr_eq(&startup, &scheduler));
+    assert!(std::sync::Arc::ptr_eq(&scheduler, &http));
+    assert!(database.exists());
+    drop(configured);
+    drop(startup);
+    drop(scheduler);
+    drop(http);
+    std::fs::remove_dir_all(directory).expect("remove temporary directory");
 }
 
 #[tokio::test]

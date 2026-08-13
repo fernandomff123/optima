@@ -3,6 +3,69 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum DataRefreshState {
+    Running,
+    Completed,
+    Partial,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataRefreshOrigin {
+    Startup,
+    Scheduled,
+    Retry,
+    Manual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataRefreshFailure {
+    pub ticker: String,
+    pub operation: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataRefreshRun {
+    pub id: String,
+    pub origin: DataRefreshOrigin,
+    pub state: DataRefreshState,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub target_session: NaiveDate,
+    pub items_obtained: u64,
+    pub items_persisted: u64,
+    pub failure_count: u64,
+    pub next_attempt_at: Option<DateTime<Utc>>,
+    pub summary: String,
+    pub failures: Vec<DataRefreshFailure>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataRefreshStatusResponse {
+    pub running: bool,
+    pub latest: Option<DataRefreshRun>,
+    pub recent: Vec<DataRefreshRun>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DataRefreshRequestState {
+    Started,
+    AlreadyRunning,
+    NoEligibleSession,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DataRefreshRequestResponse {
+    pub result: DataRefreshRequestState,
+    pub run: Option<DataRefreshRun>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AssetKind {
     Equity,
     Etf,

@@ -21,6 +21,7 @@ use crate::hexagon::{
         for_managing_portfolios::{CreatePortfolio, ForManagingPortfolios},
         for_managing_saved_strategies::{ForManagingSavedStrategies, SaveStrategy},
         for_managing_tracked_tickers::ForManagingTrackedTickers,
+        for_refreshing_market_data::ForRefreshingMarketData,
         for_simulating_strategies::{ForSimulatingStrategies, ScenarioGridRequest},
         for_synchronizing_market_data::ForSynchronizingMarketData,
         for_synchronizing_market_data::SynchronizeTrackedTickers,
@@ -45,11 +46,29 @@ struct HttpState {
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
     tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
     sector_performance: Arc<dyn ForViewingSectorPerformance>,
+    data_refresh: Option<Arc<dyn ForRefreshingMarketData>>,
 }
 
 pub struct MarketViewingPorts {
     market_data: Arc<dyn ForViewingMarketData>,
     sector_performance: Arc<dyn ForViewingSectorPerformance>,
+}
+
+pub struct SynchronizationPorts {
+    synchronization: Arc<dyn ForSynchronizingMarketData>,
+    data_refresh: Option<Arc<dyn ForRefreshingMarketData>>,
+}
+
+impl SynchronizationPorts {
+    pub fn new(
+        synchronization: Arc<dyn ForSynchronizingMarketData>,
+        data_refresh: Arc<dyn ForRefreshingMarketData>,
+    ) -> Self {
+        Self {
+            synchronization,
+            data_refresh: Some(data_refresh),
+        }
+    }
 }
 
 impl MarketViewingPorts {
@@ -71,6 +90,29 @@ pub fn router(
     simulation: Arc<dyn ForSimulatingStrategies>,
     portfolios: Arc<dyn ForManagingPortfolios>,
     synchronization: Arc<dyn ForSynchronizingMarketData>,
+    saved_strategies: Arc<dyn ForManagingSavedStrategies>,
+    tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
+) -> Router {
+    router_with_data_refresh(
+        market_viewing,
+        options,
+        simulation,
+        portfolios,
+        SynchronizationPorts {
+            synchronization,
+            data_refresh: None,
+        },
+        saved_strategies,
+        tracked_tickers,
+    )
+}
+
+pub fn router_with_data_refresh(
+    market_viewing: MarketViewingPorts,
+    options: Arc<dyn ForAnalyzingOptions>,
+    simulation: Arc<dyn ForSimulatingStrategies>,
+    portfolios: Arc<dyn ForManagingPortfolios>,
+    synchronization: SynchronizationPorts,
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
     tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
 ) -> Router {
@@ -134,6 +176,8 @@ pub fn router(
         )
         .route("/tracked-tickers", get(list_tracked_tickers))
         .route("/api/market/sectors", get(view_sector_performance))
+        .route("/api/data-refresh/status", get(data_refresh_status))
+        .route("/api/data-refresh", post(request_data_refresh))
         .route(
             "/tracked-tickers/{ticker}",
             axum::routing::put(configure_tracked_ticker),
@@ -143,11 +187,115 @@ pub fn router(
             options,
             simulation,
             portfolios,
-            synchronization,
+            synchronization: synchronization.synchronization,
             saved_strategies,
             tracked_tickers,
             sector_performance: market_viewing.sector_performance,
+            data_refresh: synchronization.data_refresh,
         })
+}
+
+async fn data_refresh_status(
+    State(state): State<HttpState>,
+) -> Result<Json<api_models::DataRefreshStatusResponse>, HttpError> {
+    refresh_port(&state)?
+        .data_refresh_status(20)
+        .await
+        .map(|status| Json(map_refresh_status(status)))
+        .map_err(HttpError)
+}
+
+async fn request_data_refresh(
+    State(state): State<HttpState>,
+) -> Result<(StatusCode, Json<api_models::DataRefreshRequestResponse>), HttpError> {
+    use crate::hexagon::driving_ports::for_refreshing_market_data::{
+        DataRefreshTrigger, StartDataRefreshResult,
+    };
+    match refresh_port(&state)?
+        .request_data_refresh(DataRefreshTrigger::Manual, chrono::Utc::now())
+        .await
+        .map_err(HttpError)?
+    {
+        StartDataRefreshResult::Started(run) => Ok((
+            StatusCode::ACCEPTED,
+            Json(api_models::DataRefreshRequestResponse {
+                result: api_models::DataRefreshRequestState::Started,
+                run: Some(map_refresh_run(run)),
+                message: "Atualização manual iniciada".to_string(),
+            }),
+        )),
+        StartDataRefreshResult::AlreadyRunning(run) => Ok((
+            StatusCode::CONFLICT,
+            Json(api_models::DataRefreshRequestResponse {
+                result: api_models::DataRefreshRequestState::AlreadyRunning,
+                run: Some(map_refresh_run(run)),
+                message: "Já existe uma atualização em curso".to_string(),
+            }),
+        )),
+        StartDataRefreshResult::NoEligibleSession => Ok((
+            StatusCode::CONFLICT,
+            Json(api_models::DataRefreshRequestResponse {
+                result: api_models::DataRefreshRequestState::NoEligibleSession,
+                run: None,
+                message: "Não existe uma sessão de mercado concluída elegível".to_string(),
+            }),
+        )),
+    }
+}
+
+fn refresh_port(state: &HttpState) -> Result<&Arc<dyn ForRefreshingMarketData>, HttpError> {
+    state.data_refresh.as_ref().ok_or_else(|| {
+        HttpError(PortError::Unavailable(
+            "data refresh is not configured".to_string(),
+        ))
+    })
+}
+
+fn map_refresh_status(
+    status: crate::hexagon::driving_ports::for_refreshing_market_data::DataRefreshStatus,
+) -> api_models::DataRefreshStatusResponse {
+    api_models::DataRefreshStatusResponse {
+        running: status.running,
+        latest: status.latest.map(map_refresh_run),
+        recent: status.recent.into_iter().map(map_refresh_run).collect(),
+    }
+}
+fn map_refresh_run(
+    run: crate::hexagon::domain::data_refresh::DataRefreshRun,
+) -> api_models::DataRefreshRun {
+    use crate::hexagon::domain::data_refresh::{DataRefreshOrigin as O, DataRefreshState as S};
+    api_models::DataRefreshRun {
+        id: run.id,
+        origin: match run.origin {
+            O::Startup => api_models::DataRefreshOrigin::Startup,
+            O::Scheduled => api_models::DataRefreshOrigin::Scheduled,
+            O::Retry => api_models::DataRefreshOrigin::Retry,
+            O::Manual => api_models::DataRefreshOrigin::Manual,
+        },
+        state: match run.state {
+            S::Running => api_models::DataRefreshState::Running,
+            S::Completed => api_models::DataRefreshState::Completed,
+            S::Partial => api_models::DataRefreshState::Partial,
+            S::Failed => api_models::DataRefreshState::Failed,
+        },
+        started_at: run.started_at,
+        finished_at: run.finished_at,
+        target_session: run.target_session,
+        items_obtained: run.items_obtained,
+        items_persisted: run.items_persisted,
+        failure_count: run.failure_count,
+        next_attempt_at: run.next_attempt_at,
+        summary: run.summary,
+        failures: run
+            .failures
+            .into_iter()
+            .map(|failure| api_models::DataRefreshFailure {
+                ticker: failure.ticker,
+                operation: failure.operation,
+                error: failure.error,
+            })
+            .collect(),
+    }
 }
 
 #[derive(Deserialize)]

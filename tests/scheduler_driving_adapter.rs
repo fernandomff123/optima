@@ -1,9 +1,14 @@
 use async_trait::async_trait;
-use chrono::{TimeZone, Utc};
+use chrono::{Duration, TimeZone, Utc};
 use hexagonal_backend::{
-    driving_adapters::scheduler::{EndOfDayRequest, synchronize_end_of_day},
+    driving_adapters::scheduler::{
+        EndOfDayRequest, next_data_refresh_delay, synchronize_end_of_day,
+    },
     hexagon::{
         PortError, PortResult,
+        driving_ports::for_refreshing_market_data::{
+            DataRefreshStatus, DataRefreshTrigger, ForRefreshingMarketData, StartDataRefreshResult,
+        },
         driving_ports::for_synchronizing_market_data::{
             ForSynchronizingMarketData, SynchronizationReport, SynchronizeTrackedTickers,
             TrackedTickersSynchronizationReport,
@@ -67,6 +72,56 @@ impl ForSynchronizingMarketData for SynchronizationMock {
             items_stored: 5,
         })
     }
+}
+
+struct RefreshScheduleMock {
+    next: chrono::DateTime<Utc>,
+}
+#[async_trait]
+impl ForRefreshingMarketData for RefreshScheduleMock {
+    async fn recover_interrupted_data_refreshes(
+        &self,
+        _: chrono::DateTime<Utc>,
+    ) -> PortResult<u64> {
+        Ok(0)
+    }
+    async fn request_data_refresh(
+        &self,
+        _: DataRefreshTrigger,
+        _: chrono::DateTime<Utc>,
+    ) -> PortResult<StartDataRefreshResult> {
+        Ok(StartDataRefreshResult::NoEligibleSession)
+    }
+    async fn next_data_refresh_attempt(
+        &self,
+        _: chrono::DateTime<Utc>,
+    ) -> PortResult<chrono::DateTime<Utc>> {
+        Ok(self.next)
+    }
+    async fn data_refresh_status(&self, _: usize) -> PortResult<DataRefreshStatus> {
+        Ok(DataRefreshStatus {
+            running: false,
+            latest: None,
+            recent: vec![],
+        })
+    }
+}
+
+#[tokio::test]
+async fn scheduler_uses_the_application_next_attempt_without_retry_policy() {
+    let now = Utc
+        .with_ymd_and_hms(2026, 8, 3, 20, 0, 0)
+        .single()
+        .expect("timestamp");
+    let delay = next_data_refresh_delay(
+        &RefreshScheduleMock {
+            next: now + Duration::minutes(5),
+        },
+        now,
+    )
+    .await
+    .expect("delay");
+    assert_eq!(delay, std::time::Duration::from_secs(300));
 }
 
 #[tokio::test]
