@@ -209,6 +209,23 @@ The former `atualizar_dados.sh` was removed because it only downloaded SPY
 option JSON in an independent one-minute loop and never participated in the
 hexagonal scheduler or persistence lifecycle.
 
+## Canonical public HTTP API and temporary aliases
+
+Every canonical public HTTP operation is rooted at `/api`. The route inventory
+and canonical-to-alias map are recorded in `docs/public-api.md`. Routes without
+that prefix are compatibility aliases: they are registered against the same
+handlers as their canonical counterparts and retain their status, content type,
+and body. They may be removed only in a future, explicitly announced breaking
+release, after consumers have migrated; this normalization does not set a
+removal date.
+
+The granular `/synchronization/*` operations are exceptional operational
+aliases and are not canonical public API. They temporarily remain available for
+compatibility, but no `/api/synchronization/*` routes exist. Startup, the EOD
+scheduler, and manual refresh all use `ForRefreshingMarketData`. The only public
+refresh operations are `GET /api/data-refresh/status` and
+`POST /api/data-refresh`.
+
 ## Simulation conversation
 
 `ForSimulatingStrategies` is intentionally not a one-function-per-port design.

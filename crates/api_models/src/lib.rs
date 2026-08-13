@@ -1,5 +1,466 @@
 use chrono::{DateTime, NaiveDate, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+pub type PortfolioBalance = BTreeMap<String, Decimal>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SectorPerformanceQuery {
+    pub period: String,
+}
+
+/// Stable JSON error envelope used by the canonical API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApiError {
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarketHistory {
+    pub ticker: String,
+    pub currency: Option<String>,
+    pub exchange_timezone: Option<String>,
+    pub daily_quotes: Vec<DailyQuote>,
+    pub dividends: Vec<MarketDividend>,
+    pub splits: Vec<StockSplit>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DailyQuote {
+    pub timestamp: DateTime<Utc>,
+    pub open: Option<f64>,
+    pub high: Option<f64>,
+    pub low: Option<f64>,
+    pub close: Option<f64>,
+    pub adjusted_close: Option<f64>,
+    pub volume: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarketDividend {
+    pub timestamp: DateTime<Utc>,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StockSplit {
+    pub timestamp: DateTime<Utc>,
+    pub numerator: f64,
+    pub denominator: f64,
+    pub ratio: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LivePrice {
+    pub ticker: String,
+    pub price: f64,
+    pub market_time: i64,
+    pub currency: String,
+    pub exchange: String,
+    pub regular_session: bool,
+    pub change: f64,
+    pub change_percent: f64,
+    pub day_volume: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OptionType {
+    Call,
+    Put,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptionContract {
+    pub occ_symbol: String,
+    pub option_type: OptionType,
+    pub strike: f64,
+    pub expiration: NaiveDate,
+    pub bid: f64,
+    pub ask: f64,
+    pub mid: f64,
+    pub spread: f64,
+    pub volume: f64,
+    pub open_interest: f64,
+    pub delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub theta: f64,
+    pub rho: f64,
+    pub theo: f64,
+    pub implied_volatility: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptionChain {
+    pub root: String,
+    pub contratos: Vec<OptionContract>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OptionSnapshot {
+    pub ticker: String,
+    pub timestamp_utc: DateTime<Utc>,
+    pub contratos: Vec<OptionContract>,
+    pub chains: Vec<OptionChain>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TermStructure {
+    pub ticker: String,
+    pub snapshot_timestamp: DateTime<Utc>,
+    pub treasury_date: NaiveDate,
+    pub points: Vec<TermStructurePoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TermStructurePoint {
+    pub days: f64,
+    pub variance: f64,
+    pub volatility: f64,
+    pub source: TermStructureSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TermStructureSource {
+    Interpolated {
+        near_expiration: NaiveDate,
+        near_rate: f64,
+        next_expiration: NaiveDate,
+        next_rate: f64,
+    },
+    Expiration {
+        expiration: NaiveDate,
+        interest_rate: f64,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VolatilitySurface {
+    pub ticker: String,
+    pub snapshot_time: DateTime<Utc>,
+    pub reference_price: f64,
+    pub points: Vec<CanonicalVolatilitySurfacePoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VolatilitySkew {
+    pub ticker: String,
+    pub expiration: NaiveDate,
+    pub points: Vec<CanonicalVolatilitySurfacePoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CanonicalVolatilitySurfacePoint {
+    pub expiration: NaiveDate,
+    pub days_to_expiration: i64,
+    pub strike: f64,
+    pub moneyness: f64,
+    pub option_type: OptionType,
+    pub implied_volatility: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ExerciseStyle {
+    European,
+    American,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrategyOptionContract {
+    pub symbol: String,
+    pub option_type: OptionType,
+    pub exercise_style: ExerciseStyle,
+    pub strike: f64,
+    pub expiration: NaiveDate,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrategyLeg {
+    pub contract: StrategyOptionContract,
+    pub quantity: i32,
+    pub multiplier: u32,
+    pub entry_price: f64,
+    pub entry_volatility: Option<f64>,
+    pub fees: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Strategy {
+    pub id: Option<String>,
+    pub root: String,
+    pub legs: Vec<StrategyLeg>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarketState {
+    pub valuation_date: NaiveDate,
+    pub spot: f64,
+    pub risk_free_rate: f64,
+    pub dividend_yield: f64,
+    pub volatility: f64,
+    pub snapshot_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioGrid {
+    pub spots: Vec<f64>,
+    pub valuation_dates: Vec<NaiveDate>,
+    pub volatility_shifts: Vec<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScenarioGridRequest {
+    pub spot: f64,
+    pub range_fraction: f64,
+    pub spot_count: usize,
+    pub valuation_dates: Vec<NaiveDate>,
+    pub volatility_shifts: Vec<f64>,
+    pub required_spots: Vec<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PricingModel {
+    BlackScholes,
+    Binomial { steps: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PricingConfig {
+    pub european_model: PricingModel,
+    pub american_model: PricingModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrategySimulationRequest {
+    pub strategy: Strategy,
+    pub market: MarketState,
+    pub grid: ScenarioGrid,
+    pub pricing: PricingConfig,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Greeks {
+    pub delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub theta: f64,
+    pub rho: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LegSimulationResult {
+    pub symbol: String,
+    pub theoretical_price: f64,
+    pub position_value: f64,
+    pub pnl: f64,
+    pub intrinsic_value: f64,
+    pub temporal_value: f64,
+    pub greeks: Greeks,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SimulationWarning {
+    AtOrAfterExpiration,
+    VolatilityFloored,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimulationPoint {
+    pub spot: f64,
+    pub valuation_date: NaiveDate,
+    pub volatility_shift: f64,
+    pub theoretical_value: f64,
+    pub pnl: f64,
+    pub greeks: Greeks,
+    pub legs: Vec<LegSimulationResult>,
+    pub warnings: Vec<SimulationWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrategySimulationResult {
+    pub strategy_id: Option<String>,
+    pub model: PricingModel,
+    pub points: Vec<SimulationPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedTicker {
+    pub ticker: String,
+    pub active: bool,
+    pub historical_prices: bool,
+    pub option_snapshots: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigureTrackedTickerRequest {
+    pub active: bool,
+    pub historical_prices: bool,
+    pub option_snapshots: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedStrategy {
+    pub id: i64,
+    pub name: String,
+    pub ticker: String,
+    pub legs: Vec<SavedStrategyLeg>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SavedStrategyLeg {
+    pub occ_symbol: String,
+    pub side: SavedStrategySide,
+    pub quantity: u32,
+    pub entry_price: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SavedStrategySide {
+    #[serde(rename = "buy", alias = "Buy")]
+    Buy,
+    #[serde(rename = "sell", alias = "Sell")]
+    Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SaveStrategy {
+    pub name: String,
+    pub ticker: String,
+    pub legs: Vec<SavedStrategyLeg>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreatePortfolioRequest {
+    pub id: String,
+    pub name: String,
+    pub base_currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Money {
+    pub amount: Decimal,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExchangeRate {
+    pub base: String,
+    pub quote: String,
+    pub rate: Decimal,
+    pub reference_date: NaiveDate,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Instrument {
+    Equity { ticker: String },
+    Option { occ_symbol: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CashMovementKind {
+    Deposit,
+    Withdrawal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CashMovement {
+    pub id: String,
+    pub occurred_at: DateTime<Utc>,
+    pub kind: CashMovementKind,
+    pub amount: Money,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TradeSide {
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Trade {
+    pub id: String,
+    pub instrument: Instrument,
+    pub side: TradeSide,
+    pub executed_at: DateTime<Utc>,
+    pub quantity: Decimal,
+    pub unit_price: Money,
+    pub fees: Vec<Money>,
+    pub settlement_rate_to_eur: Option<ExchangeRate>,
+    pub tax_rate_to_eur: Option<ExchangeRate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrencyExchange {
+    pub id: String,
+    pub occurred_at: DateTime<Utc>,
+    pub sold: Money,
+    pub bought: Money,
+    pub rate: ExchangeRate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortfolioDividend {
+    pub id: String,
+    pub instrument: Instrument,
+    pub paid_at: DateTime<Utc>,
+    pub gross: Money,
+    pub withholding_tax: Money,
+    pub tax_rate_to_eur: Option<ExchangeRate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PortfolioEvent {
+    Trade(Trade),
+    CashMovement(CashMovement),
+    Dividend(PortfolioDividend),
+    CurrencyExchange(CurrencyExchange),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Position {
+    pub instrument: Instrument,
+    pub quantity: Decimal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SynchronizationReport {
+    pub items_obtained: usize,
+    pub items_stored: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketHistorySynchronizationRequest {
+    pub since: NaiveDate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OptionChainSynchronizationRequest {
+    pub market_close: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SynchronizeTrackedTickersRequest {
+    pub since: NaiveDate,
+    pub market_close: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SynchronizationFailure {
+    pub ticker: String,
+    pub operation: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedTickersSynchronizationReport {
+    pub tickers: usize,
+    pub items_obtained: usize,
+    pub items_stored: u64,
+    pub failures: Vec<SynchronizationFailure>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

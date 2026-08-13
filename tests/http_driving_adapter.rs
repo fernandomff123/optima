@@ -225,6 +225,9 @@ struct PortfoliosMock {
 #[async_trait]
 impl ForManagingPortfolios for PortfoliosMock {
     async fn create_portfolio(&self, command: CreatePortfolio) -> PortResult<()> {
+        if command.id == "conflict" {
+            return Err(PortError::Conflict("portfolio already exists".to_string()));
+        }
         self.created
             .lock()
             .expect("test mutex must be usable")
@@ -596,4 +599,223 @@ async fn sector_endpoint_accepts_supported_periods_and_returns_json() {
         .expect("router must respond");
     assert_eq!(response.status(), 400);
     assert_eq!(response.headers()["content-type"], "application/json");
+}
+
+#[tokio::test]
+async fn canonical_route_and_alias_have_identical_http_response() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    let canonical = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/market-data/SPY/history")
+                .body(Body::empty())
+                .expect("valid canonical request"),
+        )
+        .await
+        .expect("canonical route must respond");
+    let alias = app
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/SPY/history")
+                .body(Body::empty())
+                .expect("valid alias request"),
+        )
+        .await
+        .expect("alias must respond");
+
+    assert_eq!(canonical.status(), alias.status());
+    assert_eq!(
+        canonical.headers().get("content-type"),
+        alias.headers().get("content-type")
+    );
+    let canonical_body = axum::body::to_bytes(canonical.into_body(), usize::MAX)
+        .await
+        .expect("canonical body must be readable");
+    let alias_body = axum::body::to_bytes(alias.into_body(), usize::MAX)
+        .await
+        .expect("alias body must be readable");
+    assert_eq!(canonical_body, alias_body);
+}
+
+#[tokio::test]
+async fn canonical_extractor_errors_are_json_without_changing_alias_errors() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    let malformed = Request::builder()
+        .method("POST")
+        .header("content-type", "application/json")
+        .body(Body::from("{"))
+        .expect("valid malformed request");
+    let canonical = app
+        .clone()
+        .oneshot(clone_request(&malformed, "/api/portfolios"))
+        .await
+        .expect("canonical route must respond");
+    let alias = app
+        .clone()
+        .oneshot(clone_request(&malformed, "/portfolios"))
+        .await
+        .expect("alias must respond");
+    assert_eq!(canonical.status(), alias.status());
+    assert_eq!(canonical.headers()["content-type"], "application/json");
+    assert_eq!(alias.headers()["content-type"], "text/plain; charset=utf-8");
+    let canonical_json: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(canonical.into_body(), usize::MAX)
+            .await
+            .expect("canonical body must be readable"),
+    )
+    .expect("canonical error must be JSON");
+    assert!(canonical_json["error"].is_string());
+
+    let invalid_query = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/market/sectors")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("query rejection must respond");
+    assert_eq!(invalid_query.status(), 400);
+    assert_eq!(invalid_query.headers()["content-type"], "application/json");
+}
+
+fn clone_request(request: &Request<Body>, uri: &str) -> Request<Body> {
+    Request::builder()
+        .method(request.method().clone())
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from("{"))
+        .expect("test request must be valid")
+}
+
+#[tokio::test]
+async fn port_errors_keep_status_and_json_envelope_on_canonical_and_alias_routes() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+    let cases = [
+        (
+            "GET",
+            "/api/options/SPY/chain",
+            "/options/SPY/chain",
+            None,
+            404,
+        ),
+        (
+            "GET",
+            "/api/options/SPY/term-structure",
+            "/options/SPY/term-structure",
+            None,
+            503,
+        ),
+        (
+            "POST",
+            "/api/strategy-simulation/grid",
+            "/simulation/grid",
+            Some(serde_json::json!({
+                "spot": 0.0, "range_fraction": 0.2, "spot_count": 5,
+                "valuation_dates": ["2026-01-01"], "volatility_shifts": [0.0], "required_spots": []
+            })),
+            400,
+        ),
+        (
+            "POST",
+            "/api/portfolios",
+            "/portfolios",
+            Some(serde_json::json!({
+                "id": "conflict", "name": "Conflict", "base_currency": "EUR"
+            })),
+            409,
+        ),
+    ];
+    for (method, canonical_uri, alias_uri, body, status) in cases {
+        let payload = body.map(|value| value.to_string()).unwrap_or_default();
+        let request = |uri: &str| {
+            Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from(payload.clone()))
+                .expect("test request must be valid")
+        };
+        let canonical = app
+            .clone()
+            .oneshot(request(canonical_uri))
+            .await
+            .expect("canonical response");
+        let alias = app
+            .clone()
+            .oneshot(request(alias_uri))
+            .await
+            .expect("alias response");
+        assert_eq!(canonical.status(), status);
+        assert_eq!(alias.status(), status);
+        assert_eq!(canonical.headers()["content-type"], "application/json");
+        assert_eq!(alias.headers()["content-type"], "application/json");
+        let canonical_body = axum::body::to_bytes(canonical.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let alias_body = axum::body::to_bytes(alias.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(canonical_body, alias_body);
+    }
+}
+
+#[tokio::test]
+async fn canonical_method_not_allowed_keeps_allow_header_and_returns_json() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/portfolios")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("canonical route must respond");
+
+    assert_eq!(response.status(), 405);
+    assert_eq!(response.headers()["allow"], "POST");
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("error body must be readable");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("error body must be JSON");
+    assert_eq!(json, serde_json::json!({ "error": "Method Not Allowed" }));
 }
