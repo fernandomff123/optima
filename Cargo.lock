@@ -2303,6 +2303,7 @@ dependencies = [
  "gloo-timers",
  "js-sys",
  "leptos",
+ "send_wrapper",
  "serde_json",
  "wasm-bindgen",
  "web-sys",

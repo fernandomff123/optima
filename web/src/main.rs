@@ -9,18 +9,56 @@ use futures_util::{
 };
 use gloo_net::{http::Request, websocket::futures::WebSocket};
 use gloo_timers::future::TimeoutFuture;
+use leptos::leptos_dom::helpers::window_event_listener;
 use leptos::prelude::*;
-use std::fmt;
+use send_wrapper::SendWrapper;
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use wasm_bindgen::{JsCast, closure::Closure};
 
 const API_BASE_PATH: &str = "/api";
 const DATA_REFRESH_POLL_INTERVAL_MS: u32 = 5_000;
+const DATA_REFRESH_SCHEDULER_TOLERANCE_MS: i64 = 1_500;
+const DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS: u32 = 60_000;
 
 #[derive(Clone)]
 enum DataRefreshLoadState {
     Loading,
+    Success {
+        status: DataRefreshStatusResponse,
+        communication_error: Option<String>,
+        awaiting_terminal_confirmation: bool,
+    },
+    Unavailable(String),
+    Error(String),
+}
+
+enum DataRefreshStatusResult {
     Success(DataRefreshStatusResponse),
     Unavailable(String),
     Error(String),
+}
+
+#[derive(Clone, Default)]
+struct ObservationGuard(Arc<AtomicBool>);
+
+impl ObservationGuard {
+    fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+
+    fn is_active(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    fn cancel(&self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -85,22 +123,75 @@ fn App() -> impl IntoView {
 
     leptos::task::spawn_local(load_data_refresh_status(set_refresh_state));
     Effect::new(move |_| {
-        let is_running = matches!(
-            refresh_state.get(),
-            DataRefreshLoadState::Success(status) if status.running
-        );
-        if is_running {
+        let delay =
+            data_refresh_observation_delay_ms(&refresh_state.get(), js_sys::Date::now() as i64);
+        if let Some(delay) = delay {
             let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            let guard = ObservationGuard::new();
+            let task_guard = guard.clone();
             leptos::task::spawn_local(async move {
-                let polling = async move {
-                    loop {
-                        TimeoutFuture::new(DATA_REFRESH_POLL_INTERVAL_MS).await;
+                let observation = async move {
+                    TimeoutFuture::new(delay).await;
+                    if task_guard.is_active() {
                         load_data_refresh_status(set_refresh_state).await;
                     }
                 };
-                let _ = Abortable::new(polling, abort_registration).await;
+                let _ = Abortable::new(observation, abort_registration).await;
             });
-            on_cleanup(move || abort_handle.abort());
+            on_cleanup(move || {
+                guard.cancel();
+                abort_handle.abort();
+            });
+        }
+    });
+
+    let visibility_guard = ObservationGuard::new();
+    let observe_on_return = {
+        let visibility_guard = visibility_guard.clone();
+        move || {
+            if visibility_guard.is_active()
+                && document_is_visible()
+                && data_refresh_needs_visibility_check(
+                    &refresh_state.get_untracked(),
+                    js_sys::Date::now() as i64,
+                )
+            {
+                leptos::task::spawn_local(load_data_refresh_status(set_refresh_state));
+            }
+        }
+    };
+    let focus_listener = window_event_listener(leptos::ev::focus, move |_| observe_on_return());
+    let visibility_listener =
+        web_sys::window()
+            .and_then(|window| window.document())
+            .map(|document| {
+                let listener_guard = visibility_guard.clone();
+                let listener = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+                    if listener_guard.is_active()
+                        && document_is_visible()
+                        && data_refresh_needs_visibility_check(
+                            &refresh_state.get_untracked(),
+                            js_sys::Date::now() as i64,
+                        )
+                    {
+                        leptos::task::spawn_local(load_data_refresh_status(set_refresh_state));
+                    }
+                });
+                let _ = document.add_event_listener_with_callback(
+                    "visibilitychange",
+                    listener.as_ref().unchecked_ref(),
+                );
+                SendWrapper::new((document, listener))
+            });
+    on_cleanup(move || {
+        visibility_guard.cancel();
+        focus_listener.remove();
+        if let Some(listener) = visibility_listener {
+            let (document, listener) = listener.take();
+            let _ = document.remove_event_listener_with_callback(
+                "visibilitychange",
+                listener.as_ref().unchecked_ref(),
+            );
         }
     });
 
@@ -935,32 +1026,174 @@ fn risk_mobile_card(position: RiskPositionDemo) -> impl IntoView {
     view! { <article class="risk-position-card"><header><strong class="ticker">{position.ticker}</strong><span class=format!("risk-level {}", position.risk_tone)>{position.risk}</span></header><dl><div><dt>"Estratégia"</dt><dd>{position.strategy}</dd></div><div><dt>"Strike"</dt><dd>{position.strike}</dd></div><div><dt>"Vencimento"</dt><dd>{position.expiry}</dd></div><div><dt>"DTE"</dt><dd>{position.dte}</dd></div><div><dt>"P&L atual"</dt><dd class=position.pnl_tone>{position.pnl}</dd></div><div class="risk-reason"><dt>"Motivo principal"</dt><dd>{position.reason}</dd></div></dl></article> }
 }
 
-async fn load_data_refresh_status(set_state: WriteSignal<DataRefreshLoadState>) {
+fn status_is_running(status: &DataRefreshStatusResponse) -> bool {
+    status.running
+        || status
+            .latest
+            .as_ref()
+            .is_some_and(|run| run.state == DataRefreshState::Running)
+}
+
+fn data_refresh_is_awaiting_terminal(state: &DataRefreshLoadState) -> bool {
+    matches!(
+        state,
+        DataRefreshLoadState::Success {
+            awaiting_terminal_confirmation: true,
+            ..
+        }
+    )
+}
+
+fn apply_data_refresh_status_result(
+    state: &mut DataRefreshLoadState,
+    result: DataRefreshStatusResult,
+) {
+    match result {
+        DataRefreshStatusResult::Success(status) => {
+            let awaiting_terminal_confirmation = status_is_running(&status);
+            *state = DataRefreshLoadState::Success {
+                status,
+                communication_error: None,
+                awaiting_terminal_confirmation,
+            };
+        }
+        DataRefreshStatusResult::Unavailable(message) => match state {
+            DataRefreshLoadState::Success {
+                communication_error,
+                ..
+            } => *communication_error = Some(message),
+            _ => *state = DataRefreshLoadState::Unavailable(message),
+        },
+        DataRefreshStatusResult::Error(message) => match state {
+            DataRefreshLoadState::Success {
+                communication_error,
+                ..
+            } => *communication_error = Some(message),
+            _ => *state = DataRefreshLoadState::Error(message),
+        },
+    }
+}
+
+fn mark_manual_refresh_known(state: &mut DataRefreshLoadState, run: Option<DataRefreshRun>) {
+    match state {
+        DataRefreshLoadState::Success {
+            status,
+            communication_error,
+            awaiting_terminal_confirmation,
+        } => {
+            *awaiting_terminal_confirmation = true;
+            *communication_error = None;
+            if let Some(run) = run {
+                status.running = true;
+                status.latest = Some(run.clone());
+                status.recent.retain(|recent| recent.id != run.id);
+                status.recent.insert(0, run);
+            }
+        }
+        _ => {
+            let recent = run.clone().into_iter().collect();
+            *state = DataRefreshLoadState::Success {
+                status: DataRefreshStatusResponse {
+                    running: true,
+                    latest: run,
+                    recent,
+                },
+                communication_error: None,
+                awaiting_terminal_confirmation: true,
+            };
+        }
+    }
+}
+
+fn data_refresh_observation_delay_ms(state: &DataRefreshLoadState, now_ms: i64) -> Option<u32> {
+    let DataRefreshLoadState::Success {
+        status,
+        awaiting_terminal_confirmation,
+        ..
+    } = state
+    else {
+        return None;
+    };
+
+    if *awaiting_terminal_confirmation {
+        return Some(DATA_REFRESH_POLL_INTERVAL_MS);
+    }
+
+    let next_attempt_ms = status
+        .latest
+        .as_ref()?
+        .next_attempt_at
+        .as_ref()?
+        .timestamp_millis();
+    if next_attempt_ms <= now_ms {
+        return Some(DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS);
+    }
+
+    let delay = next_attempt_ms
+        .saturating_sub(now_ms)
+        .saturating_add(DATA_REFRESH_SCHEDULER_TOLERANCE_MS);
+    Some(u32::try_from(delay).unwrap_or(u32::MAX))
+}
+
+fn data_refresh_needs_visibility_check(state: &DataRefreshLoadState, now_ms: i64) -> bool {
+    match state {
+        DataRefreshLoadState::Loading
+        | DataRefreshLoadState::Unavailable(_)
+        | DataRefreshLoadState::Error(_) => true,
+        DataRefreshLoadState::Success {
+            status,
+            awaiting_terminal_confirmation,
+            ..
+        } => {
+            *awaiting_terminal_confirmation
+                || status
+                    .latest
+                    .as_ref()
+                    .and_then(|run| run.next_attempt_at.as_ref())
+                    .is_some_and(|next_attempt| {
+                        next_attempt.timestamp_millis()
+                            <= now_ms.saturating_add(DATA_REFRESH_SCHEDULER_TOLERANCE_MS)
+                    })
+        }
+    }
+}
+
+fn document_is_visible() -> bool {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .is_some_and(|document| document.visibility_state() == web_sys::VisibilityState::Visible)
+}
+
+async fn fetch_data_refresh_status() -> DataRefreshStatusResult {
     let response = match Request::get("/api/data-refresh/status").send().await {
         Ok(response) => response,
         Err(_) => {
-            set_state.set(DataRefreshLoadState::Error(
+            return DataRefreshStatusResult::Error(
                 "Não foi possível contactar o serviço de atualização.".to_string(),
-            ));
-            return;
+            );
         }
     };
 
     match response.status() {
         200 => match response.json::<DataRefreshStatusResponse>().await {
-            Ok(status) => set_state.set(DataRefreshLoadState::Success(status)),
-            Err(_) => set_state.set(DataRefreshLoadState::Error(
-                "O serviço devolveu um estado inválido.".to_string(),
-            )),
+            Ok(status) => DataRefreshStatusResult::Success(status),
+            Err(_) => {
+                DataRefreshStatusResult::Error("O serviço devolveu um estado inválido.".to_string())
+            }
         },
-        404 | 501 | 503 => set_state.set(DataRefreshLoadState::Unavailable(
+        404 | 501 | 503 => DataRefreshStatusResult::Unavailable(
             "O serviço de atualização não está disponível.".to_string(),
-        )),
-        _ => set_state.set(DataRefreshLoadState::Error(format!(
+        ),
+        _ => DataRefreshStatusResult::Error(format!(
             "Não foi possível obter o estado (HTTP {}).",
             response.status()
-        ))),
+        )),
     }
+}
+
+async fn load_data_refresh_status(set_state: WriteSignal<DataRefreshLoadState>) {
+    let result = fetch_data_refresh_status().await;
+    set_state.update(|state| apply_data_refresh_status_result(state, result));
 }
 
 fn refresh_state_label(state: DataRefreshState) -> &'static str {
@@ -1062,16 +1295,29 @@ fn DashboardRefreshActivities() -> impl IntoView {
             <div class="activity-state error" role="alert">{message}</div>
         }
         .into_any(),
-        DataRefreshLoadState::Success(status) => {
+        DataRefreshLoadState::Success {
+            status,
+            communication_error,
+            ..
+        } => {
             let mut recent = status.recent;
             recent.sort_by_key(|run| std::cmp::Reverse(run.started_at));
-            if recent.is_empty() {
+            let activities = if recent.is_empty() {
                 view! { <div class="activity-state" role="status">"Sem atividade do sistema registada."</div> }
                     .into_any()
             } else {
                 view! { <>{recent.into_iter().map(|run| view! { <SystemActivity run=run /> }).collect_view()}</> }
                     .into_any()
+            };
+            view! {
+                <>
+                    {communication_error.map(|message| view! {
+                        <div class="activity-state error" role="alert">{message}</div>
+                    })}
+                    {activities}
+                </>
             }
+            .into_any()
         }
     }
 }
@@ -1625,10 +1871,7 @@ fn SettingsPage() -> impl IntoView {
 
     let request_refresh = move |_| {
         if submitting.get_untracked()
-            || matches!(
-                refresh_state.get_untracked(),
-                DataRefreshLoadState::Success(status) if status.running
-            )
+            || data_refresh_is_awaiting_terminal(&refresh_state.get_untracked())
         {
             return;
         }
@@ -1637,8 +1880,9 @@ fn SettingsPage() -> impl IntoView {
         leptos::task::spawn_local(async move {
             let result = request_manual_data_refresh().await;
             match result {
-                Ok(message) => {
+                Ok((message, run)) => {
                     set_request_feedback.set(Some((false, message)));
+                    set_refresh_state.update(|state| mark_manual_refresh_known(state, run));
                     load_data_refresh_status(set_refresh_state).await;
                 }
                 Err(message) => set_request_feedback.set(Some((true, message))),
@@ -1665,7 +1909,7 @@ fn SettingsPage() -> impl IntoView {
     }
 }
 
-async fn request_manual_data_refresh() -> Result<String, String> {
+async fn request_manual_data_refresh() -> Result<(String, Option<DataRefreshRun>), String> {
     let response = Request::post("/api/data-refresh")
         .send()
         .await
@@ -1682,8 +1926,8 @@ async fn request_manual_data_refresh() -> Result<String, String> {
         .await
         .map_err(|_| "O serviço devolveu uma resposta inválida.".to_string())?;
     match (status, body.result) {
-        (202, DataRefreshRequestState::Started) => Ok(body.message),
-        (409, DataRefreshRequestState::AlreadyRunning) => Ok(body.message),
+        (202, DataRefreshRequestState::Started) => Ok((body.message, body.run)),
+        (409, DataRefreshRequestState::AlreadyRunning) => Ok((body.message, body.run)),
         (409, DataRefreshRequestState::NoEligibleSession) => Err(body.message),
         _ => Err("O serviço devolveu uma resposta incoerente.".to_string()),
     }
@@ -1699,12 +1943,7 @@ fn DataRefreshPanel<F>(
 where
     F: Fn(leptos::ev::MouseEvent) + 'static,
 {
-    let is_running = move || {
-        matches!(
-            refresh_state.get(),
-            DataRefreshLoadState::Success(status) if status.running
-        )
-    };
+    let is_running = move || data_refresh_is_awaiting_terminal(&refresh_state.get());
     view! {
         <article class="card refresh-panel" aria-labelledby="refresh-panel-title">
             <header class="refresh-panel-header">
@@ -1729,7 +1968,14 @@ where
                 DataRefreshLoadState::Loading => view! { <DataStatus kind="loading" message="A obter o estado da atualização…".to_string() /> }.into_any(),
                 DataRefreshLoadState::Unavailable(message) => view! { <DataStatus kind="unavailable" message=message /> }.into_any(),
                 DataRefreshLoadState::Error(message) => view! { <DataStatus kind="error" message=message /> }.into_any(),
-                DataRefreshLoadState::Success(status) => view! { <RefreshStatusDetails status=status /> }.into_any(),
+                DataRefreshLoadState::Success { status, communication_error, .. } => view! {
+                    <>
+                        {communication_error.map(|message| view! {
+                            <DataStatus kind="error" message=message />
+                        })}
+                        <RefreshStatusDetails status=status />
+                    </>
+                }.into_any(),
             }}
         </article>
     }
@@ -1827,6 +2073,40 @@ fn SettingRow(title: &'static str, detail: &'static str) -> impl IntoView {
 #[cfg(test)]
 mod data_refresh_tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
+
+    fn run(
+        id: &str,
+        origin: DataRefreshOrigin,
+        state: DataRefreshState,
+        started_at_ms: i64,
+        next_attempt_at_ms: Option<i64>,
+    ) -> DataRefreshRun {
+        DataRefreshRun {
+            id: id.to_string(),
+            origin,
+            state,
+            started_at: Utc.timestamp_millis_opt(started_at_ms).unwrap(),
+            finished_at: (state != DataRefreshState::Running)
+                .then(|| Utc.timestamp_millis_opt(started_at_ms + 1_000).unwrap()),
+            target_session: chrono::NaiveDate::from_ymd_opt(2026, 8, 13).unwrap(),
+            items_obtained: 0,
+            items_persisted: 0,
+            failure_count: 0,
+            next_attempt_at: next_attempt_at_ms
+                .map(|value| Utc.timestamp_millis_opt(value).unwrap()),
+            summary: String::new(),
+            failures: Vec::new(),
+        }
+    }
+
+    fn status(run: DataRefreshRun) -> DataRefreshStatusResponse {
+        DataRefreshStatusResponse {
+            running: run.state == DataRefreshState::Running,
+            latest: Some(run.clone()),
+            recent: vec![run],
+        }
+    }
 
     #[test]
     fn maps_every_wire_state_to_the_required_portuguese_copy() {
@@ -1863,5 +2143,133 @@ mod data_refresh_tests {
         for (origin, label) in cases {
             assert_eq!(refresh_origin_label(origin), label);
         }
+    }
+
+    #[test]
+    fn transient_error_during_running_preserves_facts_and_polling_until_completion() {
+        let running = run(
+            "manual-1",
+            DataRefreshOrigin::Manual,
+            DataRefreshState::Running,
+            1_000,
+            None,
+        );
+        let mut state = DataRefreshLoadState::Loading;
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(running.clone())),
+        );
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Error("ligação interrompida".to_string()),
+        );
+
+        let DataRefreshLoadState::Success {
+            status: preserved,
+            communication_error,
+            awaiting_terminal_confirmation,
+        } = &state
+        else {
+            panic!("o último estado factual deve ser preservado");
+        };
+        assert_eq!(preserved.latest.as_ref().unwrap().id, running.id);
+        assert_eq!(communication_error.as_deref(), Some("ligação interrompida"));
+        assert!(*awaiting_terminal_confirmation);
+        assert_eq!(
+            data_refresh_observation_delay_ms(&state, 2_000),
+            Some(DATA_REFRESH_POLL_INTERVAL_MS)
+        );
+
+        let completed = run(
+            "manual-1",
+            DataRefreshOrigin::Manual,
+            DataRefreshState::Completed,
+            1_000,
+            None,
+        );
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(completed)),
+        );
+        assert!(!data_refresh_is_awaiting_terminal(&state));
+        assert_eq!(data_refresh_observation_delay_ms(&state, 3_000), None);
+        assert!(matches!(
+            state,
+            DataRefreshLoadState::Success {
+                communication_error: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn scheduled_execution_is_discovered_from_the_next_attempt_timer() {
+        let now = 10_000;
+        let terminal = run(
+            "scheduled-previous",
+            DataRefreshOrigin::Scheduled,
+            DataRefreshState::Completed,
+            1_000,
+            Some(now + 20_000),
+        );
+        let mut state = DataRefreshLoadState::Loading;
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(terminal)),
+        );
+        assert_eq!(data_refresh_observation_delay_ms(&state, now), Some(21_500));
+
+        let scheduled = run(
+            "scheduled-next",
+            DataRefreshOrigin::Scheduled,
+            DataRefreshState::Running,
+            now + 20_000,
+            None,
+        );
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(scheduled)),
+        );
+        assert!(data_refresh_is_awaiting_terminal(&state));
+        assert_eq!(
+            data_refresh_observation_delay_ms(&state, now + 21_500),
+            Some(DATA_REFRESH_POLL_INTERVAL_MS)
+        );
+    }
+
+    #[test]
+    fn past_next_attempt_uses_a_bounded_non_immediate_recheck() {
+        let terminal = run(
+            "retry-previous",
+            DataRefreshOrigin::Retry,
+            DataRefreshState::Failed,
+            1_000,
+            Some(9_000),
+        );
+        let mut state = DataRefreshLoadState::Loading;
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(terminal)),
+        );
+
+        assert_eq!(
+            data_refresh_observation_delay_ms(&state, 10_000),
+            Some(DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS)
+        );
+        assert!(data_refresh_needs_visibility_check(&state, 10_000));
+    }
+
+    #[test]
+    fn cleanup_disables_timer_and_visibility_callbacks() {
+        let timer_guard = ObservationGuard::new();
+        let timer_callback = timer_guard.clone();
+        let listener_guard = ObservationGuard::new();
+        let visibility_callback = listener_guard.clone();
+
+        timer_guard.cancel();
+        listener_guard.cancel();
+
+        assert!(!timer_callback.is_active());
+        assert!(!visibility_callback.is_active());
     }
 }
