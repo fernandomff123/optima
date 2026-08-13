@@ -2297,11 +2297,15 @@ name = "optima_web"
 version = "0.1.0"
 dependencies = [
  "api_models",
+ "chrono",
  "futures-util",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
  "leptos",
+ "send_wrapper",
  "serde_json",
+ "wasm-bindgen",
  "web-sys",
 ]
 

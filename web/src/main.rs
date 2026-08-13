@@ -1,14 +1,65 @@
 use api_models::{
-    AssetLivePrice, DataState, Freshness, MarketSpxHistoryResponse, PriceHistoryOverview,
-    PriceHistoryPoint,
+    AssetLivePrice, DataRefreshOrigin, DataRefreshRequestResponse, DataRefreshRequestState,
+    DataRefreshRun, DataRefreshState, DataRefreshStatusResponse, DataState, Freshness,
+    MarketSpxHistoryResponse, PriceHistoryOverview, PriceHistoryPoint,
 };
-use futures_util::StreamExt;
+use futures_util::{
+    StreamExt,
+    future::{AbortHandle, Abortable},
+};
 use gloo_net::{http::Request, websocket::futures::WebSocket};
 use gloo_timers::future::TimeoutFuture;
+use leptos::leptos_dom::helpers::window_event_listener;
 use leptos::prelude::*;
-use std::fmt;
+use send_wrapper::SendWrapper;
+use std::{
+    fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+use wasm_bindgen::{JsCast, closure::Closure};
 
 const API_BASE_PATH: &str = "/api";
+const DATA_REFRESH_POLL_INTERVAL_MS: u32 = 5_000;
+const DATA_REFRESH_SCHEDULER_TOLERANCE_MS: i64 = 1_500;
+const DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS: u32 = 60_000;
+
+#[derive(Clone)]
+enum DataRefreshLoadState {
+    Loading,
+    Success {
+        status: DataRefreshStatusResponse,
+        communication_error: Option<String>,
+        awaiting_terminal_confirmation: bool,
+    },
+    Unavailable(String),
+    Error(String),
+}
+
+enum DataRefreshStatusResult {
+    Success(DataRefreshStatusResponse),
+    Unavailable(String),
+    Error(String),
+}
+
+#[derive(Clone, Default)]
+struct ObservationGuard(Arc<AtomicBool>);
+
+impl ObservationGuard {
+    fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+
+    fn is_active(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    fn cancel(&self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
@@ -67,6 +118,82 @@ fn App() -> impl IntoView {
     let (menu_open, set_menu_open) = signal(false);
     let menu_button = NodeRef::<leptos::html::Button>::new();
     let first_nav_button = NodeRef::<leptos::html::Button>::new();
+    let (refresh_state, set_refresh_state) = signal(DataRefreshLoadState::Loading);
+    provide_context((refresh_state, set_refresh_state));
+
+    leptos::task::spawn_local(load_data_refresh_status(set_refresh_state));
+    Effect::new(move |_| {
+        let delay =
+            data_refresh_observation_delay_ms(&refresh_state.get(), js_sys::Date::now() as i64);
+        if let Some(delay) = delay {
+            let (abort_handle, abort_registration) = AbortHandle::new_pair();
+            let guard = ObservationGuard::new();
+            let task_guard = guard.clone();
+            leptos::task::spawn_local(async move {
+                let observation = async move {
+                    TimeoutFuture::new(delay).await;
+                    if task_guard.is_active() {
+                        load_data_refresh_status(set_refresh_state).await;
+                    }
+                };
+                let _ = Abortable::new(observation, abort_registration).await;
+            });
+            on_cleanup(move || {
+                guard.cancel();
+                abort_handle.abort();
+            });
+        }
+    });
+
+    let visibility_guard = ObservationGuard::new();
+    let observe_on_return = {
+        let visibility_guard = visibility_guard.clone();
+        move || {
+            if visibility_guard.is_active()
+                && document_is_visible()
+                && data_refresh_needs_visibility_check(
+                    &refresh_state.get_untracked(),
+                    js_sys::Date::now() as i64,
+                )
+            {
+                leptos::task::spawn_local(load_data_refresh_status(set_refresh_state));
+            }
+        }
+    };
+    let focus_listener = window_event_listener(leptos::ev::focus, move |_| observe_on_return());
+    let visibility_listener =
+        web_sys::window()
+            .and_then(|window| window.document())
+            .map(|document| {
+                let listener_guard = visibility_guard.clone();
+                let listener = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+                    if listener_guard.is_active()
+                        && document_is_visible()
+                        && data_refresh_needs_visibility_check(
+                            &refresh_state.get_untracked(),
+                            js_sys::Date::now() as i64,
+                        )
+                    {
+                        leptos::task::spawn_local(load_data_refresh_status(set_refresh_state));
+                    }
+                });
+                let _ = document.add_event_listener_with_callback(
+                    "visibilitychange",
+                    listener.as_ref().unchecked_ref(),
+                );
+                SendWrapper::new((document, listener))
+            });
+    on_cleanup(move || {
+        visibility_guard.cancel();
+        focus_listener.remove();
+        if let Some(listener) = visibility_listener {
+            let (document, listener) = listener.take();
+            let _ = document.remove_event_listener_with_callback(
+                "visibilitychange",
+                listener.as_ref().unchecked_ref(),
+            );
+        }
+    });
 
     let close_menu = move || {
         set_menu_open.set(false);
@@ -504,6 +631,13 @@ fn SectorDetailPanel(
                 let sector = SECTOR_MARKET_DEMO[selected.get()];
                 let index = period.get().index();
                 let change = sector.changes[index];
+                let histogram = sector.histograms[index];
+                let histogram_max = histogram
+                    .iter()
+                    .map(|value| value.unsigned_abs())
+                    .max()
+                    .unwrap_or(1)
+                    .max(1);
                 let histogram_description = format!("Histograma demonstrativo de oito intervalos para {} no período de {}", sector.name, period.get().label());
                 view! {
                     <div class="sector-detail-top"><div><span>"Setor selecionado"</span><h2>{sector.name}</h2></div><b>{sector.etf}</b></div>
@@ -518,8 +652,12 @@ fn SectorDetailPanel(
                         <figcaption><span>"Momentum"</span><small>"Histograma demonstrativo"</small></figcaption>
                         <div class="histogram-plot" role="img" aria-label=histogram_description>
                             <i class="histogram-zero"></i>
-                            {sector.histograms[index].into_iter().map(|value| view! {
-                                <span class=if value < 0 { "negative" } else { "positive" } style=format!("--bar-size: {}%", value.unsigned_abs() * 10)><i></i></span>
+                            {histogram.into_iter().map(|value| {
+                                let magnitude = value.unsigned_abs();
+                                let normalized = if magnitude == 0 { 0 } else { (u16::from(magnitude) * 100 / u16::from(histogram_max)).max(12) };
+                                view! {
+                                <span class=if value < 0 { "negative" } else { "positive" } style=format!("--bar-size: {normalized}%")><i></i></span>
+                                }
                             }).collect_view()}
                         </div>
                     </figure>
@@ -888,6 +1026,302 @@ fn risk_mobile_card(position: RiskPositionDemo) -> impl IntoView {
     view! { <article class="risk-position-card"><header><strong class="ticker">{position.ticker}</strong><span class=format!("risk-level {}", position.risk_tone)>{position.risk}</span></header><dl><div><dt>"Estratégia"</dt><dd>{position.strategy}</dd></div><div><dt>"Strike"</dt><dd>{position.strike}</dd></div><div><dt>"Vencimento"</dt><dd>{position.expiry}</dd></div><div><dt>"DTE"</dt><dd>{position.dte}</dd></div><div><dt>"P&L atual"</dt><dd class=position.pnl_tone>{position.pnl}</dd></div><div class="risk-reason"><dt>"Motivo principal"</dt><dd>{position.reason}</dd></div></dl></article> }
 }
 
+fn status_is_running(status: &DataRefreshStatusResponse) -> bool {
+    status.running
+        || status
+            .latest
+            .as_ref()
+            .is_some_and(|run| run.state == DataRefreshState::Running)
+}
+
+fn data_refresh_is_awaiting_terminal(state: &DataRefreshLoadState) -> bool {
+    matches!(
+        state,
+        DataRefreshLoadState::Success {
+            awaiting_terminal_confirmation: true,
+            ..
+        }
+    )
+}
+
+fn apply_data_refresh_status_result(
+    state: &mut DataRefreshLoadState,
+    result: DataRefreshStatusResult,
+) {
+    match result {
+        DataRefreshStatusResult::Success(status) => {
+            let awaiting_terminal_confirmation = status_is_running(&status);
+            *state = DataRefreshLoadState::Success {
+                status,
+                communication_error: None,
+                awaiting_terminal_confirmation,
+            };
+        }
+        DataRefreshStatusResult::Unavailable(message) => match state {
+            DataRefreshLoadState::Success {
+                communication_error,
+                ..
+            } => *communication_error = Some(message),
+            _ => *state = DataRefreshLoadState::Unavailable(message),
+        },
+        DataRefreshStatusResult::Error(message) => match state {
+            DataRefreshLoadState::Success {
+                communication_error,
+                ..
+            } => *communication_error = Some(message),
+            _ => *state = DataRefreshLoadState::Error(message),
+        },
+    }
+}
+
+fn mark_manual_refresh_known(state: &mut DataRefreshLoadState, run: Option<DataRefreshRun>) {
+    match state {
+        DataRefreshLoadState::Success {
+            status,
+            communication_error,
+            awaiting_terminal_confirmation,
+        } => {
+            *awaiting_terminal_confirmation = true;
+            *communication_error = None;
+            if let Some(run) = run {
+                status.running = true;
+                status.latest = Some(run.clone());
+                status.recent.retain(|recent| recent.id != run.id);
+                status.recent.insert(0, run);
+            }
+        }
+        _ => {
+            let recent = run.clone().into_iter().collect();
+            *state = DataRefreshLoadState::Success {
+                status: DataRefreshStatusResponse {
+                    running: true,
+                    latest: run,
+                    recent,
+                },
+                communication_error: None,
+                awaiting_terminal_confirmation: true,
+            };
+        }
+    }
+}
+
+fn data_refresh_observation_delay_ms(state: &DataRefreshLoadState, now_ms: i64) -> Option<u32> {
+    let DataRefreshLoadState::Success {
+        status,
+        awaiting_terminal_confirmation,
+        ..
+    } = state
+    else {
+        return None;
+    };
+
+    if *awaiting_terminal_confirmation {
+        return Some(DATA_REFRESH_POLL_INTERVAL_MS);
+    }
+
+    let next_attempt_ms = status
+        .latest
+        .as_ref()?
+        .next_attempt_at
+        .as_ref()?
+        .timestamp_millis();
+    if next_attempt_ms <= now_ms {
+        return Some(DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS);
+    }
+
+    let delay = next_attempt_ms
+        .saturating_sub(now_ms)
+        .saturating_add(DATA_REFRESH_SCHEDULER_TOLERANCE_MS);
+    Some(u32::try_from(delay).unwrap_or(u32::MAX))
+}
+
+fn data_refresh_needs_visibility_check(state: &DataRefreshLoadState, now_ms: i64) -> bool {
+    match state {
+        DataRefreshLoadState::Loading
+        | DataRefreshLoadState::Unavailable(_)
+        | DataRefreshLoadState::Error(_) => true,
+        DataRefreshLoadState::Success {
+            status,
+            awaiting_terminal_confirmation,
+            ..
+        } => {
+            *awaiting_terminal_confirmation
+                || status
+                    .latest
+                    .as_ref()
+                    .and_then(|run| run.next_attempt_at.as_ref())
+                    .is_some_and(|next_attempt| {
+                        next_attempt.timestamp_millis()
+                            <= now_ms.saturating_add(DATA_REFRESH_SCHEDULER_TOLERANCE_MS)
+                    })
+        }
+    }
+}
+
+fn document_is_visible() -> bool {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .is_some_and(|document| document.visibility_state() == web_sys::VisibilityState::Visible)
+}
+
+async fn fetch_data_refresh_status() -> DataRefreshStatusResult {
+    let response = match Request::get("/api/data-refresh/status").send().await {
+        Ok(response) => response,
+        Err(_) => {
+            return DataRefreshStatusResult::Error(
+                "Não foi possível contactar o serviço de atualização.".to_string(),
+            );
+        }
+    };
+
+    match response.status() {
+        200 => match response.json::<DataRefreshStatusResponse>().await {
+            Ok(status) => DataRefreshStatusResult::Success(status),
+            Err(_) => {
+                DataRefreshStatusResult::Error("O serviço devolveu um estado inválido.".to_string())
+            }
+        },
+        404 | 501 | 503 => DataRefreshStatusResult::Unavailable(
+            "O serviço de atualização não está disponível.".to_string(),
+        ),
+        _ => DataRefreshStatusResult::Error(format!(
+            "Não foi possível obter o estado (HTTP {}).",
+            response.status()
+        )),
+    }
+}
+
+async fn load_data_refresh_status(set_state: WriteSignal<DataRefreshLoadState>) {
+    let result = fetch_data_refresh_status().await;
+    set_state.update(|state| apply_data_refresh_status_result(state, result));
+}
+
+fn refresh_state_label(state: DataRefreshState) -> &'static str {
+    match state {
+        DataRefreshState::Running => "Em curso",
+        DataRefreshState::Completed => "Concluída",
+        DataRefreshState::Partial => "Parcial",
+        DataRefreshState::Failed => "Falhou",
+    }
+}
+
+fn refresh_activity_title(state: DataRefreshState) -> &'static str {
+    match state {
+        DataRefreshState::Running => "Atualização de dados iniciada",
+        DataRefreshState::Completed => "Atualização concluída",
+        DataRefreshState::Partial => "Atualização parcial",
+        DataRefreshState::Failed => "Atualização falhou",
+    }
+}
+
+fn refresh_origin_label(origin: DataRefreshOrigin) -> &'static str {
+    match origin {
+        DataRefreshOrigin::Startup => "Arranque",
+        DataRefreshOrigin::Scheduled => "Agendada",
+        DataRefreshOrigin::Retry => "Nova tentativa",
+        DataRefreshOrigin::Manual => "Manual",
+    }
+}
+
+fn refresh_tone(state: DataRefreshState) -> &'static str {
+    match state {
+        DataRefreshState::Running => "blue",
+        DataRefreshState::Completed => "green",
+        DataRefreshState::Partial => "amber",
+        DataRefreshState::Failed => "red",
+    }
+}
+
+fn format_refresh_datetime(value: &chrono::DateTime<chrono::Utc>) -> String {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        value.timestamp_millis() as f64
+    ));
+    date.to_locale_string("pt-PT", &wasm_bindgen::JsValue::UNDEFINED)
+        .into()
+}
+
+fn refresh_counts(run: &DataRefreshRun) -> Option<String> {
+    (run.items_obtained > 0 || run.items_persisted > 0).then(|| {
+        format!(
+            "{} obtidos · {} guardados",
+            run.items_obtained, run.items_persisted
+        )
+    })
+}
+
+#[component]
+fn SystemActivity(run: DataRefreshRun) -> impl IntoView {
+    let tone = refresh_tone(run.state);
+    let state = run.state;
+    let detail = format!("Origem: {}", refresh_origin_label(run.origin));
+    let counts = refresh_counts(&run);
+    let next_attempt = run.next_attempt_at.as_ref().map(|date| {
+        format!(
+            "Tentativa seguinte prevista: {}",
+            format_refresh_datetime(date)
+        )
+    });
+    view! {
+        <div class="activity-row system-activity">
+            <span class=format!("activity-icon {tone}") aria-hidden="true">"↻"</span>
+            <div>
+                <small>{format!("Sistema · {}", format_refresh_datetime(&run.started_at))}</small>
+                <b>{refresh_activity_title(state)}</b>
+                <p>{detail}</p>
+                {counts.map(|value| view! { <p>{value}</p> })}
+                {next_attempt.map(|value| view! { <p>{value}</p> })}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn DashboardRefreshActivities() -> impl IntoView {
+    let (refresh_state, _) = expect_context::<(
+        ReadSignal<DataRefreshLoadState>,
+        WriteSignal<DataRefreshLoadState>,
+    )>();
+
+    move || match refresh_state.get() {
+        DataRefreshLoadState::Loading => view! {
+            <div class="activity-state" role="status">"A carregar atividade do sistema…"</div>
+        }
+        .into_any(),
+        DataRefreshLoadState::Unavailable(message) => view! {
+            <div class="activity-state unavailable" role="status">{message}</div>
+        }
+        .into_any(),
+        DataRefreshLoadState::Error(message) => view! {
+            <div class="activity-state error" role="alert">{message}</div>
+        }
+        .into_any(),
+        DataRefreshLoadState::Success {
+            status,
+            communication_error,
+            ..
+        } => {
+            let mut recent = status.recent;
+            recent.sort_by_key(|run| std::cmp::Reverse(run.started_at));
+            let activities = if recent.is_empty() {
+                view! { <div class="activity-state" role="status">"Sem atividade do sistema registada."</div> }
+                    .into_any()
+            } else {
+                view! { <>{recent.into_iter().map(|run| view! { <SystemActivity run=run /> }).collect_view()}</> }
+                    .into_any()
+            };
+            view! {
+                <>
+                    {communication_error.map(|message| view! {
+                        <div class="activity-state error" role="alert">{message}</div>
+                    })}
+                    {activities}
+                </>
+            }
+            .into_any()
+        }
+    }
+}
+
 #[component]
 fn DashboardPage() -> impl IntoView {
     let data = DashboardDemo::get();
@@ -907,7 +1341,7 @@ fn DashboardPage() -> impl IntoView {
             </header>
             <p id="dashboard-demo-note" class="demo-notice" role="note">
                 <span aria-hidden="true">"◇"</span>
-                "Simulação · todos os valores, sinais e atividades desta página são demonstrativos."
+                "Simulação · os valores, sinais e atividades financeiras são demonstrativos; a atividade do Sistema é factual."
             </p>
 
             <div class="dashboard-metrics">
@@ -915,69 +1349,89 @@ fn DashboardPage() -> impl IntoView {
             </div>
 
             <div class="official-dashboard-grid">
-                <DashboardPanel class="exposure-panel" title="Exposição por setor" subtitle="Percentagem do valor de mercado · simulação">
-                    <div class="sector-list">
-                        {data.sectors.into_iter().map(|sector| view! {
-                            <div class="sector-row">
-                                <div class="sector-copy"><b>{sector.name}</b><small>{sector.tickers}</small><strong>{format!("{}%", sector.percent)}</strong></div>
-                                <div class="demo-progress" role="img" aria-label=format!("{}: {} por cento", sector.name, sector.percent)>
-                                    <i class=sector.tone style=format!("width:{}%", sector.width)></i>
+                <div class="dashboard-top-row">
+                    <DashboardPanel class="exposure-panel" title="Exposição por setor" subtitle="Percentagem do valor de mercado · simulação">
+                        <div class="sector-list">
+                            {data.sectors.into_iter().map(|sector| view! {
+                                <div class="sector-row">
+                                    <div class="sector-copy"><b>{sector.name}</b><small>{sector.tickers}</small><strong>{format!("{}%", sector.percent)}</strong></div>
+                                    <div class="demo-progress" role="img" aria-label=format!("{}: {} por cento", sector.name, sector.percent)>
+                                        <i class=sector.tone style=format!("width:{}%", sector.width)></i>
+                                    </div>
                                 </div>
-                            </div>
-                        }).collect_view()}
-                    </div>
-                </DashboardPanel>
+                            }).collect_view()}
+                        </div>
+                    </DashboardPanel>
 
-                <DashboardPanel class="greek-panel" title="Gregas do portfolio" subtitle="Exposição líquida · dados demonstrativos">
-                    <div class="greek-list">
-                        {data.greeks.into_iter().map(|greek| view! {
-                            <div class="greek-row">
-                                <div><span><b>{greek.name}</b><small>{greek.detail}</small></span><strong>{greek.value}</strong></div>
-                                <div class="demo-progress" role="img" aria-label=format!("{} demonstrativo: {}", greek.name, greek.value)>
-                                    <i class=greek.tone style=format!("width:{}%", greek.width)></i>
+                    <DashboardPanel class="greek-panel" title="Gregas do portfolio" subtitle="Exposição líquida · dados demonstrativos">
+                        <div class="greek-list">
+                            {data.greeks.into_iter().map(|greek| view! {
+                                <div class="greek-row">
+                                    <div><span><b>{greek.name}</b><small>{greek.detail}</small></span><strong>{greek.value}</strong></div>
+                                    <div class="demo-progress" role="img" aria-label=format!("{} demonstrativo: {}", greek.name, greek.value)>
+                                        <i class=greek.tone style=format!("width:{}%", greek.width)></i>
+                                    </div>
                                 </div>
-                            </div>
-                        }).collect_view()}
-                    </div>
-                </DashboardPanel>
+                            }).collect_view()}
+                        </div>
+                    </DashboardPanel>
+                </div>
 
-                <DashboardPanel class="pnl-panel" title="P&L vs benchmark" subtitle="Evolução acumulada · últimos 30 dias · simulação">
-                    <DemoPnlChart data=data.pnl />
-                </DashboardPanel>
+                <div class="dashboard-column dashboard-column-left">
+                    <DashboardPanel class="pnl-panel" title="P&L vs benchmark" subtitle="Evolução acumulada · últimos 30 dias · simulação">
+                        <DemoPnlChart data=data.pnl />
+                    </DashboardPanel>
 
-                <DashboardPanel class="alerts-panel" title="Alertas de risco" subtitle="3 sinais demonstrativos requerem atenção">
-                    <div class="alert-list">
-                        {data.alerts.into_iter().map(|alert| view! {
-                            <div class=format!("risk-alert {}", alert.tone)>
-                                <span aria-hidden="true">"!"</span>
-                                <div><b>{alert.title}</b><small>{alert.detail}</small></div>
-                                <em>"Simulação"</em>
-                            </div>
-                        }).collect_view()}
-                    </div>
-                </DashboardPanel>
+                    <DashboardPanel class="maturity-panel" title="Escada de vencimentos" subtitle="Posições por intervalo de DTE · simulação">
+                        <div class="ladder-bars" role="img" aria-label="Distribuição demonstrativa: 3 posições de 0 a 7 DTE, 2 de 8 a 14, 4 de 15 a 30, 2 de 31 a 60 e 1 acima de 60">
+                            {data.maturities.into_iter().map(|item| view! {
+                                <div class="ladder-column"><b>{item.count}</b><div><i class=item.tone style=format!("height:{}px", item.height)></i></div><span>{item.range}</span></div>
+                            }).collect_view()}
+                        </div>
+                        <small class="ladder-axis">"Dias até ao vencimento (DTE)"</small>
+                        <div class="ladder-note"><b>"5 posições"</b><span>"vencem nos próximos 14 dias"</span></div>
+                    </DashboardPanel>
+                </div>
 
-                <DashboardPanel class="maturity-panel" title="Escada de vencimentos" subtitle="Posições por intervalo de DTE · simulação">
-                    <div class="ladder-bars" role="img" aria-label="Distribuição demonstrativa: 3 posições de 0 a 7 DTE, 2 de 8 a 14, 4 de 15 a 30, 2 de 31 a 60 e 1 acima de 60">
-                        {data.maturities.into_iter().map(|item| view! {
-                            <div class="ladder-column"><b>{item.count}</b><div><i class=item.tone style=format!("height:{}px", item.height)></i></div><span>{item.range}</span></div>
-                        }).collect_view()}
-                    </div>
-                    <small class="ladder-axis">"Dias até ao vencimento (DTE)"</small>
-                    <div class="ladder-note"><b>"5 posições"</b><span>"vencem nos próximos 14 dias"</span></div>
-                </DashboardPanel>
+                <div class="dashboard-column dashboard-column-right">
+                    <DashboardPanel class="alerts-panel" title="Alertas de risco" subtitle="3 sinais demonstrativos requerem atenção">
+                        <div class="alert-list">
+                            {data.alerts.into_iter().map(|alert| view! {
+                                <div class=format!("risk-alert {}", alert.tone)>
+                                    <span aria-hidden="true">"!"</span>
+                                    <div><b>{alert.title}</b><small>{alert.detail}</small></div>
+                                    <em>"Simulação"</em>
+                                </div>
+                            }).collect_view()}
+                        </div>
+                    </DashboardPanel>
 
-                <DashboardPanel class="activity-panel" title="Atividade recente" subtitle="Registo demonstrativo; nenhuma ação real">
-                    <div class="activity-list">
-                        {data.activities.into_iter().map(|activity| view! {
-                            <div class="activity-row">
-                                <span class=format!("activity-icon {}", activity.tone) aria-hidden="true">{activity.icon}</span>
-                                <div><small>{activity.time}</small><b>{activity.title}</b><p>{activity.detail}</p></div>
-                                {activity.value.map(|value| view! { <strong class="positive">{value}</strong> })}
-                            </div>
-                        }).collect_view()}
-                    </div>
-                </DashboardPanel>
+                    <DashboardPanel class="activity-panel" title="Atividade recente" subtitle="Sistema factual · atividade financeira simulada">
+                        <div
+                            class="activity-scroll"
+                            tabindex="0"
+                            role="region"
+                            aria-label="Lista de atividades recentes"
+                        >
+                        <div class="activity-columns">
+                            <section class="activity-group" aria-labelledby="system-activity-title">
+                                <h3 id="system-activity-title" class="activity-section-label">"Sistema"</h3>
+                                <DashboardRefreshActivities />
+                            </section>
+                            <section class="activity-group" aria-labelledby="simulation-activity-title">
+                                <h3 id="simulation-activity-title" class="activity-section-label">"Simulação"</h3>
+                                {data.activities.into_iter().map(|activity| view! {
+                                    <div class="activity-row">
+                                        <span class=format!("activity-icon {}", activity.tone) aria-hidden="true">{activity.icon}</span>
+                                        <div><small>{format!("Simulação · {}", activity.time)}</small><b>{activity.title}</b><p>{activity.detail}</p></div>
+                                        {activity.value.map(|value| view! { <strong class="positive">{value}</strong> })}
+                                    </div>
+                                }).collect_view()}
+                            </section>
+                        </div>
+                        </div>
+                    </DashboardPanel>
+                </div>
 
                 <DashboardPanel class="risk-positions-panel" title="Posições em maior risco" subtitle="Ranking explicável · dados demonstrativos">
                     <div class="risk-method"><span>"Score simulado"</span><b>"35% DTE"</b><b>"30% Gamma"</b><b>"20% Vega"</b><b>"15% perda"</b></div>
@@ -1408,16 +1862,168 @@ fn SimulatorPage() -> impl IntoView {
 
 #[component]
 fn SettingsPage() -> impl IntoView {
+    let (refresh_state, set_refresh_state) = expect_context::<(
+        ReadSignal<DataRefreshLoadState>,
+        WriteSignal<DataRefreshLoadState>,
+    )>();
+    let (submitting, set_submitting) = signal(false);
+    let (request_feedback, set_request_feedback) = signal::<Option<(bool, String)>>(None);
+
+    let request_refresh = move |_| {
+        if submitting.get_untracked()
+            || data_refresh_is_awaiting_terminal(&refresh_state.get_untracked())
+        {
+            return;
+        }
+        set_submitting.set(true);
+        set_request_feedback.set(None);
+        leptos::task::spawn_local(async move {
+            let result = request_manual_data_refresh().await;
+            match result {
+                Ok((message, run)) => {
+                    set_request_feedback.set(Some((false, message)));
+                    set_refresh_state.update(|state| mark_manual_refresh_known(state, run));
+                    load_data_refresh_status(set_refresh_state).await;
+                }
+                Err(message) => set_request_feedback.set(Some((true, message))),
+            }
+            set_submitting.set(false);
+        });
+    };
+
     view! {
         <section class="page">
-            <PageHeader eyebrow="Preferências" title="Configurações" subtitle="Preferências locais da interface" />
-            <PlaceholderNotice />
+            <PageHeader eyebrow="Preferências" title="Configurações" subtitle="Preferências e atualização de dados" />
+            <DataRefreshPanel
+                refresh_state=refresh_state
+                submitting=submitting
+                request_feedback=request_feedback
+                request_refresh=request_refresh
+            />
             <article class="card settings-list">
                 <SettingRow title="Modo escuro" detail="Tema inicial da fundação visual" />
                 <SettingRow title="Alertas de risco" detail="Configuração placeholder" />
                 <SettingRow title="Moeda base" detail="EUR (€) · configuração placeholder" />
             </article>
         </section>
+    }
+}
+
+async fn request_manual_data_refresh() -> Result<(String, Option<DataRefreshRun>), String> {
+    let response = Request::post("/api/data-refresh")
+        .send()
+        .await
+        .map_err(|_| "Não foi possível contactar o serviço de atualização.".to_string())?;
+    let status = response.status();
+    if status != 202 && status != 409 {
+        return Err(format!(
+            "Não foi possível iniciar a atualização (HTTP {status})."
+        ));
+    }
+
+    let body = response
+        .json::<DataRefreshRequestResponse>()
+        .await
+        .map_err(|_| "O serviço devolveu uma resposta inválida.".to_string())?;
+    match (status, body.result) {
+        (202, DataRefreshRequestState::Started) => Ok((body.message, body.run)),
+        (409, DataRefreshRequestState::AlreadyRunning) => Ok((body.message, body.run)),
+        (409, DataRefreshRequestState::NoEligibleSession) => Err(body.message),
+        _ => Err("O serviço devolveu uma resposta incoerente.".to_string()),
+    }
+}
+
+#[component]
+fn DataRefreshPanel<F>(
+    refresh_state: ReadSignal<DataRefreshLoadState>,
+    submitting: ReadSignal<bool>,
+    request_feedback: ReadSignal<Option<(bool, String)>>,
+    request_refresh: F,
+) -> impl IntoView
+where
+    F: Fn(leptos::ev::MouseEvent) + 'static,
+{
+    let is_running = move || data_refresh_is_awaiting_terminal(&refresh_state.get());
+    view! {
+        <article class="card refresh-panel" aria-labelledby="refresh-panel-title">
+            <header class="refresh-panel-header">
+                <div>
+                    <h2 id="refresh-panel-title">"Atualização de dados"</h2>
+                    <p>"Estado factual devolvido pelo serviço de atualização."</p>
+                </div>
+                <button
+                    class="refresh-button"
+                    type="button"
+                    disabled=move || submitting.get() || is_running()
+                    aria-busy=move || submitting.get().to_string()
+                    on:click=request_refresh
+                >
+                    {move || if submitting.get() { "A iniciar…" } else if is_running() { "Atualização em curso" } else { "Atualizar agora" }}
+                </button>
+            </header>
+            {move || request_feedback.get().map(|(is_error, message)| view! {
+                <div class:request-error=is_error class="refresh-feedback" role=if is_error { "alert" } else { "status" }>{message}</div>
+            })}
+            {move || match refresh_state.get() {
+                DataRefreshLoadState::Loading => view! { <DataStatus kind="loading" message="A obter o estado da atualização…".to_string() /> }.into_any(),
+                DataRefreshLoadState::Unavailable(message) => view! { <DataStatus kind="unavailable" message=message /> }.into_any(),
+                DataRefreshLoadState::Error(message) => view! { <DataStatus kind="error" message=message /> }.into_any(),
+                DataRefreshLoadState::Success { status, communication_error, .. } => view! {
+                    <>
+                        {communication_error.map(|message| view! {
+                            <DataStatus kind="error" message=message />
+                        })}
+                        <RefreshStatusDetails status=status />
+                    </>
+                }.into_any(),
+            }}
+        </article>
+    }
+}
+
+#[component]
+fn RefreshStatusDetails(status: DataRefreshStatusResponse) -> impl IntoView {
+    let latest = status.latest;
+    view! {
+        <div class="refresh-status-content" aria-live="polite">
+            {match latest {
+                Some(run) => view! { <RefreshRunDetails run=run /> }.into_any(),
+                None => view! { <div class="refresh-empty" role="status">"Ainda não existem execuções registadas."</div> }.into_any(),
+            }}
+        </div>
+    }
+}
+
+#[component]
+fn RefreshRunDetails(run: DataRefreshRun) -> impl IntoView {
+    let state = run.state;
+    let finished = run.finished_at.as_ref().map(format_refresh_datetime);
+    let next_attempt = run.next_attempt_at.as_ref().map(format_refresh_datetime);
+    let summary = (!run.summary.is_empty()).then_some(run.summary.clone());
+    view! {
+        <div class="refresh-run">
+            <div class="refresh-run-heading">
+                <span class=format!("refresh-state {}", refresh_tone(state))>{refresh_state_label(state)}</span>
+                <small>{format!("Origem: {}", refresh_origin_label(run.origin))}</small>
+            </div>
+            <dl class="refresh-facts">
+                <div><dt>"Início"</dt><dd>{format_refresh_datetime(&run.started_at)}</dd></div>
+                {finished.map(|value| view! { <div><dt>"Conclusão"</dt><dd>{value}</dd></div> })}
+                <div><dt>"Itens obtidos"</dt><dd>{run.items_obtained}</dd></div>
+                <div><dt>"Itens guardados"</dt><dd>{run.items_persisted}</dd></div>
+                <div><dt>"Falhas"</dt><dd>{run.failure_count}</dd></div>
+                {next_attempt.map(|value| view! { <div><dt>"Próxima tentativa"</dt><dd>{value}</dd></div> })}
+            </dl>
+            {summary.map(|value| view! { <p class="refresh-summary">{value}</p> })}
+            {(!run.failures.is_empty()).then(|| view! {
+                <div class="refresh-failures">
+                    <h3>"Falhas registadas"</h3>
+                    <ul>{run.failures.into_iter().map(|failure| view! {
+                        <li><b>{failure.ticker}</b><span>{failure.operation}</span><p>{failure.error}</p></li>
+                    }).collect_view()}</ul>
+                </div>
+            })}
+        </div>
     }
 }
 
@@ -1461,5 +2067,209 @@ fn SettingRow(title: &'static str, detail: &'static str) -> impl IntoView {
             <div><strong>{title}</strong><span>{detail}</span></div>
             <button type="button" disabled aria-label=format!("Configurar {title}")>"—"</button>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod data_refresh_tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    fn run(
+        id: &str,
+        origin: DataRefreshOrigin,
+        state: DataRefreshState,
+        started_at_ms: i64,
+        next_attempt_at_ms: Option<i64>,
+    ) -> DataRefreshRun {
+        DataRefreshRun {
+            id: id.to_string(),
+            origin,
+            state,
+            started_at: Utc.timestamp_millis_opt(started_at_ms).unwrap(),
+            finished_at: (state != DataRefreshState::Running)
+                .then(|| Utc.timestamp_millis_opt(started_at_ms + 1_000).unwrap()),
+            target_session: chrono::NaiveDate::from_ymd_opt(2026, 8, 13).unwrap(),
+            items_obtained: 0,
+            items_persisted: 0,
+            failure_count: 0,
+            next_attempt_at: next_attempt_at_ms
+                .map(|value| Utc.timestamp_millis_opt(value).unwrap()),
+            summary: String::new(),
+            failures: Vec::new(),
+        }
+    }
+
+    fn status(run: DataRefreshRun) -> DataRefreshStatusResponse {
+        DataRefreshStatusResponse {
+            running: run.state == DataRefreshState::Running,
+            latest: Some(run.clone()),
+            recent: vec![run],
+        }
+    }
+
+    #[test]
+    fn maps_every_wire_state_to_the_required_portuguese_copy() {
+        let cases = [
+            (
+                DataRefreshState::Running,
+                "Em curso",
+                "Atualização de dados iniciada",
+            ),
+            (
+                DataRefreshState::Completed,
+                "Concluída",
+                "Atualização concluída",
+            ),
+            (DataRefreshState::Partial, "Parcial", "Atualização parcial"),
+            (DataRefreshState::Failed, "Falhou", "Atualização falhou"),
+        ];
+
+        for (state, status, activity) in cases {
+            assert_eq!(refresh_state_label(state), status);
+            assert_eq!(refresh_activity_title(state), activity);
+        }
+    }
+
+    #[test]
+    fn maps_every_wire_origin_without_inventing_a_source() {
+        let cases = [
+            (DataRefreshOrigin::Startup, "Arranque"),
+            (DataRefreshOrigin::Scheduled, "Agendada"),
+            (DataRefreshOrigin::Retry, "Nova tentativa"),
+            (DataRefreshOrigin::Manual, "Manual"),
+        ];
+
+        for (origin, label) in cases {
+            assert_eq!(refresh_origin_label(origin), label);
+        }
+    }
+
+    #[test]
+    fn transient_error_during_running_preserves_facts_and_polling_until_completion() {
+        let running = run(
+            "manual-1",
+            DataRefreshOrigin::Manual,
+            DataRefreshState::Running,
+            1_000,
+            None,
+        );
+        let mut state = DataRefreshLoadState::Loading;
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(running.clone())),
+        );
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Error("ligação interrompida".to_string()),
+        );
+
+        let DataRefreshLoadState::Success {
+            status: preserved,
+            communication_error,
+            awaiting_terminal_confirmation,
+        } = &state
+        else {
+            panic!("o último estado factual deve ser preservado");
+        };
+        assert_eq!(preserved.latest.as_ref().unwrap().id, running.id);
+        assert_eq!(communication_error.as_deref(), Some("ligação interrompida"));
+        assert!(*awaiting_terminal_confirmation);
+        assert_eq!(
+            data_refresh_observation_delay_ms(&state, 2_000),
+            Some(DATA_REFRESH_POLL_INTERVAL_MS)
+        );
+
+        let completed = run(
+            "manual-1",
+            DataRefreshOrigin::Manual,
+            DataRefreshState::Completed,
+            1_000,
+            None,
+        );
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(completed)),
+        );
+        assert!(!data_refresh_is_awaiting_terminal(&state));
+        assert_eq!(data_refresh_observation_delay_ms(&state, 3_000), None);
+        assert!(matches!(
+            state,
+            DataRefreshLoadState::Success {
+                communication_error: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn scheduled_execution_is_discovered_from_the_next_attempt_timer() {
+        let now = 10_000;
+        let terminal = run(
+            "scheduled-previous",
+            DataRefreshOrigin::Scheduled,
+            DataRefreshState::Completed,
+            1_000,
+            Some(now + 20_000),
+        );
+        let mut state = DataRefreshLoadState::Loading;
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(terminal)),
+        );
+        assert_eq!(data_refresh_observation_delay_ms(&state, now), Some(21_500));
+
+        let scheduled = run(
+            "scheduled-next",
+            DataRefreshOrigin::Scheduled,
+            DataRefreshState::Running,
+            now + 20_000,
+            None,
+        );
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(scheduled)),
+        );
+        assert!(data_refresh_is_awaiting_terminal(&state));
+        assert_eq!(
+            data_refresh_observation_delay_ms(&state, now + 21_500),
+            Some(DATA_REFRESH_POLL_INTERVAL_MS)
+        );
+    }
+
+    #[test]
+    fn past_next_attempt_uses_a_bounded_non_immediate_recheck() {
+        let terminal = run(
+            "retry-previous",
+            DataRefreshOrigin::Retry,
+            DataRefreshState::Failed,
+            1_000,
+            Some(9_000),
+        );
+        let mut state = DataRefreshLoadState::Loading;
+        apply_data_refresh_status_result(
+            &mut state,
+            DataRefreshStatusResult::Success(status(terminal)),
+        );
+
+        assert_eq!(
+            data_refresh_observation_delay_ms(&state, 10_000),
+            Some(DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS)
+        );
+        assert!(data_refresh_needs_visibility_check(&state, 10_000));
+    }
+
+    #[test]
+    fn cleanup_disables_timer_and_visibility_callbacks() {
+        let timer_guard = ObservationGuard::new();
+        let timer_callback = timer_guard.clone();
+        let listener_guard = ObservationGuard::new();
+        let visibility_callback = listener_guard.clone();
+
+        timer_guard.cancel();
+        listener_guard.cancel();
+
+        assert!(!timer_callback.is_active());
+        assert!(!visibility_callback.is_active());
     }
 }
