@@ -7,16 +7,19 @@ use std::error::Error;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let configured = hexagonal_backend::configurator::configure();
-    let tickers = configured.tracked_tickers.list_active_tickers().await?;
+    let tickers = configured.tracked_tickers.list_tickers(false).await?;
     let requested = tickers
         .iter()
-        .filter(|ticker| ticker.option_snapshots)
+        .filter(|ticker| ticker.active && ticker.option_snapshots)
         .count();
     let mut succeeded = 0;
     let mut inserted_points = 0;
     let mut failures = Vec::new();
 
-    for tracked in tickers.into_iter().filter(|ticker| ticker.option_snapshots) {
+    for tracked in tickers
+        .into_iter()
+        .filter(|ticker| ticker.active && ticker.option_snapshots)
+    {
         match configured
             .synchronization
             .synchronize_term_structure(&tracked.ticker)

@@ -67,3 +67,29 @@ Pre-existing behavior intentionally retained includes SPX history returning 500
 without VIX and simulation returning 404 when required market data is absent.
 Shutdown lifecycle, underlying invariants, DuckDB concurrency, persistence, and
 business rules are outside this normalization.
+
+## Tracked ticker management
+
+`GET /api/tracked-tickers` preserves the historical behavior and returns only
+active entries. `GET /api/tracked-tickers?include_inactive=true` returns the
+complete catalog. Each entry contains `ticker`, `source` (`system` or `user`),
+`active`, `historical_prices`, and `option_snapshots`. The temporary
+`GET /tracked-tickers` alias accepts the same query and returns the same status,
+`application/json` content type, and body.
+
+`PUT /api/tracked-tickers/{ticker}` accepts `active`, `historical_prices`, and
+`option_snapshots`, and returns `204 No Content`. It creates a user ticker when
+none exists (absence is otherwise represented by omission from the list) and
+otherwise replaces that user ticker's configuration. Repeating
+the same request is idempotent. Tickers are trimmed and uppercased in the
+domain. Invalid symbols return `400` with the canonical `ApiError` envelope;
+an identical configuration of a protected system ticker is idempotent, while
+an attempted change returns `409`; persistence
+failures return `503`. The temporary `PUT /tracked-tickers/{ticker}` alias uses
+the same handler and preserves the successful `204` response with no body and
+no content type.
+
+There is deliberately no delete endpoint. Deactivation retains history,
+option snapshots, portfolio events, and saved-strategy references. SPX, SPY,
+VIX, XLB, XLC, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, and XLY are active
+system entries and cannot be configured through this API.

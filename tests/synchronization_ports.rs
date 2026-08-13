@@ -52,6 +52,7 @@ impl ForLoadingTrackedTickers for TwoHistoryTickersMock {
             .map(
                 |ticker| hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                     ticker: ticker.to_string(),
+                    source: hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerSource::User,
                     active: true,
                     historical_prices: true,
                     option_snapshots: false,
@@ -90,6 +91,8 @@ impl ForLoadingTrackedTickers for OptionTrackedTickersMock {
         Ok(vec![
             hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                 ticker: "SPY".to_string(),
+                source:
+                    hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerSource::User,
                 active: true,
                 historical_prices: false,
                 option_snapshots: true,
@@ -179,6 +182,8 @@ impl ForLoadingTrackedTickers for TrackedTickersMock {
         Ok(vec![
             hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                 ticker: "SPY".to_string(),
+                source:
+                    hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerSource::User,
                 active: true,
                 historical_prices: true,
                 option_snapshots: false,

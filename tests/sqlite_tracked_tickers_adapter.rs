@@ -2,7 +2,6 @@ use hexagonal_backend::{
     driven_adapters::sqlite::tracked_tickers::SqliteTrackedTickersAdapter,
     hexagon::{
         application::tracked_tickers::TrackedTickersApplication,
-        domain::tracked_ticker::TrackedTicker,
         driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers,
     },
 };
@@ -18,13 +17,15 @@ async fn application_manages_tracked_tickers_through_sqlite_ports() {
     let adapter = SqliteTrackedTickersAdapter::new(pool);
     let application = TrackedTickersApplication::new(adapter.clone(), adapter);
     application
-        .configure_ticker(TrackedTicker {
-            ticker: "SPX".into(),
-            active: true,
-            historical_prices: true,
-            option_snapshots: true,
-        })
+        .configure_ticker(
+            "QQQ",
+            hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerConfiguration {
+                active: true,
+                historical_prices: true,
+                option_snapshots: true,
+            },
+        )
         .await
         .unwrap();
-    assert_eq!(application.list_active_tickers().await.unwrap().len(), 1);
+    assert_eq!(application.list_tickers(false).await.unwrap().len(), 1);
 }

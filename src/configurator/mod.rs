@@ -11,6 +11,7 @@ use std::{
 use axum::Router;
 use sqlx::SqlitePool;
 
+use crate::hexagon::driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers;
 use crate::hexagon::driving_ports::for_refreshing_market_data::ForRefreshingMarketData;
 use crate::{
     driven_adapters::{
@@ -208,7 +209,11 @@ pub async fn initialize_storage(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     };
 
     tracked_tickers::initialize(pool).await?;
-    tracked_tickers::seed_defaults(pool).await?;
+    let tracked_tickers_adapter = SqliteTrackedTickersAdapter::new(pool.clone());
+    TrackedTickersApplication::new(tracked_tickers_adapter.clone(), tracked_tickers_adapter)
+        .bootstrap_system_tickers()
+        .await
+        .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
     migrations::remove_research_storage(pool).await?;
     market_history::initialize(pool).await?;
     index_history::initialize(pool).await?;
@@ -236,7 +241,11 @@ pub async fn initialize_analytical_storage_with_config(
     DuckDbVolatilityTermStructuresAdapter::new(path)
         .initialize()
         .await?;
-    DuckDbTrackedTickersAdapter::new(path).initialize().await?;
+    let tracked_tickers = DuckDbTrackedTickersAdapter::new(path);
+    tracked_tickers.initialize().await?;
+    TrackedTickersApplication::new(tracked_tickers.clone(), tracked_tickers)
+        .bootstrap_system_tickers()
+        .await?;
     DuckDbPortfolioAdapter::new(path).initialize().await?;
     DuckDbSavedStrategiesAdapter::new(path).initialize().await?;
     DuckDbDataRefreshRunsAdapter::new(path).initialize().await

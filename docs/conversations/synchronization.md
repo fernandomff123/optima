@@ -41,3 +41,9 @@ for any one port in the configurator without rewriting the use case.
 `SynchronizationStores` and `OptionAnalysisCollaborators` are constructor
 parameter groupings. They do not implement ports and do not hide technology;
 their fields remain independently constrained by the required port traits.
+
+The tracked-ticker catalog is the single selection source for batch and
+end-of-day refresh. Active system and user entries follow the same loop;
+`historical_prices` and `option_snapshots` independently select its two market
+data capabilities. VIX index history remains the dedicated volatility-index
+step and therefore has both generic capabilities disabled in the catalog.

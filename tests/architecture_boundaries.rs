@@ -147,6 +147,29 @@ fn applications_do_not_know_axum() {
 }
 
 #[test]
+fn tracked_ticker_policy_stays_inside_the_hexagon() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let adapter = fs::read_to_string(root.join("src/driven_adapters/duckdb/tracked_tickers.rs"))
+        .expect("tracked ticker adapter source must be readable");
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/tracked_tickers/mod.rs"))
+            .expect("tracked ticker application source must be readable");
+    let domain = fs::read_to_string(root.join("src/hexagon/domain/tracked_ticker.rs"))
+        .expect("tracked ticker domain source must be readable");
+
+    assert!(!adapter.contains("SPX"));
+    assert!(!adapter.contains("system_tickers"));
+    assert!(application.contains("is_system_ticker"));
+    assert!(domain.contains("super::sector_performance::{SECTOR_BENCHMARK_TICKER, SECTORS}"));
+    assert!(!domain.contains("\"XLK\""));
+
+    let configurator = fs::read_to_string(root.join("src/configurator/mod.rs"))
+        .expect("configurator source must be readable");
+    assert!(configurator.contains(".bootstrap_system_tickers()"));
+    assert!(!configurator.contains("domain::tracked_ticker::system_tickers"));
+}
+
+#[test]
 fn all_legacy_route_patterns_remain_in_the_http_adapter() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = fs::read_to_string(root.join("src/driving_adapters/http/legacy_server.rs"))

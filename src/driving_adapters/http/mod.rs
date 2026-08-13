@@ -574,10 +574,11 @@ async fn synchronize_tracked_tickers(
 
 async fn list_tracked_tickers(
     State(state): State<HttpState>,
+    Query(query): Query<api_models::TrackedTickersQuery>,
 ) -> Result<Json<Vec<api_models::TrackedTicker>>, HttpError> {
     state
         .tracked_tickers
-        .list_active_tickers()
+        .list_tickers(query.include_inactive)
         .await
         .map(|tickers| {
             tickers
@@ -596,7 +597,10 @@ async fn configure_tracked_ticker(
 ) -> Result<StatusCode, HttpError> {
     state
         .tracked_tickers
-        .configure_ticker(canonical_models::domain_tracked_ticker(ticker, body))
+        .configure_ticker(
+            &ticker,
+            canonical_models::tracked_ticker_configuration(body),
+        )
         .await
         .map(|()| StatusCode::NO_CONTENT)
         .map_err(HttpError)

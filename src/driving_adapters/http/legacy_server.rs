@@ -148,7 +148,7 @@ async fn list_assets(
 ) -> Result<Json<Vec<AssetSummary>>, StatusCode> {
     let tracked = state
         .tracked_tickers
-        .list_active_tickers()
+        .list_tickers(false)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(tracked.iter().map(asset_summary).collect()))
@@ -1289,6 +1289,7 @@ mod tests {
     fn classifies_spy_as_an_etf() {
         let tracked = TrackedTicker {
             ticker: "SPY".to_string(),
+            source: crate::hexagon::domain::tracked_ticker::TrackedTickerSource::System,
             active: true,
             historical_prices: false,
             option_snapshots: true,
@@ -1304,6 +1305,7 @@ mod tests {
     fn classifies_spx_as_an_index() {
         let tracked = TrackedTicker {
             ticker: "SPX".to_string(),
+            source: crate::hexagon::domain::tracked_ticker::TrackedTickerSource::System,
             active: true,
             historical_prices: false,
             option_snapshots: true,

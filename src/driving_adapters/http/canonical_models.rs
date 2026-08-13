@@ -319,18 +319,20 @@ pub fn simulation_result(value: sim::SimulationResult) -> api_models::StrategySi
 pub fn tracked_ticker(value: tt::TrackedTicker) -> api_models::TrackedTicker {
     api_models::TrackedTicker {
         ticker: value.ticker,
+        source: match value.source {
+            tt::TrackedTickerSource::System => api_models::TrackedTickerSource::System,
+            tt::TrackedTickerSource::User => api_models::TrackedTickerSource::User,
+        },
         active: value.active,
         historical_prices: value.historical_prices,
         option_snapshots: value.option_snapshots,
     }
 }
 
-pub fn domain_tracked_ticker(
-    ticker: String,
+pub fn tracked_ticker_configuration(
     value: api_models::ConfigureTrackedTickerRequest,
-) -> tt::TrackedTicker {
-    tt::TrackedTicker {
-        ticker,
+) -> tt::TrackedTickerConfiguration {
+    tt::TrackedTickerConfiguration {
         active: value.active,
         historical_prices: value.historical_prices,
         option_snapshots: value.option_snapshots,
@@ -726,6 +728,7 @@ mod tests {
         assert_same_json(&saved, &saved_strategy(saved.clone()));
         let ticker = tt::TrackedTicker {
             ticker: "SPY".into(),
+            source: tt::TrackedTickerSource::System,
             active: true,
             historical_prices: false,
             option_snapshots: true,

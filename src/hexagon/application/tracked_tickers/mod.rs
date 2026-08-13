@@ -4,7 +4,10 @@ use async_trait::async_trait;
 
 use crate::hexagon::{
     PortError, PortResult,
-    domain::tracked_ticker::TrackedTicker,
+    domain::tracked_ticker::{
+        TrackedTicker, TrackedTickerConfiguration, is_system_ticker, normalize_ticker,
+        system_tickers,
+    },
     driven_ports::{
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
         for_storing_tracked_tickers::ForStoringTrackedTickers,
@@ -29,20 +32,41 @@ where
     Loader: ForLoadingTrackedTickers,
     Store: ForStoringTrackedTickers,
 {
-    async fn list_active_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
-        self.loader.load_active_tickers().await
+    async fn list_tickers(&self, include_inactive: bool) -> PortResult<Vec<TrackedTicker>> {
+        if include_inactive {
+            self.loader.load_tracked_tickers().await
+        } else {
+            self.loader.load_active_tickers().await
+        }
     }
 
-    async fn configure_ticker(&self, mut ticker: TrackedTicker) -> PortResult<()> {
-        ticker.ticker = ticker.ticker.trim().to_ascii_uppercase();
-        if ticker.ticker.is_empty()
-            || !ticker
-                .ticker
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || character == '^')
-        {
-            return Err(PortError::InvalidRequest("invalid tracked ticker".into()));
+    async fn bootstrap_system_tickers(&self) -> PortResult<()> {
+        for ticker in system_tickers() {
+            self.store.store_tracked_ticker(&ticker).await?;
         }
+        Ok(())
+    }
+
+    async fn configure_ticker(
+        &self,
+        ticker: &str,
+        configuration: TrackedTickerConfiguration,
+    ) -> PortResult<()> {
+        let ticker = normalize_ticker(ticker).map_err(PortError::InvalidRequest)?;
+        if is_system_ticker(&ticker) {
+            if system_tickers()
+                .into_iter()
+                .find(|tracked| tracked.ticker == ticker)
+                .is_some_and(|tracked| tracked.configuration() == configuration)
+            {
+                return Ok(());
+            }
+            return Err(PortError::Conflict(format!(
+                "tracked ticker {ticker} is protected by the system"
+            )));
+        }
+        let ticker =
+            TrackedTicker::user(&ticker, configuration).map_err(PortError::InvalidRequest)?;
         self.store.store_tracked_ticker(&ticker).await
     }
 }
