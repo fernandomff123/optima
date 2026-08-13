@@ -187,6 +187,10 @@ impl ForLoadingMarketHistory for Histories {
 struct Tickers;
 #[async_trait]
 impl ForLoadingTrackedTickers for Tickers {
+    async fn load_tracked_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
+        unreachable!("refresh must only load active tracked tickers")
+    }
+
     async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
         Ok(vec![])
     }

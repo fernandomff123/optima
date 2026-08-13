@@ -170,6 +170,23 @@ fn tracked_ticker_policy_stays_inside_the_hexagon() {
 }
 
 #[test]
+fn tracked_ticker_loading_operations_have_no_semantic_fallback() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let port = fs::read_to_string(
+        root.join("src/hexagon/driven_ports/for_loading_tracked_tickers/mod.rs"),
+    )
+    .expect("tracked ticker loading port must be readable");
+
+    assert!(
+        port.contains("async fn load_tracked_tickers(&self) -> PortResult<Vec<TrackedTicker>>;")
+    );
+    assert!(
+        port.contains("async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>>;")
+    );
+    assert!(!port.contains("self.load_active_tickers().await"));
+}
+
+#[test]
 fn all_legacy_route_patterns_remain_in_the_http_adapter() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = fs::read_to_string(root.join("src/driving_adapters/http/legacy_server.rs"))

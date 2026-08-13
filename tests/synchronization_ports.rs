@@ -44,6 +44,12 @@ struct TwoHistoryTickersMock;
 
 #[async_trait]
 impl ForLoadingTrackedTickers for TwoHistoryTickersMock {
+    async fn load_tracked_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        unreachable!("synchronization must only load active tracked tickers")
+    }
+
     async fn load_active_tickers(
         &self,
     ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
@@ -85,6 +91,12 @@ impl ForObtainingMarketHistory for PartiallyFailingHistoryMock {
 
 #[async_trait]
 impl ForLoadingTrackedTickers for OptionTrackedTickersMock {
+    async fn load_tracked_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        unreachable!("synchronization must only load active tracked tickers")
+    }
+
     async fn load_active_tickers(
         &self,
     ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
@@ -176,6 +188,12 @@ impl ForConsultingTradingCalendar for TradingCalendarMock {
 
 #[async_trait]
 impl ForLoadingTrackedTickers for TrackedTickersMock {
+    async fn load_tracked_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        unreachable!("synchronization must only load active tracked tickers")
+    }
+
     async fn load_active_tickers(
         &self,
     ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
