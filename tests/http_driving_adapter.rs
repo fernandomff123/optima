@@ -4,7 +4,10 @@ use std::{
 };
 
 use async_trait::async_trait;
-use axum::{body::Body, http::Request};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use chrono::{DateTime, NaiveDate, Utc};
 use hexagonal_backend::{
     driving_adapters::http,
@@ -121,12 +124,36 @@ impl ForViewingSectorPerformance for SectorPerformanceMock {
 
 #[async_trait]
 impl ForManagingTrackedTickers for TrackedTickersMock {
-    async fn list_active_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
-        Ok(Vec::new())
+    async fn list_tickers(&self, include_inactive: bool) -> PortResult<Vec<TrackedTicker>> {
+        let tickers = vec![TrackedTicker {
+            ticker: "QQQ".into(),
+            source: hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerSource::User,
+            active: false,
+            historical_prices: true,
+            option_snapshots: false,
+        }];
+        Ok(tickers
+            .into_iter()
+            .filter(|ticker| include_inactive || ticker.active)
+            .collect())
     }
 
-    async fn configure_ticker(&self, _ticker: TrackedTicker) -> PortResult<()> {
+    async fn bootstrap_system_tickers(&self) -> PortResult<()> {
         Ok(())
+    }
+
+    async fn configure_ticker(
+        &self,
+        ticker: &str,
+        _configuration: hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerConfiguration,
+    ) -> PortResult<()> {
+        match ticker {
+            "SPX" => Err(PortError::Conflict(
+                "tracked ticker SPX is protected by the system".into(),
+            )),
+            "bad ticker" => Err(PortError::InvalidRequest("invalid tracked ticker".into())),
+            _ => Ok(()),
+        }
     }
 }
 
@@ -554,6 +581,96 @@ async fn http_adapter_drives_tracked_ticker_management() {
         .expect("router must respond");
 
     assert_eq!(response.status(), 204);
+    assert!(response.headers().get("content-type").is_none());
+    assert!(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_validation() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    for path in ["/api/tracked-tickers", "/tracked-tickers"] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!([])
+        );
+    }
+
+    for path in [
+        "/api/tracked-tickers?include_inactive=true",
+        "/tracked-tickers?include_inactive=true",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            serde_json::json!([{
+                "ticker": "QQQ",
+                "source": "user",
+                "active": false,
+                "historical_prices": true,
+                "option_snapshots": false
+            }])
+        );
+    }
+
+    for (path, expected) in [
+        ("/api/tracked-tickers/SPX", StatusCode::CONFLICT),
+        ("/tracked-tickers/bad%20ticker", StatusCode::BAD_REQUEST),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"active":false,"historical_prices":false,"option_snapshots":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected);
+    }
 }
 
 #[tokio::test]

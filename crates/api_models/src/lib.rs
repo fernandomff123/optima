@@ -285,8 +285,16 @@ pub struct StrategySimulationResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrackedTickerSource {
+    System,
+    User,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackedTicker {
     pub ticker: String,
+    pub source: TrackedTickerSource,
     pub active: bool,
     pub historical_prices: bool,
     pub option_snapshots: bool,
@@ -297,6 +305,12 @@ pub struct ConfigureTrackedTickerRequest {
     pub active: bool,
     pub historical_prices: bool,
     pub option_snapshots: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackedTickersQuery {
+    #[serde(default)]
+    pub include_inactive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

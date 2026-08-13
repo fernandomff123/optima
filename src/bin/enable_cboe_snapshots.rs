@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         requested.iter().map(String::as_str).collect()
     };
     let configured = hexagonal_backend::configurator::configure();
-    let active = configured.tracked_tickers.list_active_tickers().await?;
+    let active = configured.tracked_tickers.list_tickers(false).await?;
 
     for ticker in tickers {
         let normalized = ticker.trim().to_ascii_uppercase();
@@ -25,7 +25,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             continue;
         };
         tracked.option_snapshots = true;
-        configured.tracked_tickers.configure_ticker(tracked).await?;
+        configured
+            .tracked_tickers
+            .configure_ticker(&tracked.ticker, tracked.configuration())
+            .await?;
         println!("{normalized}: option_snapshots ativado");
     }
 

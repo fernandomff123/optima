@@ -6,7 +6,7 @@ use duckdb::{Connection, params};
 
 use crate::hexagon::{
     PortError, PortResult,
-    domain::tracked_ticker::TrackedTicker,
+    domain::tracked_ticker::{TrackedTicker, TrackedTickerSource},
     driven_ports::{
         for_counting_tracked_tickers::ForCountingTrackedTickers,
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
@@ -30,8 +30,7 @@ impl DuckDbTrackedTickersAdapter {
         let path = self.database_path.clone();
         run_blocking(move || {
             let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            seed_defaults(&connection)
+            initialize_schema(&connection)
         })
         .await
     }
@@ -39,9 +38,14 @@ impl DuckDbTrackedTickersAdapter {
 
 #[async_trait::async_trait]
 impl ForLoadingTrackedTickers for DuckDbTrackedTickersAdapter {
+    async fn load_tracked_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
+        let path = self.database_path.clone();
+        run_blocking(move || load(&path, false)).await
+    }
+
     async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
         let path = self.database_path.clone();
-        run_blocking(move || load_active(&path)).await
+        run_blocking(move || load(&path, true)).await
     }
 }
 
@@ -71,37 +75,32 @@ fn initialize_schema(connection: &Connection) -> Result<(), duckdb::Error> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS tracked_tickers (
             ticker VARCHAR PRIMARY KEY,
+            source VARCHAR NOT NULL DEFAULT 'user',
             active BOOLEAN NOT NULL,
             historical_prices BOOLEAN NOT NULL,
             option_snapshots BOOLEAN NOT NULL
-        );",
+        );
+        ALTER TABLE tracked_tickers ADD COLUMN IF NOT EXISTS source VARCHAR DEFAULT 'user';
+        UPDATE tracked_tickers SET source = 'user' WHERE source IS NULL;",
     )
-}
-
-fn seed_defaults(connection: &Connection) -> Result<(), duckdb::Error> {
-    for ticker in [
-        "AAPL", "IBM", "GOOGL", "MSFT", "JPM", "SPY", "SPX", "XLK", "XLF", "XLE", "XLI", "XLV",
-        "XLY", "XLC", "XLP", "XLB", "XLU", "XLRE",
-    ] {
-        connection.execute(
-            "INSERT INTO tracked_tickers VALUES (?, true, true, ?) ON CONFLICT DO NOTHING",
-            params![ticker, !ticker.starts_with("XL")],
-        )?;
-    }
-    Ok(())
 }
 
 fn store(path: &PathBuf, ticker: &TrackedTicker) -> Result<(), duckdb::Error> {
     let connection = Connection::open(path)?;
     initialize_schema(&connection)?;
     connection.execute(
-        "INSERT INTO tracked_tickers (ticker, active, historical_prices, option_snapshots)
-         VALUES (?, ?, ?, ?)
+        "INSERT INTO tracked_tickers (ticker, source, active, historical_prices, option_snapshots)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT DO UPDATE SET active = excluded.active,
+            source = excluded.source,
             historical_prices = excluded.historical_prices,
             option_snapshots = excluded.option_snapshots",
         params![
             ticker.ticker.trim().to_ascii_uppercase(),
+            match ticker.source {
+                TrackedTickerSource::System => "system",
+                TrackedTickerSource::User => "user",
+            },
             ticker.active,
             ticker.historical_prices,
             ticker.option_snapshots
@@ -110,20 +109,25 @@ fn store(path: &PathBuf, ticker: &TrackedTicker) -> Result<(), duckdb::Error> {
     Ok(())
 }
 
-fn load_active(path: &PathBuf) -> Result<Vec<TrackedTicker>, duckdb::Error> {
+fn load(path: &PathBuf, active_only: bool) -> Result<Vec<TrackedTicker>, duckdb::Error> {
     let connection = Connection::open(path)?;
     initialize_schema(&connection)?;
-    let mut statement = connection.prepare(
-        "SELECT ticker, active, historical_prices, option_snapshots
-         FROM tracked_tickers WHERE active ORDER BY ticker",
-    )?;
+    let predicate = if active_only { "WHERE active" } else { "" };
+    let mut statement = connection.prepare(&format!(
+        "SELECT ticker, source, active, historical_prices, option_snapshots
+         FROM tracked_tickers {predicate} ORDER BY ticker"
+    ))?;
     statement
         .query_map([], |row| {
             Ok(TrackedTicker {
                 ticker: row.get(0)?,
-                active: row.get(1)?,
-                historical_prices: row.get(2)?,
-                option_snapshots: row.get(3)?,
+                source: match row.get::<_, String>(1)?.as_str() {
+                    "system" => TrackedTickerSource::System,
+                    _ => TrackedTickerSource::User,
+                },
+                active: row.get(2)?,
+                historical_prices: row.get(3)?,
+                option_snapshots: row.get(4)?,
             })
         })?
         .collect()
