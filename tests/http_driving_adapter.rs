@@ -786,3 +786,36 @@ async fn port_errors_keep_status_and_json_envelope_on_canonical_and_alias_routes
         assert_eq!(canonical_body, alias_body);
     }
 }
+
+#[tokio::test]
+async fn canonical_method_not_allowed_keeps_allow_header_and_returns_json() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/portfolios")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("canonical route must respond");
+
+    assert_eq!(response.status(), 405);
+    assert_eq!(response.headers()["allow"], "POST");
+    assert_eq!(response.headers()["content-type"], "application/json");
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("error body must be readable");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("error body must be JSON");
+    assert_eq!(json, serde_json::json!({ "error": "Method Not Allowed" }));
+}

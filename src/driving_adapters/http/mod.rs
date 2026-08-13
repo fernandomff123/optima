@@ -11,7 +11,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{Request, StatusCode, header},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::Response,
     routing::{get, post},
 };
 use chrono::NaiveDate;
@@ -403,34 +403,29 @@ async fn canonical_error_boundary(request: Request<Body>, next: Next) -> Respons
         return response;
     }
 
-    let status = response.status();
-    let bytes = match axum::body::to_bytes(response.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(api_models::ApiError {
-                    error: error.to_string(),
-                }),
-            )
-                .into_response();
-        }
+    let (mut parts, body) = response.into_parts();
+    let message = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(error) => error.to_string(),
     };
-    let message = String::from_utf8_lossy(&bytes).into_owned();
-    (
-        status,
-        Json(api_models::ApiError {
-            error: if message.is_empty() {
-                status
-                    .canonical_reason()
-                    .unwrap_or("request failed")
-                    .to_string()
-            } else {
-                message
-            },
-        }),
-    )
-        .into_response()
+    let error = api_models::ApiError {
+        error: if message.is_empty() {
+            parts
+                .status
+                .canonical_reason()
+                .unwrap_or("request failed")
+                .to_string()
+        } else {
+            message
+        },
+    };
+    let body = serde_json::to_vec(&error)
+        .unwrap_or_else(|_| br#"{"error":"failed to serialize error response"}"#.to_vec());
+    parts.headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("application/json"),
+    );
+    Response::from_parts(parts, Body::from(body))
 }
 
 async fn data_refresh_status(
