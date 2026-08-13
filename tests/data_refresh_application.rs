@@ -77,6 +77,10 @@ impl Tasks {
     fn new() -> Self {
         Self(Mutex::new(Vec::new()))
     }
+
+    fn take_task(&self) -> DataRefreshTask {
+        self.0.lock().expect("tasks lock").remove(0)
+    }
 }
 impl ForRunningDataRefreshTasks for Tasks {
     fn run_data_refresh_task(&self, task: DataRefreshTask) {
@@ -415,7 +419,42 @@ async fn concurrent_request_waits_for_blocked_initial_persistence_and_returns_sa
 }
 
 #[tokio::test]
-async fn next_attempt_waits_for_terminal_persistence_and_observes_persisted_retry_after_failure() {
+async fn notification_before_next_attempt_wait_does_not_block() {
+    let runs = Arc::new(Runs::default());
+    let tasks = Arc::new(Tasks::new());
+    let application = DataRefreshApplication::new(
+        Arc::new(Sync),
+        runs.clone(),
+        Arc::new(Histories),
+        Arc::new(Tickers),
+        Arc::new(Calendar),
+        tasks.clone(),
+    );
+    application
+        .request_data_refresh(DataRefreshTrigger::Scheduler, Utc::now())
+        .await
+        .expect("start");
+    tasks.take_task().await;
+
+    let persisted = runs
+        .load_recent_data_refresh_runs(1)
+        .await
+        .expect("terminal")
+        .remove(0)
+        .next_attempt_at
+        .expect("persisted next attempt");
+    let observed = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        application.next_data_refresh_attempt(Utc::now()),
+    )
+    .await
+    .expect("notification sent before subscription must not be lost")
+    .expect("next attempt");
+    assert_eq!(observed, persisted);
+}
+
+#[tokio::test]
+async fn terminal_notification_releases_all_waiters_with_the_same_persisted_retry() {
     let runs = Arc::new(ControlledRuns::new(2, true));
     let application = Arc::new(DataRefreshApplication::new(
         Arc::new(Sync),
@@ -430,21 +469,40 @@ async fn next_attempt_waits_for_terminal_persistence_and_observes_persisted_retr
         .await
         .expect("start");
     runs.wait_until_blocked().await;
-    let next = {
+    let mut waiters = Vec::new();
+    for _ in 0..3 {
         let application = application.clone();
-        tokio::spawn(async move { application.next_data_refresh_attempt(Utc::now()).await })
-    };
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    assert!(!next.is_finished());
+        waiters.push(tokio::spawn(async move {
+            application.next_data_refresh_attempt(Utc::now()).await
+        }));
+    }
+    for waiter in &mut waiters {
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), waiter)
+                .await
+                .is_err(),
+            "waiter must remain blocked until terminal persistence is attempted"
+        );
+    }
     runs.release();
-    let next_attempt = next.await.expect("next task").expect("next attempt");
+    let mut observed = Vec::new();
+    for waiter in waiters {
+        observed.push(
+            tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+                .await
+                .expect("terminal notification must release every waiter")
+                .expect("next task")
+                .expect("next attempt"),
+        );
+    }
     let terminal = runs
         .load_recent_data_refresh_runs(1)
         .await
         .expect("terminal")
         .remove(0);
     assert_eq!(terminal.state, DataRefreshState::Failed);
-    assert_eq!(terminal.next_attempt_at, Some(next_attempt));
-    assert!(next_attempt < Utc::now() + Duration::minutes(6));
+    let persisted = terminal.next_attempt_at.expect("persisted retry");
+    assert!(observed.iter().all(|next| *next == persisted));
+    assert!(persisted < Utc::now() + Duration::minutes(6));
     assert_eq!(runs.stores.load(Ordering::SeqCst), 3);
 }

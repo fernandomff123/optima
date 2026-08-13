@@ -6,7 +6,7 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, watch};
 
 use crate::hexagon::{
     PortError, PortResult,
@@ -84,7 +84,7 @@ struct DataRefreshCore {
     tickers: Arc<dyn ForLoadingTrackedTickers>,
     calendar: Arc<dyn ForConsultingTradingCalendar>,
     active: AtomicBool,
-    changed: Notify,
+    active_changed: watch::Sender<bool>,
     backfill: MarketHistoryBackfillPolicy,
 }
 
@@ -108,7 +108,7 @@ impl DataRefreshApplication {
                 tickers,
                 calendar,
                 active: AtomicBool::new(false),
-                changed: Notify::new(),
+                active_changed: watch::channel(false).0,
                 backfill: MarketHistoryBackfillPolicy,
             }),
             tasks,
@@ -131,7 +131,7 @@ impl DataRefreshApplication {
 impl DataRefreshCore {
     fn release_active(&self) {
         self.active.store(false, Ordering::Release);
-        self.changed.notify_waiters();
+        self.active_changed.send_replace(false);
     }
 
     async fn execute(
@@ -268,6 +268,7 @@ impl ForRefreshingMarketData for DataRefreshApplication {
                 })?;
             return Ok(StartDataRefreshResult::AlreadyRunning(running));
         }
+        self.core.active_changed.send_replace(true);
         let eligible = self
             .core
             .calendar
@@ -316,8 +317,11 @@ impl ForRefreshingMarketData for DataRefreshApplication {
     }
 
     async fn next_data_refresh_attempt(&self, now: DateTime<Utc>) -> PortResult<DateTime<Utc>> {
+        let mut active_changed = self.core.active_changed.subscribe();
         while self.core.active.load(Ordering::Acquire) {
-            self.core.changed.notified().await;
+            active_changed.changed().await.map_err(|_| {
+                PortError::Unavailable("data refresh state signal closed".to_string())
+            })?;
         }
         if let Some(run) = self
             .core
