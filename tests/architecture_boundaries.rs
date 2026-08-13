@@ -79,3 +79,109 @@ fn production_code_does_not_use_panicking_value_extraction() {
         }
     }
 }
+
+#[test]
+fn web_server_has_one_composition_and_one_http_router() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let server = fs::read_to_string(root.join("src/bin/web_server.rs"))
+        .expect("web server source must be readable");
+    assert_eq!(server.matches("configurator::configure()").count(), 1);
+    assert_eq!(
+        server.matches("configure_server_http_application(").count(),
+        1
+    );
+    assert!(!server.contains("Router::new()"));
+    assert!(!server.contains(".route("));
+    assert!(server.contains("let data_refresh = configured.data_refresh.clone();"));
+    assert!(server.contains("run_startup_refresh(data_refresh.clone())"));
+    assert!(server.contains("run_market_eod_scheduler(data_refresh)"));
+    assert!(server.contains("configure_server_http_application(\n        configured,"));
+}
+
+#[test]
+fn http_handlers_only_receive_injected_ports() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/driving_adapters/http");
+    let mut files = Vec::new();
+    rust_files(&root, &mut files);
+
+    for path in files {
+        let source = fs::read_to_string(&path).expect("HTTP adapter source must be readable");
+        assert!(
+            !source.contains("configurator::configure"),
+            "{} calls the composition root from an HTTP adapter",
+            path.display()
+        );
+        assert!(
+            !source.contains("driven_adapters::"),
+            "{} constructs or calls a driven adapter",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn websocket_receives_market_ports_by_injection() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(root.join("src/driving_adapters/http/legacy_server.rs"))
+        .expect("legacy HTTP adapter source must be readable");
+    assert!(source.contains("market_data: Arc<dyn ForViewingMarketData>"));
+    assert!(source.contains("market_stream: Arc<dyn ForStreamingMarketPrices>"));
+    assert!(source.contains("async fn handle_asset_live_prices("));
+    assert!(source.contains("state.market_data,"));
+    assert!(source.contains("state.market_stream,"));
+}
+
+#[test]
+fn applications_do_not_know_axum() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/hexagon/application");
+    let mut files = Vec::new();
+    rust_files(&root, &mut files);
+    for path in files {
+        let source = fs::read_to_string(&path).expect("application source must be readable");
+        assert!(
+            !source.to_ascii_lowercase().contains("axum"),
+            "{} depends on Axum",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn all_legacy_route_patterns_remain_in_the_http_adapter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = fs::read_to_string(root.join("src/driving_adapters/http/legacy_server.rs"))
+        .expect("legacy HTTP adapter source must be readable");
+    let expected = [
+        "/api/health",
+        "/api/assets",
+        "/api/assets/live",
+        "/api/market/benchmark",
+        "/api/market/volatility",
+        "/api/market/spx-history",
+        "/api/market/vix-history",
+        "/api/market/rates",
+        "/api/portfolio",
+        "/api/portfolio/summary",
+        "/api/portfolio/cash",
+        "/api/portfolio/positions",
+        "/api/portfolio/movements",
+        "/api/simulation",
+        "/api/simulation/intraday",
+        "/api/strategies",
+        "/api/strategies/{id}",
+        "/api/simulation/contracts",
+        "/api/portfolio/option-trades",
+        "/api/portfolio/currency-exchanges",
+        "/api/assets/{ticker}/price",
+        "/api/assets/{ticker}/price-history",
+        "/api/assets/{ticker}/historical-volatility",
+        "/api/assets/{ticker}/implied-volatility",
+        "/api/assets/{ticker}/options/snapshot",
+        "/api/assets/{ticker}/options/term-structure",
+        "/api/assets/{ticker}/options/volatility-surface",
+        "/api/assets/{ticker}/options/intraday",
+    ];
+    for route in expected {
+        assert!(source.contains(route), "legacy route disappeared: {route}");
+    }
+}

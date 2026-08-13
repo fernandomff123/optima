@@ -179,6 +179,7 @@ pub type ConfiguredStrategyMigration =
 
 /// Fully wired single hexagon, ready to be handed to driving adapters.
 pub struct ConfiguredApplication {
+    pub composition_config: CompositionConfig,
     pub market_data: ConfiguredMarketData,
     pub market_stream: ConfiguredMarketStream,
     pub market_scheduling: ConfiguredMarketScheduling,
@@ -265,6 +266,7 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
         Arc::new(TokioDataRefreshTaskRunner),
     ));
     ConfiguredApplication {
+        composition_config: config.clone(),
         market_data: MarketDataApplication::new(
             DuckDbMarketHistoryAdapter::new(path),
             DuckDbIndexHistoryAdapter::new(path),
@@ -425,19 +427,75 @@ pub fn configure_http() -> Router {
 }
 
 pub fn configure_http_application(configured: ConfiguredApplication) -> Router {
-    crate::driving_adapters::http::router_with_data_refresh(
+    let (_market_session_updates, market_session) = tokio::sync::watch::channel(false);
+    configure_server_http_application(configured, market_session)
+}
+
+/// Connects the single configured application to every current HTTP route.
+///
+/// The receiver is runtime state, not a dependency selected by the adapter.
+pub fn configure_server_http_application(
+    configured: ConfiguredApplication,
+    market_session: tokio::sync::watch::Receiver<bool>,
+) -> Router {
+    let ConfiguredApplication {
+        composition_config: _,
+        market_data,
+        market_stream,
+        market_scheduling: _,
+        interest_rates,
+        market_volatility,
+        intraday_simulation,
+        options,
+        portfolios,
+        portfolio_valuation,
+        saved_strategies,
+        tracked_tickers,
+        sector_performance,
+        simulation,
+        synchronization,
+        data_refresh,
+    } = configured;
+
+    let market_data = Arc::new(market_data);
+    let options = Arc::new(options);
+    let simulation = Arc::new(simulation);
+    let portfolios = Arc::new(portfolios);
+    let saved_strategies = Arc::new(saved_strategies);
+    let tracked_tickers = Arc::new(tracked_tickers);
+    let synchronization = Arc::new(synchronization);
+
+    let modern = crate::driving_adapters::http::router_with_data_refresh(
         crate::driving_adapters::http::MarketViewingPorts::new(
-            Arc::new(configured.market_data),
-            Arc::new(configured.sector_performance),
+            market_data.clone(),
+            Arc::new(sector_performance),
         ),
-        Arc::new(configured.options),
-        Arc::new(configured.simulation),
-        Arc::new(configured.portfolios),
-        crate::driving_adapters::http::SynchronizationPorts::new(
-            Arc::new(configured.synchronization),
-            configured.data_refresh,
-        ),
-        Arc::new(configured.saved_strategies),
-        Arc::new(configured.tracked_tickers),
-    )
+        options.clone(),
+        simulation.clone(),
+        portfolios.clone(),
+        crate::driving_adapters::http::SynchronizationPorts::new(synchronization, data_refresh),
+        saved_strategies.clone(),
+        tracked_tickers.clone(),
+    );
+
+    let intraday_simulation = Arc::new(intraday_simulation);
+    let legacy = crate::driving_adapters::http::legacy_server::router(
+        crate::driving_adapters::http::legacy_server::LegacyHttpPorts {
+            market_data,
+            market_stream: Arc::new(market_stream),
+            market_volatility: Arc::new(market_volatility),
+            interest_rates: Arc::new(interest_rates),
+            portfolios,
+            portfolio_valuation: Arc::new(portfolio_valuation),
+            options,
+            simulation,
+            intraday_simulation: intraday_simulation.clone(),
+            intraday_options: intraday_simulation,
+            saved_strategies,
+            tracked_tickers,
+        },
+        market_session,
+    );
+
+    modern.merge(legacy)
 }
