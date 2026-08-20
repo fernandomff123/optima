@@ -134,6 +134,17 @@ pub fn is_system_ticker(ticker: &str) -> bool {
         || SECTORS.iter().any(|sector| sector.etf == ticker)
 }
 
+/// Maps established market aliases of protected indices to this application's
+/// public identity. Provider request symbols remain an adapter concern.
+pub fn canonical_system_ticker(ticker: &str) -> Option<&str> {
+    match ticker {
+        "^GSPC" => Some("SPX"),
+        "^VIX" => Some("VIX"),
+        _ if is_system_ticker(ticker) => Some(ticker),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,6 +180,19 @@ mod tests {
                 .iter()
                 .all(|sector| tickers.iter().any(|ticker| ticker.ticker == sector.etf))
         );
+    }
+
+    #[test]
+    fn protected_index_aliases_have_one_public_identity() {
+        for (identity, canonical) in [
+            ("SPX", "SPX"),
+            ("^GSPC", "SPX"),
+            ("VIX", "VIX"),
+            ("^VIX", "VIX"),
+        ] {
+            assert_eq!(canonical_system_ticker(identity), Some(canonical));
+        }
+        assert_eq!(canonical_system_ticker("BRK-B"), None);
     }
 
     #[test]

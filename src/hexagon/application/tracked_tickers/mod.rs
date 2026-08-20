@@ -9,8 +9,8 @@ use tokio::sync::Mutex;
 use crate::hexagon::{
     PortError, PortResult,
     domain::tracked_ticker::{
-        ResolvedUnderlying, TrackedTicker, TrackedTickerConfiguration, UnderlyingResolutionState,
-        is_system_ticker, normalize_ticker, system_tickers,
+        ResolvedUnderlying, TrackedTicker, TrackedTickerConfiguration, TrackedTickerSource,
+        UnderlyingResolutionState, canonical_system_ticker, normalize_ticker, system_tickers,
     },
     driven_ports::{
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
@@ -79,6 +79,19 @@ where
 
     async fn bootstrap_system_tickers(&self) -> PortResult<()> {
         let existing = self.loader.load_tracked_tickers().await?;
+        for mut legacy_alias in existing
+            .iter()
+            .filter(|tracked| tracked.source == TrackedTickerSource::User)
+            .filter(|tracked| {
+                canonical_system_ticker(&tracked.ticker)
+                    .is_some_and(|canonical| canonical != tracked.ticker)
+            })
+            .cloned()
+        {
+            legacy_alias.active = false;
+            legacy_alias.reject();
+            self.store.store_tracked_ticker(&legacy_alias).await?;
+        }
         for mut ticker in system_tickers() {
             if let Some(stored) = existing.iter().find(|stored| {
                 stored.ticker == ticker.ticker
@@ -98,7 +111,10 @@ where
         configuration: TrackedTickerConfiguration,
     ) -> PortResult<()> {
         let ticker = normalize_ticker(ticker).map_err(PortError::InvalidRequest)?;
-        if is_system_ticker(&ticker) {
+        if let Some(canonical) = canonical_system_ticker(&ticker) {
+            if canonical != ticker {
+                return Err(protected_alias_conflict(&ticker, canonical));
+            }
             if system_tickers()
                 .into_iter()
                 .find(|tracked| tracked.ticker == ticker)
@@ -205,6 +221,11 @@ where
 {
     async fn resolve_underlying(&self, ticker: &str) -> PortResult<UnderlyingResolution> {
         let ticker = normalize_ticker(ticker).map_err(PortError::InvalidRequest)?;
+        if let Some(canonical) = canonical_system_ticker(&ticker)
+            && canonical != ticker
+        {
+            return Err(protected_alias_conflict(&ticker, canonical));
+        }
         let resolved = self
             .resolver
             .resolve_underlying(&ticker)
@@ -217,6 +238,12 @@ where
             metadata,
         })
     }
+}
+
+fn protected_alias_conflict(alias: &str, canonical: &str) -> PortError {
+    PortError::Conflict(format!(
+        "tracked ticker {alias} is equivalent to system-protected {canonical}"
+    ))
 }
 
 fn confirm_identity(

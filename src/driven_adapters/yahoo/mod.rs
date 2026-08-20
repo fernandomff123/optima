@@ -133,6 +133,7 @@ fn chart_provider_symbol(ticker: &str) -> String {
     match ticker {
         "BRK.B" => "BRK-B".to_string(),
         "SPX" => "^GSPC".to_string(),
+        "VIX" => "^VIX".to_string(),
         _ => ticker.to_string(),
     }
 }
@@ -302,6 +303,7 @@ mod resolver_tests {
             (" msft ", "MSFT", "MSFT"),
             (" brk.b ", "BRK.B", "BRK-B"),
             (" spx ", "SPX", "^GSPC"),
+            (" vix ", "VIX", "^VIX"),
         ] {
             let normalized = client::normalize_ticker(input).unwrap();
             assert_eq!(normalized, public_ticker);

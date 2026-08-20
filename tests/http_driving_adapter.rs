@@ -181,6 +181,12 @@ impl ForManagingTrackedTickers for TrackedTickersMock {
             "SPX" => Err(PortError::Conflict(
                 "tracked ticker SPX is protected by the system".into(),
             )),
+            "^GSPC" => Err(PortError::Conflict(
+                "tracked ticker ^GSPC is equivalent to system-protected SPX".into(),
+            )),
+            "^VIX" => Err(PortError::Conflict(
+                "tracked ticker ^VIX is equivalent to system-protected VIX".into(),
+            )),
             "bad ticker" => Err(PortError::InvalidRequest("invalid tracked ticker".into())),
             _ => Ok(()),
         }
@@ -694,6 +700,10 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
 
     for (path, expected) in [
         ("/api/tracked-tickers/SPX", StatusCode::CONFLICT),
+        ("/api/tracked-tickers/%5EGSPC", StatusCode::CONFLICT),
+        ("/api/tracked-tickers/%5EVIX", StatusCode::CONFLICT),
+        ("/tracked-tickers/%5EGSPC", StatusCode::CONFLICT),
+        ("/tracked-tickers/%5EVIX", StatusCode::CONFLICT),
         ("/tracked-tickers/bad%20ticker", StatusCode::BAD_REQUEST),
     ] {
         let response = app
@@ -711,6 +721,14 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
             .await
             .unwrap();
         assert_eq!(response.status(), expected);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(serde_json::from_slice::<api_models::ApiError>(&body).is_ok());
     }
 }
 

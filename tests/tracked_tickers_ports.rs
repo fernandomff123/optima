@@ -270,6 +270,80 @@ async fn rejects_invalid_and_system_tickers_factually() {
     );
 }
 
+#[tokio::test]
+async fn protected_index_aliases_never_create_users_or_duplicate_refresh_identity() {
+    let adapter = TrackedTickersMock::default();
+    let application =
+        TrackedTickersApplication::new(adapter.clone(), adapter.clone(), MustNotResolve);
+    application.bootstrap_system_tickers().await.unwrap();
+
+    for (alias, canonical) in [("^GSPC", "SPX"), ("^VIX", "VIX")] {
+        for _ in 0..2 {
+            assert_eq!(
+                application
+                    .configure_ticker(alias, configuration(true))
+                    .await,
+                Err(PortError::Conflict(format!(
+                    "tracked ticker {alias} is equivalent to system-protected {canonical}"
+                )))
+            );
+        }
+        assert!(matches!(
+            application.resolve_underlying(alias).await,
+            Err(PortError::Conflict(_))
+        ));
+    }
+
+    let stored = application.list_tickers(true).await.unwrap();
+    assert_eq!(
+        stored,
+        hexagonal_backend::hexagon::domain::tracked_ticker::system_tickers()
+    );
+    assert!(stored.iter().all(|ticker| ticker.source
+        == hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerSource::System));
+    let eligible = adapter.load_refresh_eligible_tickers().await.unwrap();
+    for canonical in ["SPX", "VIX"] {
+        assert_eq!(
+            eligible
+                .iter()
+                .filter(|ticker| ticker.ticker == canonical)
+                .count(),
+            1
+        );
+    }
+}
+
+#[tokio::test]
+async fn canonical_system_configuration_remains_idempotent() {
+    let adapter = TrackedTickersMock::default();
+    let application =
+        TrackedTickersApplication::new(adapter.clone(), adapter.clone(), MustNotResolve);
+    application.bootstrap_system_tickers().await.unwrap();
+
+    for canonical in ["SPX", "VIX"] {
+        let system = application
+            .list_tickers(true)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|ticker| ticker.ticker == canonical)
+            .unwrap();
+        application
+            .configure_ticker(canonical, system.configuration())
+            .await
+            .unwrap();
+        application
+            .configure_ticker(canonical, system.configuration())
+            .await
+            .unwrap();
+    }
+
+    let stored = application.list_tickers(true).await.unwrap();
+    assert_eq!(stored.len(), 14);
+    assert!(stored.iter().all(|ticker| ticker.source
+        == hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerSource::System));
+}
+
 fn configuration(
     active: bool,
 ) -> hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerConfiguration {
