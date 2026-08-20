@@ -111,7 +111,7 @@ async fn configurator_wires_every_application_to_its_driving_port() {
     saved_strategies(&configured.saved_strategies);
     tracked_tickers(&configured.tracked_tickers);
     simulation(&configured.simulation);
-    synchronization(&configured.synchronization);
+    synchronization(configured.synchronization.as_ref());
     sector_performance(&configured.sector_performance);
 
     let error = configured

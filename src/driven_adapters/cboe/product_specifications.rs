@@ -1,5 +1,7 @@
 //! Offline catalog of evidenced Cboe option product specifications.
 
+use std::collections::BTreeMap;
+
 use async_trait::async_trait;
 use chrono::NaiveDate;
 
@@ -8,6 +10,7 @@ use crate::hexagon::{
     domain::options::OptionContractSpecification,
     driven_ports::for_resolving_option_contract_specifications::{
         ForResolvingOptionContractSpecifications, OptionContractIdentity,
+        OptionContractSpecificationResolution,
     },
 };
 
@@ -19,28 +22,38 @@ pub struct CboeOptionContractSpecificationsAdapter;
 
 #[async_trait]
 impl ForResolvingOptionContractSpecifications for CboeOptionContractSpecificationsAdapter {
-    async fn resolve_option_contract_specification(
+    async fn resolve_option_contract_specifications(
         &self,
-        contract: OptionContractIdentity<'_>,
-    ) -> PortResult<Option<OptionContractSpecification>> {
+        contracts: &[OptionContractIdentity],
+    ) -> PortResult<BTreeMap<OptionContractIdentity, OptionContractSpecificationResolution>> {
         let Some(catalog_reviewed_at) = NaiveDate::from_ymd_opt(2026, 8, 20) else {
             return Err(crate::hexagon::PortError::Unavailable(
                 "invalid embedded catalog review date".to_string(),
             ));
         };
-        let root = contract.root.trim().to_ascii_uppercase();
-        let specification = match root.as_str() {
-            "SPX" | "SPXW" => OptionContractSpecification::new(
-                root,
-                100.0,
-                "USD",
-                "cboe_spx_options_product_specifications",
-                Some(catalog_reviewed_at),
-                None,
-            ),
-            _ => None,
-        };
-        Ok(specification)
+        Ok(contracts
+            .iter()
+            .cloned()
+            .map(|identity| {
+                let root = identity.root.trim().to_ascii_uppercase();
+                let resolution = match root.as_str() {
+                    "SPX" | "SPXW" => OptionContractSpecification::new(
+                        root,
+                        100.0,
+                        "USD",
+                        "cboe_spx_options_product_specifications",
+                        Some(catalog_reviewed_at),
+                        None,
+                    )
+                    .map_or(
+                        OptionContractSpecificationResolution::NotFound,
+                        OptionContractSpecificationResolution::Found,
+                    ),
+                    _ => OptionContractSpecificationResolution::NotFound,
+                };
+                (identity, resolution)
+            })
+            .collect())
     }
 }
 
@@ -51,15 +64,24 @@ mod tests {
     #[tokio::test]
     async fn resolves_only_evidenced_exact_roots() {
         let adapter = CboeOptionContractSpecificationsAdapter;
-        for root in ["SPX", "SPXW"] {
-            let specification = adapter
-                .resolve_option_contract_specification(OptionContractIdentity {
-                    root,
-                    occ_symbol: "contract",
-                })
-                .await
-                .unwrap()
-                .unwrap();
+        let identities: Vec<_> = ["SPX", "SPXW", "SPY", "XSP", "UNKNOWN", "SPX1", "SPXW1"]
+            .into_iter()
+            .map(|root| OptionContractIdentity {
+                root: root.to_string(),
+                occ_symbol: format!("{root}-contract"),
+            })
+            .collect();
+        let resolutions = adapter
+            .resolve_option_contract_specifications(&identities)
+            .await
+            .unwrap();
+
+        for identity in &identities[..2] {
+            let OptionContractSpecificationResolution::Found(specification) =
+                &resolutions[identity]
+            else {
+                panic!("standard root must be resolved");
+            };
             assert_eq!(specification.contract_multiplier, 100.0);
             assert_eq!(specification.currency, "USD");
             assert_eq!(specification.effective_from, None);
@@ -68,16 +90,10 @@ mod tests {
                 NaiveDate::from_ymd_opt(2026, 8, 20)
             );
         }
-        for root in ["SPY", "XSP", "UNKNOWN", "SPX1", "SPXW1"] {
-            assert!(
-                adapter
-                    .resolve_option_contract_specification(OptionContractIdentity {
-                        root,
-                        occ_symbol: "adjusted-or-unknown",
-                    })
-                    .await
-                    .unwrap()
-                    .is_none()
+        for identity in &identities[2..] {
+            assert_eq!(
+                resolutions[identity],
+                OptionContractSpecificationResolution::NotFound
             );
         }
     }
