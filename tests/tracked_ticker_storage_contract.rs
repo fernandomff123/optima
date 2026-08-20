@@ -26,6 +26,7 @@ static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy)]
 struct Resolver;
+struct MustNotResolve;
 
 #[async_trait::async_trait]
 impl ForResolvingUnderlyingSymbols for Resolver {
@@ -38,6 +39,116 @@ impl ForResolvingUnderlyingSymbols for Resolver {
             metadata: UnderlyingMetadata::default(),
         })
     }
+}
+
+#[async_trait::async_trait]
+impl ForResolvingUnderlyingSymbols for MustNotResolve {
+    async fn resolve_underlying(
+        &self,
+        ticker: &str,
+    ) -> Result<ResolvedUnderlying, UnderlyingResolutionError> {
+        panic!("protected alias {ticker} must not reach the provider")
+    }
+}
+
+async fn assert_legacy_alias_reconciliation<Adapter>(adapter: Adapter)
+where
+    Adapter: ForLoadingTrackedTickers + ForStoringTrackedTickers + Clone,
+{
+    for ticker in ["^GSPC", "^VIX"] {
+        adapter
+            .store_tracked_ticker(&TrackedTicker {
+                ticker: ticker.to_string(),
+                source: TrackedTickerSource::User,
+                active: true,
+                historical_prices: true,
+                option_snapshots: false,
+                resolution_state: UnderlyingResolutionState::Resolved,
+                validated_at: Some(chrono::Utc::now()),
+                metadata: UnderlyingMetadata {
+                    exchange: Some("legacy".into()),
+                    ..UnderlyingMetadata::default()
+                },
+            })
+            .await
+            .unwrap();
+    }
+
+    let application =
+        TrackedTickersApplication::new(adapter.clone(), adapter.clone(), MustNotResolve);
+    application.bootstrap_system_tickers().await.unwrap();
+    application.bootstrap_system_tickers().await.unwrap();
+    drop(application);
+
+    let restarted =
+        TrackedTickersApplication::new(adapter.clone(), adapter.clone(), MustNotResolve);
+    restarted.bootstrap_system_tickers().await.unwrap();
+    for input in ["^gspc", " ^GSPC ", "^vix", " ^VIX "] {
+        assert!(matches!(
+            restarted
+                .configure_ticker(
+                    input,
+                    TrackedTickerConfiguration {
+                        active: true,
+                        historical_prices: true,
+                        option_snapshots: false,
+                    }
+                )
+                .await,
+            Err(PortError::Conflict(_))
+        ));
+        assert!(matches!(
+            hexagonal_backend::hexagon::driving_ports::for_resolving_underlyings::ForResolvingUnderlyings::resolve_underlying(&restarted, input).await,
+            Err(PortError::Conflict(_))
+        ));
+    }
+
+    let stored = adapter.load_tracked_tickers().await.unwrap();
+    for alias in ["^GSPC", "^VIX"] {
+        let legacy = stored
+            .iter()
+            .find(|tracked| tracked.ticker == alias)
+            .unwrap();
+        assert_eq!(legacy.source, TrackedTickerSource::User);
+        assert!(!legacy.active);
+        assert_eq!(legacy.resolution_state, UnderlyingResolutionState::Rejected);
+        assert!(legacy.validated_at.is_none());
+        assert_eq!(legacy.metadata, UnderlyingMetadata::default());
+    }
+
+    let relevant = adapter
+        .load_refresh_eligible_tickers()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|tracked| matches!(tracked.ticker.as_str(), "SPX" | "VIX" | "^GSPC" | "^VIX"))
+        .map(|tracked| tracked.ticker)
+        .collect::<Vec<_>>();
+    assert_eq!(relevant, vec!["SPX", "VIX"]);
+}
+
+#[tokio::test]
+async fn sqlite_bootstrap_reconciles_legacy_protected_aliases_across_restart() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    tracked_tickers::initialize(&pool).await.unwrap();
+    assert_legacy_alias_reconciliation(SqliteTrackedTickersAdapter::new(pool)).await;
+}
+
+#[tokio::test]
+async fn duckdb_bootstrap_reconciles_legacy_protected_aliases_across_restart() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-legacy-aliases-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbTrackedTickersAdapter::new(&path);
+    adapter.initialize().await.unwrap();
+    assert_legacy_alias_reconciliation(adapter).await;
+    std::fs::remove_file(path).unwrap();
 }
 
 async fn assert_contract(adapter: &(impl ForLoadingTrackedTickers + ForStoringTrackedTickers)) {
