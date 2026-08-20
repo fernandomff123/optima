@@ -498,7 +498,10 @@ pub fn configure_server_http_application(
         portfolios.clone(),
         crate::driving_adapters::http::SynchronizationPorts::new(synchronization, data_refresh),
         saved_strategies.clone(),
-        tracked_tickers.clone(),
+        crate::driving_adapters::http::TrackedTickerPorts::new(
+            tracked_tickers.clone(),
+            tracked_tickers.clone(),
+        ),
     );
 
     let intraday_simulation = Arc::new(intraday_simulation);

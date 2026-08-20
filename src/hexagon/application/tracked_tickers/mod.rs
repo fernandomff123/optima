@@ -1,5 +1,7 @@
 //! Tracked-ticker configuration use cases.
 
+use std::{collections::HashMap, sync::Arc};
+
 use async_trait::async_trait;
 use chrono::Utc;
 use tokio::sync::Mutex;
@@ -27,7 +29,7 @@ pub struct TrackedTickersApplication<Loader, Store, Resolver> {
     loader: Loader,
     store: Store,
     resolver: Resolver,
-    configuration_lock: Mutex<()>,
+    configuration_coordinators: Mutex<HashMap<String, Arc<Mutex<u64>>>>,
 }
 
 impl<Loader, Store, Resolver> TrackedTickersApplication<Loader, Store, Resolver> {
@@ -36,7 +38,24 @@ impl<Loader, Store, Resolver> TrackedTickersApplication<Loader, Store, Resolver>
             loader,
             store,
             resolver,
-            configuration_lock: Mutex::new(()),
+            configuration_coordinators: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn coordinator_for(&self, ticker: &str) -> Arc<Mutex<u64>> {
+        let mut coordinators = self.configuration_coordinators.lock().await;
+        coordinators
+            .entry(ticker.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(0)))
+            .clone()
+    }
+
+    async fn release_coordinator(&self, ticker: &str, coordinator: &Arc<Mutex<u64>>) {
+        let mut coordinators = self.configuration_coordinators.lock().await;
+        if coordinators.get(ticker).is_some_and(|current| {
+            Arc::ptr_eq(current, coordinator) && Arc::strong_count(current) == 2
+        }) {
+            coordinators.remove(ticker);
         }
     }
 }
@@ -90,48 +109,113 @@ where
                 "tracked ticker {ticker} is protected by the system"
             )));
         }
-        let _configuration = self.configuration_lock.lock().await;
-        let existing = self
-            .loader
-            .load_tracked_tickers()
-            .await?
-            .into_iter()
-            .find(|tracked| tracked.ticker == ticker);
+        let coordinator = self.coordinator_for(&ticker).await;
+        let result = async {
+            let (revision, existing) = {
+                let mut current_revision = coordinator.lock().await;
+                *current_revision += 1;
+                let revision = *current_revision;
+                let existing = self
+                    .loader
+                    .load_tracked_tickers()
+                    .await?
+                    .into_iter()
+                    .find(|tracked| tracked.ticker == ticker);
 
-        if let Some(mut tracked) = existing {
-            if !configuration.active
-                || tracked.resolution_state == UnderlyingResolutionState::Resolved
-            {
+                if let Some(mut tracked) = existing.clone() {
+                    if !configuration.active
+                        || tracked.resolution_state == UnderlyingResolutionState::Resolved
+                    {
+                        tracked.active = configuration.active;
+                        tracked.historical_prices = configuration.historical_prices;
+                        tracked.option_snapshots = configuration.option_snapshots;
+                        self.store.store_tracked_ticker(&tracked).await?;
+                        return Ok(());
+                    }
+                } else if !configuration.active {
+                    let tracked = TrackedTicker::user(&ticker, configuration)
+                        .map_err(PortError::InvalidRequest)?;
+                    self.store.store_tracked_ticker(&tracked).await?;
+                    return Ok(());
+                }
+                (revision, existing)
+            };
+
+            let resolution = self.resolver.resolve_underlying(&ticker).await;
+            let current_revision = coordinator.lock().await;
+            if *current_revision != revision {
+                return Ok(());
+            }
+
+            let existing = self
+                .loader
+                .load_tracked_tickers()
+                .await?
+                .into_iter()
+                .find(|tracked| tracked.ticker == ticker)
+                .or(existing);
+
+            if let Some(mut tracked) = existing {
+                match resolution {
+                    Ok(resolved) => {
+                        let resolved = confirm_identity(&ticker, resolved)?;
+                        tracked
+                            .resolve(resolved, Utc::now())
+                            .map_err(PortError::Unavailable)?;
+                    }
+                    Err(UnderlyingResolutionError::NotFound(message)) => {
+                        tracked.reject();
+                        tracked.active = configuration.active;
+                        tracked.historical_prices = configuration.historical_prices;
+                        tracked.option_snapshots = configuration.option_snapshots;
+                        self.store.store_tracked_ticker(&tracked).await?;
+                        return Err(PortError::NotFound(message));
+                    }
+                    Err(error) => return Err(map_resolution_error(error)),
+                }
                 tracked.active = configuration.active;
                 tracked.historical_prices = configuration.historical_prices;
                 tracked.option_snapshots = configuration.option_snapshots;
                 return self.store.store_tracked_ticker(&tracked).await;
             }
 
-            match self.resolver.resolve_underlying(&ticker).await {
-                Ok(resolved) => tracked.resolve(resolved, Utc::now()),
-                Err(UnderlyingResolutionError::NotFound(message)) => {
-                    tracked.reject();
-                    self.store.store_tracked_ticker(&tracked).await?;
-                    return Err(PortError::NotFound(message));
-                }
-                Err(error) => return Err(map_resolution_error(error)),
-            }
-            tracked.active = configuration.active;
-            tracked.historical_prices = configuration.historical_prices;
-            tracked.option_snapshots = configuration.option_snapshots;
-            return self.store.store_tracked_ticker(&tracked).await;
+            let resolved = resolution.map_err(map_resolution_error)?;
+            let resolved = confirm_identity(&ticker, resolved)?;
+            let mut tracked =
+                TrackedTicker::user(&ticker, configuration).map_err(PortError::InvalidRequest)?;
+            tracked
+                .resolve(resolved, Utc::now())
+                .map_err(PortError::Unavailable)?;
+            self.store.store_tracked_ticker(&tracked).await
         }
+        .await;
+        self.release_coordinator(&ticker, &coordinator).await;
+        result
+    }
+}
 
-        let resolved = self
-            .resolver
-            .resolve_underlying(&ticker)
-            .await
-            .map_err(map_resolution_error)?;
-        let mut tracked =
-            TrackedTicker::user(&ticker, configuration).map_err(PortError::InvalidRequest)?;
-        tracked.resolve(resolved, Utc::now());
-        self.store.store_tracked_ticker(&tracked).await
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn obsolete_per_ticker_coordinators_are_removed_after_the_last_request() {
+        let application = TrackedTickersApplication::new((), (), ());
+        let first = application.coordinator_for("MSFT").await;
+        let second = application.coordinator_for("MSFT").await;
+
+        application.release_coordinator("MSFT", &first).await;
+        assert_eq!(application.configuration_coordinators.lock().await.len(), 1);
+
+        drop(first);
+        application.release_coordinator("MSFT", &second).await;
+        assert!(
+            application
+                .configuration_coordinators
+                .lock()
+                .await
+                .is_empty()
+        );
     }
 }
 
@@ -145,17 +229,36 @@ where
 {
     async fn resolve_underlying(&self, ticker: &str) -> PortResult<UnderlyingResolution> {
         let ticker = normalize_ticker(ticker).map_err(PortError::InvalidRequest)?;
-        let ResolvedUnderlying { ticker, metadata } = self
+        let resolved = self
             .resolver
             .resolve_underlying(&ticker)
             .await
             .map_err(map_resolution_error)?;
+        let ResolvedUnderlying { ticker, metadata } = confirm_identity(&ticker, resolved)?;
         Ok(UnderlyingResolution {
             ticker,
             validated_at: Utc::now(),
             metadata,
         })
     }
+}
+
+fn confirm_identity(
+    requested_ticker: &str,
+    resolved: ResolvedUnderlying,
+) -> PortResult<ResolvedUnderlying> {
+    let resolved_ticker = normalize_ticker(&resolved.ticker).map_err(|_| {
+        PortError::Unavailable("provider returned an invalid underlying identity".into())
+    })?;
+    if resolved_ticker != requested_ticker {
+        return Err(PortError::Unavailable(format!(
+            "provider returned {resolved_ticker} while resolving {requested_ticker}"
+        )));
+    }
+    Ok(ResolvedUnderlying {
+        ticker: resolved_ticker,
+        metadata: resolved.metadata,
+    })
 }
 
 fn map_resolution_error(error: UnderlyingResolutionError) -> PortError {

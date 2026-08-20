@@ -183,16 +183,13 @@ async fn load_with_predicate(
         .map(|row| {
             Ok(TrackedTicker {
                 ticker: row.try_get("ticker")?,
-                source: match row.try_get::<String, _>("source")?.as_str() {
-                    "system" => TrackedTickerSource::System,
-                    _ => TrackedTickerSource::User,
-                },
+                source: parse_source(&row.try_get::<String, _>("source")?)?,
                 active: row.try_get("active")?,
                 historical_prices: row.try_get("yahoo_prices")?,
                 option_snapshots: row.try_get("cboe_snapshot")?,
                 resolution_state: parse_resolution_state(
                     &row.try_get::<String, _>("resolution_state")?,
-                ),
+                )?,
                 validated_at: row.try_get("validated_at")?,
                 metadata: UnderlyingMetadata {
                     currency: row.try_get("currency")?,
@@ -213,12 +210,28 @@ fn resolution_state(value: UnderlyingResolutionState) -> &'static str {
     }
 }
 
-fn parse_resolution_state(value: &str) -> UnderlyingResolutionState {
+fn parse_source(value: &str) -> Result<TrackedTickerSource, sqlx::Error> {
     match value {
-        "resolved" => UnderlyingResolutionState::Resolved,
-        "rejected" => UnderlyingResolutionState::Rejected,
-        _ => UnderlyingResolutionState::Pending,
+        "system" => Ok(TrackedTickerSource::System),
+        "user" => Ok(TrackedTickerSource::User),
+        _ => Err(invalid_persisted_enum("source", value)),
     }
+}
+
+fn parse_resolution_state(value: &str) -> Result<UnderlyingResolutionState, sqlx::Error> {
+    match value {
+        "pending" => Ok(UnderlyingResolutionState::Pending),
+        "resolved" => Ok(UnderlyingResolutionState::Resolved),
+        "rejected" => Ok(UnderlyingResolutionState::Rejected),
+        _ => Err(invalid_persisted_enum("resolution_state", value)),
+    }
+}
+
+fn invalid_persisted_enum(field: &str, value: &str) -> sqlx::Error {
+    sqlx::Error::Decode(Box::new(std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("unknown tracked_tickers.{field} value: {value}"),
+    )))
 }
 
 pub async fn set_option_snapshots(

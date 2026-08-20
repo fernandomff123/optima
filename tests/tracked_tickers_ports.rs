@@ -32,6 +32,7 @@ struct ResolverMock;
 struct MissingResolver;
 struct UnavailableResolver;
 struct InvalidResponseResolver;
+struct DifferentIdentityResolver;
 struct MustNotResolve;
 
 #[derive(Clone, Default)]
@@ -42,8 +43,10 @@ struct ControlledResolver {
 }
 
 impl ControlledResolver {
-    async fn wait_until_entered(&self) {
-        self.entered.notified().await;
+    async fn wait_until_calls(&self, expected: usize) {
+        while self.calls.load(Ordering::SeqCst) < expected {
+            self.entered.notified().await;
+        }
     }
 
     fn release(&self) {
@@ -97,6 +100,19 @@ impl ForResolvingUnderlyingSymbols for InvalidResponseResolver {
         Err(UnderlyingResolutionError::InvalidProviderResponse(
             "Yahoo response was incompatible".into(),
         ))
+    }
+}
+
+#[async_trait]
+impl ForResolvingUnderlyingSymbols for DifferentIdentityResolver {
+    async fn resolve_underlying(
+        &self,
+        _ticker: &str,
+    ) -> Result<ResolvedUnderlying, UnderlyingResolutionError> {
+        Ok(ResolvedUnderlying {
+            ticker: "AAPL".into(),
+            metadata: UnderlyingMetadata::default(),
+        })
     }
 }
 
@@ -383,18 +399,20 @@ async fn resolved_ticker_can_be_updated_and_disabled_without_provider() {
     let adapter = TrackedTickersMock::default();
     let mut tracked = TrackedTicker::user("MSFT", configuration(true)).unwrap();
     let validated_at = chrono::Utc::now();
-    tracked.resolve(
-        ResolvedUnderlying {
-            ticker: "MSFT".into(),
-            metadata: UnderlyingMetadata {
-                currency: Some("USD".into()),
-                exchange: Some("NMS".into()),
-                timezone: None,
-                instrument_type: Some("EQUITY".into()),
+    tracked
+        .resolve(
+            ResolvedUnderlying {
+                ticker: "MSFT".into(),
+                metadata: UnderlyingMetadata {
+                    currency: Some("USD".into()),
+                    exchange: Some("NMS".into()),
+                    timezone: None,
+                    instrument_type: Some("EQUITY".into()),
+                },
             },
-        },
-        validated_at,
-    );
+            validated_at,
+        )
+        .expect("matching resolution must succeed");
     adapter.store_tracked_ticker(&tracked).await.unwrap();
     let application =
         TrackedTickersApplication::new(adapter.clone(), adapter.clone(), MustNotResolve);
@@ -473,7 +491,50 @@ async fn exact_resolution_use_case_does_not_persist_or_activate() {
 }
 
 #[tokio::test]
-async fn concurrent_puts_for_the_same_ticker_are_serialized() {
+async fn different_resolved_identity_fails_without_altering_or_creating_records() {
+    let empty_store = TrackedTickersMock::default();
+    let application = TrackedTickersApplication::new(
+        empty_store.clone(),
+        empty_store.clone(),
+        DifferentIdentityResolver,
+    );
+    assert!(matches!(
+        application
+            .configure_ticker("MSFT", configuration(true))
+            .await,
+        Err(PortError::Unavailable(_))
+    ));
+    assert!(empty_store.load_tracked_tickers().await.unwrap().is_empty());
+    assert!(matches!(
+        application.resolve_underlying("MSFT").await,
+        Err(PortError::Unavailable(_))
+    ));
+
+    let existing_store = TrackedTickersMock::default();
+    let original = TrackedTicker::user("MSFT", configuration(true)).unwrap();
+    existing_store
+        .store_tracked_ticker(&original)
+        .await
+        .unwrap();
+    let application = TrackedTickersApplication::new(
+        existing_store.clone(),
+        existing_store.clone(),
+        DifferentIdentityResolver,
+    );
+    assert!(matches!(
+        application
+            .configure_ticker("MSFT", configuration(true))
+            .await,
+        Err(PortError::Unavailable(_))
+    ));
+    assert_eq!(
+        existing_store.load_tracked_tickers().await.unwrap(),
+        vec![original]
+    );
+}
+
+#[tokio::test]
+async fn concurrent_puts_for_the_same_ticker_keep_the_latest_configuration() {
     let adapter = TrackedTickersMock::default();
     let resolver = ControlledResolver::default();
     let application = Arc::new(TrackedTickersApplication::new(
@@ -489,7 +550,7 @@ async fn concurrent_puts_for_the_same_ticker_are_serialized() {
                 .await
         })
     };
-    resolver.wait_until_entered().await;
+    resolver.wait_until_calls(1).await;
     let second_configuration =
         hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTickerConfiguration {
             active: true,
@@ -504,15 +565,15 @@ async fn concurrent_puts_for_the_same_ticker_are_serialized() {
                 .await
         })
     };
-    tokio::task::yield_now().await;
-    assert!(!second.is_finished());
+    resolver.wait_until_calls(2).await;
+    resolver.release();
     resolver.release();
     first.await.unwrap().unwrap();
     second.await.unwrap().unwrap();
 
     let stored = adapter.load_tracked_tickers().await.unwrap().remove(0);
     assert_eq!(stored.configuration(), second_configuration);
-    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(resolver.calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]
@@ -536,7 +597,7 @@ async fn deactivation_during_resolution_wins_over_the_older_provider_response() 
                 .await
         })
     };
-    resolver.wait_until_entered().await;
+    resolver.wait_until_calls(1).await;
     let disabling = {
         let application = application.clone();
         tokio::spawn(async move {
@@ -545,15 +606,70 @@ async fn deactivation_during_resolution_wins_over_the_older_provider_response() 
                 .await
         })
     };
-    tokio::task::yield_now().await;
-    assert!(!disabling.is_finished());
+    disabling.await.unwrap().unwrap();
+    assert!(
+        adapter
+            .load_refresh_eligible_tickers()
+            .await
+            .unwrap()
+            .is_empty(),
+        "the stale provider response must not create an eligibility window"
+    );
     resolver.release();
     resolving.await.unwrap().unwrap();
-    disabling.await.unwrap().unwrap();
 
     let stored = adapter.load_tracked_tickers().await.unwrap().remove(0);
     assert!(!stored.active);
-    assert_eq!(stored.resolution_state, UnderlyingResolutionState::Resolved);
-    assert_eq!(stored.metadata.currency.as_deref(), Some("USD"));
+    assert_eq!(stored.resolution_state, UnderlyingResolutionState::Pending);
+    assert_eq!(stored.metadata, UnderlyingMetadata::default());
     assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn different_tickers_do_not_block_each_other_during_resolution() {
+    let adapter = TrackedTickersMock::default();
+    let resolver = ControlledResolver::default();
+    let application = Arc::new(TrackedTickersApplication::new(
+        adapter.clone(),
+        adapter.clone(),
+        resolver.clone(),
+    ));
+    let msft = {
+        let application = application.clone();
+        tokio::spawn(async move {
+            application
+                .configure_ticker("MSFT", configuration(true))
+                .await
+        })
+    };
+    resolver.wait_until_calls(1).await;
+    let aapl = {
+        let application = application.clone();
+        tokio::spawn(async move {
+            application
+                .configure_ticker("AAPL", configuration(true))
+                .await
+        })
+    };
+    resolver.wait_until_calls(2).await;
+
+    resolver.release();
+    resolver.release();
+    msft.await.unwrap().unwrap();
+    aapl.await.unwrap().unwrap();
+
+    let mut tickers = adapter.load_tracked_tickers().await.unwrap();
+    tickers.sort_by(|left, right| left.ticker.cmp(&right.ticker));
+    assert_eq!(
+        tickers
+            .iter()
+            .map(|ticker| ticker.ticker.as_str())
+            .collect::<Vec<_>>(),
+        vec!["AAPL", "MSFT"]
+    );
+    assert!(
+        tickers
+            .iter()
+            .all(|ticker| ticker.resolution_state == UnderlyingResolutionState::Resolved)
+    );
 }

@@ -67,11 +67,19 @@ impl TrackedTicker {
         })
     }
 
-    pub fn resolve(&mut self, underlying: ResolvedUnderlying, validated_at: DateTime<Utc>) {
-        self.ticker = underlying.ticker;
+    pub fn resolve(
+        &mut self,
+        underlying: ResolvedUnderlying,
+        validated_at: DateTime<Utc>,
+    ) -> Result<(), String> {
+        let resolved_ticker = normalize_ticker(&underlying.ticker)?;
+        if resolved_ticker != self.ticker {
+            return Err("resolved underlying identity does not match tracked ticker".to_string());
+        }
         self.resolution_state = UnderlyingResolutionState::Resolved;
         self.validated_at = Some(validated_at);
         self.metadata = underlying.metadata;
+        Ok(())
     }
 
     pub fn reject(&mut self) {
@@ -161,5 +169,36 @@ mod tests {
                 .iter()
                 .all(|sector| tickers.iter().any(|ticker| ticker.ticker == sector.etf))
         );
+    }
+
+    #[test]
+    fn resolution_cannot_replace_the_tracked_ticker_identity() {
+        let mut tracked = TrackedTicker::user(
+            "MSFT",
+            TrackedTickerConfiguration {
+                active: true,
+                historical_prices: true,
+                option_snapshots: false,
+            },
+        )
+        .unwrap();
+        let before = tracked.clone();
+
+        let result = tracked.resolve(
+            ResolvedUnderlying {
+                ticker: "AAPL".into(),
+                metadata: UnderlyingMetadata {
+                    exchange: Some("NMS".into()),
+                    ..UnderlyingMetadata::default()
+                },
+            },
+            Utc::now(),
+        );
+
+        assert_eq!(
+            result,
+            Err("resolved underlying identity does not match tracked ticker".into())
+        );
+        assert_eq!(tracked, before);
     }
 }

@@ -385,7 +385,7 @@ async fn http_adapter_drives_a_mock_application() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app
@@ -414,7 +414,7 @@ async fn http_adapter_translates_application_errors() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app
@@ -439,7 +439,7 @@ async fn http_adapter_drives_the_simulation_port_and_maps_validation_errors() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "spot": 0.0,
@@ -475,7 +475,7 @@ async fn http_adapter_drives_the_complete_portfolio_port() {
         portfolios.clone(),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "id": "main",
@@ -514,7 +514,7 @@ async fn http_adapter_drives_the_synchronization_port() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let term_response = app
@@ -553,7 +553,7 @@ async fn http_adapter_drives_saved_strategy_management() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "name": "Long call",
@@ -590,7 +590,7 @@ async fn http_adapter_drives_tracked_ticker_management() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "active": true,
@@ -632,7 +632,7 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     for path in ["/api/tracked-tickers", "/tracked-tickers"] {
@@ -723,7 +723,7 @@ async fn exact_underlying_resolution_has_canonical_success_and_public_errors_onl
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app
@@ -792,7 +792,7 @@ async fn sector_endpoint_accepts_supported_periods_and_returns_json() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     for period in ["1w", "2w", "1m"] {
@@ -837,7 +837,7 @@ async fn canonical_route_and_alias_have_identical_http_response() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let canonical = app
@@ -883,7 +883,7 @@ async fn canonical_extractor_errors_are_json_without_changing_alias_errors() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let malformed = Request::builder()
@@ -943,7 +943,7 @@ async fn port_errors_keep_status_and_json_envelope_on_canonical_and_alias_routes
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let cases = [
         (
@@ -1023,7 +1023,7 @@ async fn canonical_method_not_allowed_keeps_allow_header_and_returns_json() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app

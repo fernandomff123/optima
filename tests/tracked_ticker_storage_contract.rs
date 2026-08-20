@@ -55,6 +55,23 @@ async fn assert_contract(adapter: &(impl ForLoadingTrackedTickers + ForStoringTr
         .store_tracked_ticker(&ticker)
         .await
         .expect("ticker must store");
+    let mut identity_guard = ticker.clone();
+    assert!(
+        identity_guard
+            .resolve(
+                ResolvedUnderlying {
+                    ticker: "AAPL".into(),
+                    metadata: UnderlyingMetadata::default(),
+                },
+                chrono::Utc::now(),
+            )
+            .is_err()
+    );
+    assert_eq!(identity_guard, ticker);
+    adapter
+        .store_tracked_ticker(&identity_guard)
+        .await
+        .expect("rejected identity change must not affect persistence");
     assert!(
         adapter
             .load_active_tickers()
@@ -106,13 +123,15 @@ async fn assert_resolution_eligibility(
     rejected.reject();
     adapter.store_tracked_ticker(&rejected).await.unwrap();
     let mut resolved = TrackedTicker::user("RESOLVED", configuration).unwrap();
-    resolved.resolve(
-        ResolvedUnderlying {
-            ticker: "RESOLVED".into(),
-            metadata: UnderlyingMetadata::default(),
-        },
-        chrono::Utc::now(),
-    );
+    resolved
+        .resolve(
+            ResolvedUnderlying {
+                ticker: "RESOLVED".into(),
+                metadata: UnderlyingMetadata::default(),
+            },
+            chrono::Utc::now(),
+        )
+        .expect("matching resolution must succeed");
     adapter.store_tracked_ticker(&resolved).await.unwrap();
     let mut inactive = resolved.clone();
     inactive.ticker = "INACTIVE".into();
@@ -158,6 +177,79 @@ async fn duckdb_satisfies_tracked_ticker_contract() {
     assert_contract(&adapter).await;
     assert_resolution_eligibility(&adapter).await;
     std::fs::remove_file(path).expect("temporary DuckDB must be removable");
+}
+
+#[tokio::test]
+async fn sqlite_rejects_unknown_persisted_source_and_resolution_state() {
+    for (column, value) in [("source", "external"), ("resolution_state", "unknown")] {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        tracked_tickers::initialize(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO tracked_tickers
+             (ticker, source, active, yahoo_prices, cboe_snapshot, resolution_state)
+             VALUES ('BROKEN', 'user', 1, 1, 0, 'pending')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(&format!(
+            "UPDATE tracked_tickers SET {column} = ? WHERE ticker = 'BROKEN'"
+        ))
+        .bind(value)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let error = SqliteTrackedTickersAdapter::new(pool)
+            .load_tracked_tickers()
+            .await
+            .expect_err("unknown persisted enum must fail loading");
+        assert!(error.to_string().contains(column));
+        assert!(error.to_string().contains(value));
+    }
+}
+
+#[tokio::test]
+async fn duckdb_rejects_unknown_persisted_source_and_resolution_state() {
+    for (column, value) in [("source", "external"), ("resolution_state", "unknown")] {
+        let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "hexagonal-invalid-tracked-tickers-{}-{sequence}.duckdb",
+            std::process::id()
+        ));
+        let adapter = DuckDbTrackedTickersAdapter::new(&path);
+        adapter.initialize().await.unwrap();
+        {
+            let connection = duckdb::Connection::open(&path).unwrap();
+            connection
+                .execute(
+                    "INSERT INTO tracked_tickers
+                     (ticker, source, active, historical_prices, option_snapshots,
+                      resolution_state)
+                     VALUES ('BROKEN', 'user', true, true, false, 'pending')",
+                    [],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    &format!("UPDATE tracked_tickers SET {column} = ? WHERE ticker = 'BROKEN'"),
+                    [value],
+                )
+                .unwrap();
+        }
+
+        let error = adapter
+            .load_tracked_tickers()
+            .await
+            .expect_err("unknown persisted enum must fail loading");
+        assert!(error.to_string().contains(column));
+        assert!(error.to_string().contains(value));
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 #[tokio::test]
@@ -413,13 +505,15 @@ async fn seed_resolution_states(
         instrument_type: Some("EQUITY".into()),
     };
     let mut resolved = TrackedTicker::user("RESOLVED", configuration).unwrap();
-    resolved.resolve(
-        ResolvedUnderlying {
-            ticker: "RESOLVED".into(),
-            metadata: metadata.clone(),
-        },
-        validated_at,
-    );
+    resolved
+        .resolve(
+            ResolvedUnderlying {
+                ticker: "RESOLVED".into(),
+                metadata: metadata.clone(),
+            },
+            validated_at,
+        )
+        .expect("matching resolution must succeed");
     adapter.store_tracked_ticker(&resolved).await.unwrap();
     let mut rejected = TrackedTicker::user("REJECTED", configuration).unwrap();
     rejected.reject();

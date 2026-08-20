@@ -227,9 +227,15 @@ provider capabilities. Capability resolution belongs to phase 2.
 
 Provider symbols remain inside the Yahoo adapter. The public identities
 `BRK.B` and `SPX` are translated to `BRK-B` and `^GSPC` only for Yahoo calls and
-are restored before crossing the driven port. Tracked-ticker configuration is
-serialized by the application across resolution and persistence so an older
-provider response cannot overwrite a newer deactivation or configuration.
+are restored before crossing the driven port. Management and exact resolution
+are independent driving ports, injected separately into the HTTP adapter even
+when the composition root supplies the same application instance for both.
+Tracked-ticker configuration uses monotonic coordination per normalized ticker:
+the application records a new revision before provider access, does not hold a
+lock during that access, and persists a response only if its revision is still
+current. Independent tickers therefore do not block each other, and an older
+provider response cannot create even a temporary eligibility window after a
+newer deactivation or configuration.
 
 The former `atualizar_dados.sh` was removed because it only downloaded SPY
 option JSON in an independent one-minute loop and never participated in the

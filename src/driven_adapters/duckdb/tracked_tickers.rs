@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use duckdb::{Connection, params};
+use duckdb::{Connection, params, types::Type};
 
 use crate::hexagon::{
     PortError, PortResult,
@@ -169,14 +169,11 @@ fn load(path: &PathBuf, filter: LoadFilter) -> Result<Vec<TrackedTicker>, duckdb
         .query_map([], |row| {
             Ok(TrackedTicker {
                 ticker: row.get(0)?,
-                source: match row.get::<_, String>(1)?.as_str() {
-                    "system" => TrackedTickerSource::System,
-                    _ => TrackedTickerSource::User,
-                },
+                source: parse_source(&row.get::<_, String>(1)?)?,
                 active: row.get(2)?,
                 historical_prices: row.get(3)?,
                 option_snapshots: row.get(4)?,
-                resolution_state: parse_resolution_state(&row.get::<_, String>(5)?),
+                resolution_state: parse_resolution_state(&row.get::<_, String>(5)?)?,
                 validated_at: row.get(6)?,
                 metadata: UnderlyingMetadata {
                     currency: row.get(7)?,
@@ -197,12 +194,32 @@ fn resolution_state(value: UnderlyingResolutionState) -> &'static str {
     }
 }
 
-fn parse_resolution_state(value: &str) -> UnderlyingResolutionState {
+fn parse_source(value: &str) -> Result<TrackedTickerSource, duckdb::Error> {
     match value {
-        "resolved" => UnderlyingResolutionState::Resolved,
-        "rejected" => UnderlyingResolutionState::Rejected,
-        _ => UnderlyingResolutionState::Pending,
+        "system" => Ok(TrackedTickerSource::System),
+        "user" => Ok(TrackedTickerSource::User),
+        _ => Err(invalid_persisted_enum(1, "source", value)),
     }
+}
+
+fn parse_resolution_state(value: &str) -> Result<UnderlyingResolutionState, duckdb::Error> {
+    match value {
+        "pending" => Ok(UnderlyingResolutionState::Pending),
+        "resolved" => Ok(UnderlyingResolutionState::Resolved),
+        "rejected" => Ok(UnderlyingResolutionState::Rejected),
+        _ => Err(invalid_persisted_enum(5, "resolution_state", value)),
+    }
+}
+
+fn invalid_persisted_enum(index: usize, field: &str, value: &str) -> duckdb::Error {
+    duckdb::Error::FromSqlConversionFailure(
+        index,
+        Type::Text,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unknown tracked_tickers.{field} value: {value}"),
+        )),
+    )
 }
 
 async fn run_blocking<T, E>(
