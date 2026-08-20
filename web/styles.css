@@ -111,18 +111,12 @@ button:disabled { cursor: not-allowed; opacity: .75; }
 .form-layout { grid-template-columns: minmax(250px, .65fr) 1.35fr; }.form-card label { display: grid; gap: 7px; margin: 15px 0; color: #8994aa; font-size: 11px; }.form-card input { width: 100%; padding: 11px; border: 1px solid #2e3a55; border-radius: 8px; background: #0d1527; color: #b6bfd2; }.primary-button { width: 100%; margin-top: 6px; background: #3d57bd; border-color: #536cce; color: #cdd7ff; }
 .greeks-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin-bottom: 12px; }.greeks-grid span { padding: 13px; border-radius: 8px; background: #0d1527; }.greeks-grid small, .greeks-grid strong { display: block; }.greeks-grid small { color: #77839a; }.greeks-grid strong { margin-top: 7px; }.chart-placeholder.compact { min-height: 190px; }
 .settings-list { padding: 0 21px; }.setting-row { min-height: 84px; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid #263047; }.setting-row:last-child { border: 0; }.setting-row strong, .setting-row span { display: block; }.setting-row span { margin-top: 5px; color: #7d899f; font-size: 11px; }.setting-row button { width: 34px; height: 28px; border: 1px solid #34405b; border-radius: 99px; background: #172138; }
-.underlyings-panel { margin-bottom: 18px; }
-.underlyings-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
-.underlyings-header h2, .add-underlying h3, .underlyings-group-title h3 { margin: 0; }
-.underlyings-header h2 { font-size: 17px; }
-.underlyings-header p, .add-underlying-heading p, .underlyings-group-title p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.add-underlying-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .secondary-button, .add-underlying-button, .save-ticker-button { min-height: 44px; border: 1px solid #49618a; border-radius: 9px; background: #172640; color: #d9e4f7; cursor: pointer; font-weight: 750; }
 .secondary-button { flex: 0 0 auto; padding: 9px 14px; }
-.underlyings-feedback { min-height: 14px; margin-top: 12px; }
 .ticker-feedback { padding: 9px 11px; border: 1px solid #32745f; border-radius: 8px; background: #17382f66; color: #73dfbe; font-size: 11px; }
 .ticker-feedback.error { border-color: #70404b; background: #381b2366; color: #f08b99; }
 .add-underlying { margin-top: 12px; padding: 17px; border: 1px solid #344866; border-radius: 11px; background: #101b2e; }
-.add-underlying h3, .underlyings-group-title h3 { font-size: 13px; }
 .add-underlying-fields { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(170px, .8fr) minmax(170px, .8fr) auto; align-items: end; gap: 12px; margin-top: 15px; }
 .ticker-field { min-width: 0; display: grid; gap: 6px; color: #b9c5d7; font-size: 11px; }
 .ticker-field input { width: 100%; min-height: 44px; padding: 10px 11px; border: 1px solid #3a4b68; border-radius: 8px; background: #0b1424; color: var(--text); text-transform: uppercase; }
@@ -149,9 +143,6 @@ button:disabled { cursor: not-allowed; opacity: .75; }
 .final-add-button { width: 100%; margin-top: 12px; }
 .underlyings-state, .user-underlyings-empty { min-height: 92px; display: grid; place-items: center; margin-top: 18px; padding: 20px; border: 1px dashed #35415c; border-radius: 9px; color: var(--muted); font-size: 11px; text-align: center; }
 .underlyings-state.error { border-color: #643646; background: #2c162055; color: #f08b99; }
-.underlyings-groups { display: grid; gap: 24px; margin-top: 24px; }
-.underlyings-group-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 11px; }
-.underlyings-group-title > span { min-width: 28px; padding: 5px 8px; border-radius: 99px; background: #0e192b; color: #91a5c5; font-size: 10px; text-align: center; }
 .underlyings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
 .underlying-card { min-width: 0; padding: 15px; scroll-margin-top: 18px; border: 1px solid #30435f; border-radius: 10px; background: #111d30; }
 .underlying-card.user-card.inactive { border-style: dashed; background: #101827; }
