@@ -2002,23 +2002,27 @@ async fn put_tracked_ticker(
         .await
         .ok()
         .map(|body| body.error);
+    Err(ticker_save_error(status, detail))
+}
+
+fn ticker_save_error(status: u16, detail: Option<String>) -> String {
     let prefix = match status {
         400 => "O pedido para guardar o subjacente é inválido (HTTP 400).",
         404 => "O ticker não foi encontrado ao guardar (HTTP 404).",
-        409 => "O subjacente está protegido ou existe um conflito (HTTP 409).",
+        409 => {
+            "Este ticker corresponde a um subjacente gerido e protegido pelo sistema (HTTP 409)."
+        }
         503 => "O serviço de validação está temporariamente indisponível (HTTP 503).",
         _ => {
-            return Err(format!(
-                "Não foi possível guardar o subjacente (HTTP {status})."
-            ));
+            return format!("Não foi possível guardar o subjacente (HTTP {status}).");
         }
     };
-    Err(detail
+    detail
         .filter(|message| !message.trim().is_empty())
         .map_or_else(
             || prefix.to_string(),
             |message| format!("{prefix} {message}"),
-        ))
+        )
 }
 
 #[derive(Clone)]
@@ -2028,6 +2032,7 @@ enum TickerResolutionState {
     Resolved(UnderlyingResolution),
     InvalidFormat(String),
     NotFound(Option<String>),
+    Conflict(Option<String>),
     TemporarilyUnavailable(Option<String>),
     NetworkError,
     InvalidResponse,
@@ -2041,9 +2046,21 @@ fn resolution_error(status: u16, detail: Option<String>) -> TickerResolutionStat
             |detail| format!("O formato do ticker não é válido (HTTP 400). {detail}"),
         )),
         404 => TickerResolutionState::NotFound(detail),
+        409 => TickerResolutionState::Conflict(detail),
         503 => TickerResolutionState::TemporarilyUnavailable(detail),
         _ => TickerResolutionState::UnexpectedStatus(status, detail),
     }
+}
+
+fn resolution_conflict_message(detail: Option<String>) -> String {
+    let prefix =
+        "Este ticker corresponde a um subjacente gerido e protegido pelo sistema (HTTP 409).";
+    detail
+        .filter(|message| !message.trim().is_empty())
+        .map_or_else(
+            || prefix.to_string(),
+            |message| format!("{prefix} {message}"),
+        )
 }
 
 fn parsed_resolution(resolution: Option<UnderlyingResolution>) -> TickerResolutionState {
@@ -2101,6 +2118,18 @@ fn ticker_save_message(ticker: &str, configuration: &ConfigureTrackedTickerReque
 
 fn should_apply_resolution(guard: &ObservationGuard, expected: u64, current: u64) -> bool {
     guard.is_active() && expected == current
+}
+
+fn resolved_ticker_for_submission(
+    resolution: &TickerResolutionState,
+    requested_ticker: &str,
+) -> Option<String> {
+    match resolution {
+        TickerResolutionState::Resolved(resolved) if resolved.ticker == requested_ticker => {
+            Some(resolved.ticker.clone())
+        }
+        _ => None,
+    }
 }
 
 fn start_ticker_save(
@@ -2247,9 +2276,9 @@ fn AddTrackedTickerForm(
     view! {
         <form class="card add-underlying" aria-labelledby="add-underlying-title" on:submit=move |event| {
             event.prevent_default();
-            let TickerResolutionState::Resolved(resolved) = resolution.get_untracked() else { return; };
             let Ok(normalized_ticker) = normalize_user_ticker(&ticker.get_untracked()) else { return; };
-            if resolved.ticker != normalized_ticker || saving.get_untracked().contains(&normalized_ticker) { return; }
+            let Some(resolved_ticker) = resolved_ticker_for_submission(&resolution.get_untracked(), &normalized_ticker) else { return; };
+            if saving.get_untracked().contains(&normalized_ticker) { return; }
             let reset_generation = request_generation.clone();
             let reset_form = Rc::new(move || {
                 reset_generation.fetch_add(1, Ordering::AcqRel);
@@ -2262,7 +2291,7 @@ fn AddTrackedTickerForm(
                 }
             });
             start_ticker_save(
-                resolved.ticker,
+                resolved_ticker,
                 safe_ticker_configuration(true, historical.get_untracked()),
                 set_state,
                 set_saving,
@@ -2273,7 +2302,7 @@ fn AddTrackedTickerForm(
         }>
             <div class="add-underlying-heading"><h2 id="add-underlying-title">"Adicionar subjacente"</h2><p>"Por enquanto, a pesquisa é feita exatamente pelo ticker."</p></div>
             <div class="add-underlying-fields">
-                <label class="ticker-field" for="new-underlying-ticker"><span>"Ticker"</span><input node_ref=ticker_input id="new-underlying-ticker" name="ticker" maxlength="15" autocomplete="off" prop:value=move || ticker.get() aria-invalid=move || matches!(resolution.get(), TickerResolutionState::InvalidFormat(_) | TickerResolutionState::NotFound(_)).to_string() aria-describedby="new-underlying-help new-underlying-resolution" on:input={
+                <label class="ticker-field" for="new-underlying-ticker"><span>"Ticker"</span><input node_ref=ticker_input id="new-underlying-ticker" name="ticker" maxlength="15" autocomplete="off" prop:value=move || ticker.get() aria-invalid=move || matches!(resolution.get(), TickerResolutionState::InvalidFormat(_) | TickerResolutionState::NotFound(_) | TickerResolutionState::Conflict(_)).to_string() aria-describedby="new-underlying-help new-underlying-resolution" on:input={
                     let request_generation = request_generation.clone();
                     move |event| {
                         request_generation.fetch_add(1, Ordering::AcqRel);
@@ -2316,6 +2345,7 @@ fn AddTrackedTickerForm(
                 TickerResolutionState::Resolving => view! { <span role="status">"A validar o ticker…"</span> }.into_any(),
                 TickerResolutionState::InvalidFormat(message) => view! { <span class="error" role="alert">{message}</span> }.into_any(),
                 TickerResolutionState::NotFound(detail) => view! { <span class="error" role="alert">{detail.map_or_else(|| "Ticker não encontrado (HTTP 404).".to_string(), |detail| format!("Ticker não encontrado (HTTP 404). {detail}"))}</span> }.into_any(),
+                TickerResolutionState::Conflict(detail) => view! { <span class="error" role="alert">{resolution_conflict_message(detail)}</span> }.into_any(),
                 TickerResolutionState::TemporarilyUnavailable(detail) => view! { <span class="error" role="alert">{detail.map_or_else(|| "O serviço de validação está temporariamente indisponível (HTTP 503). Tente novamente mais tarde.".to_string(), |detail| format!("O serviço de validação está temporariamente indisponível (HTTP 503). {detail}"))}</span> }.into_any(),
                 TickerResolutionState::NetworkError => view! { <span class="error" role="alert">"Erro de rede ao validar o ticker. Verifique a ligação e tente novamente."</span> }.into_any(),
                 TickerResolutionState::InvalidResponse => view! { <span class="error" role="alert">"O serviço devolveu uma resposta inválida."</span> }.into_any(),
@@ -2329,7 +2359,7 @@ fn AddTrackedTickerForm(
             </div>
             {move || existing_user().is_none().then(|| view! { <button class="add-underlying-button final-add-button" type="submit" disabled=move || {
                 let value = normalized();
-                saving.get().contains(&value) || !matches!(resolution.get(), TickerResolutionState::Resolved(result) if result.ticker == value)
+                saving.get().contains(&value) || resolved_ticker_for_submission(&resolution.get(), &value).is_none()
             }>{move || { let value = normalized(); if saving.get().contains(&value) { "A guardar…" } else { "Adicionar subjacente" } }}</button> })}
             <p class="update-note">"Adicionar guarda a configuração pedida, mas não inicia uma atualização de dados."</p>
         </form>
@@ -2560,8 +2590,9 @@ fn SettingRow(title: &'static str, detail: &'static str) -> impl IntoView {
 mod tracked_ticker_tests {
     use super::{
         ObservationGuard, TickerResolutionState, TrackedTicker, TrackedTickerSource,
-        UnderlyingResolutionState, normalize_user_ticker, parsed_resolution, resolution_error,
-        safe_ticker_configuration, should_apply_resolution, ticker_save_message,
+        UnderlyingResolutionState, normalize_user_ticker, parsed_resolution,
+        resolution_conflict_message, resolution_error, resolved_ticker_for_submission,
+        safe_ticker_configuration, should_apply_resolution, ticker_save_error, ticker_save_message,
         user_tracked_tickers,
     };
 
@@ -2648,6 +2679,59 @@ mod tracked_ticker_tests {
             resolution_error(418, Some("provider response".to_string())),
             TickerResolutionState::UnexpectedStatus(418, Some(detail)) if detail == "provider response"
         ));
+    }
+
+    #[test]
+    fn resolution_conflict_uses_api_error_detail() {
+        let detail = "tracked ticker is equivalent to a system-protected identity".to_string();
+        let state = resolution_error(409, Some(detail.clone()));
+        assert!(matches!(
+            &state,
+            TickerResolutionState::Conflict(Some(message)) if message == &detail
+        ));
+        let TickerResolutionState::Conflict(detail) = state else {
+            panic!("HTTP 409 must be an explicit conflict");
+        };
+        let message = resolution_conflict_message(detail);
+        assert!(message.contains("gerido e protegido pelo sistema"));
+        assert!(message.contains("system-protected identity"));
+    }
+
+    #[test]
+    fn resolution_conflict_without_valid_json_has_factual_fallback() {
+        let state = resolution_error(409, None);
+        let TickerResolutionState::Conflict(detail) = state else {
+            panic!("HTTP 409 must be an explicit conflict");
+        };
+        assert_eq!(
+            resolution_conflict_message(detail),
+            "Este ticker corresponde a um subjacente gerido e protegido pelo sistema (HTTP 409)."
+        );
+    }
+
+    #[test]
+    fn conflict_cannot_be_submitted_as_a_put() {
+        let conflict = TickerResolutionState::Conflict(Some("protected".into()));
+        assert!(resolved_ticker_for_submission(&conflict, "ANY").is_none());
+    }
+
+    #[test]
+    fn put_conflict_uses_api_error_detail() {
+        let message = ticker_save_error(409, Some("canonical identity is protected".into()));
+        assert!(message.contains("gerido e protegido pelo sistema"));
+        assert!(message.contains("canonical identity is protected"));
+    }
+
+    #[test]
+    fn protected_alias_policy_is_not_coded_in_the_frontend() {
+        let production = include_str!("main.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        for provider_identity in ["GSPC", "VIX"] {
+            let alias_literal = format!("\"^{provider_identity}\"");
+            assert!(!production.contains(&alias_literal));
+        }
     }
 
     #[test]
