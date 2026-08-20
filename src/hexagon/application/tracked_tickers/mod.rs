@@ -44,6 +44,7 @@ impl<Loader, Store, Resolver> TrackedTickersApplication<Loader, Store, Resolver>
 
     async fn coordinator_for(&self, ticker: &str) -> Arc<Mutex<u64>> {
         let mut coordinators = self.configuration_coordinators.lock().await;
+        coordinators.retain(|_, coordinator| Arc::strong_count(coordinator) > 1);
         coordinators
             .entry(ticker.to_string())
             .or_insert_with(|| Arc::new(Mutex::new(0)))
@@ -194,31 +195,6 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn obsolete_per_ticker_coordinators_are_removed_after_the_last_request() {
-        let application = TrackedTickersApplication::new((), (), ());
-        let first = application.coordinator_for("MSFT").await;
-        let second = application.coordinator_for("MSFT").await;
-
-        application.release_coordinator("MSFT", &first).await;
-        assert_eq!(application.configuration_coordinators.lock().await.len(), 1);
-
-        drop(first);
-        application.release_coordinator("MSFT", &second).await;
-        assert!(
-            application
-                .configuration_coordinators
-                .lock()
-                .await
-                .is_empty()
-        );
-    }
-}
-
 #[async_trait]
 impl<Loader, Store, Resolver> ForResolvingUnderlyings
     for TrackedTickersApplication<Loader, Store, Resolver>
@@ -268,5 +244,158 @@ fn map_resolution_error(error: UnderlyingResolutionError) -> PortError {
         | UnderlyingResolutionError::InvalidProviderResponse(message) => {
             PortError::Unavailable(message)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hexagon::domain::tracked_ticker::UnderlyingMetadata;
+
+    #[derive(Clone, Default)]
+    struct EmptyTrackedTickers;
+
+    #[async_trait]
+    impl ForLoadingTrackedTickers for EmptyTrackedTickers {
+        async fn load_tracked_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
+            Ok(Vec::new())
+        }
+
+        async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
+            Ok(Vec::new())
+        }
+
+        async fn load_refresh_eligible_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[async_trait]
+    impl ForStoringTrackedTickers for EmptyTrackedTickers {
+        async fn store_tracked_ticker(&self, _ticker: &TrackedTicker) -> PortResult<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct BlockingResolver {
+        entered: Arc<tokio::sync::Notify>,
+    }
+
+    #[async_trait]
+    impl ForResolvingUnderlyingSymbols for BlockingResolver {
+        async fn resolve_underlying(
+            &self,
+            ticker: &str,
+        ) -> Result<ResolvedUnderlying, UnderlyingResolutionError> {
+            self.entered.notify_one();
+            std::future::pending::<()>().await;
+            Ok(ResolvedUnderlying {
+                ticker: ticker.to_string(),
+                metadata: UnderlyingMetadata::default(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn obsolete_per_ticker_coordinators_are_removed_after_the_last_request() {
+        let application = TrackedTickersApplication::new((), (), ());
+        let first = application.coordinator_for("MSFT").await;
+        let second = application.coordinator_for("MSFT").await;
+
+        application.release_coordinator("MSFT", &first).await;
+        assert_eq!(application.configuration_coordinators.lock().await.len(), 1);
+
+        drop(first);
+        application.release_coordinator("MSFT", &second).await;
+        assert!(
+            application
+                .configuration_coordinators
+                .lock()
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn later_configuration_cleans_a_cancelled_request_without_removing_active_ones() {
+        let resolver = BlockingResolver::default();
+        let application = Arc::new(TrackedTickersApplication::new(
+            EmptyTrackedTickers,
+            EmptyTrackedTickers,
+            resolver.clone(),
+        ));
+        let configuring = {
+            let application = application.clone();
+            tokio::spawn(async move {
+                application
+                    .configure_ticker(
+                        "MSFT",
+                        TrackedTickerConfiguration {
+                            active: true,
+                            historical_prices: true,
+                            option_snapshots: false,
+                        },
+                    )
+                    .await
+            })
+        };
+        resolver.entered.notified().await;
+        configuring.abort();
+        assert!(configuring.await.unwrap_err().is_cancelled());
+        assert!(
+            application
+                .configuration_coordinators
+                .lock()
+                .await
+                .contains_key("MSFT")
+        );
+
+        application
+            .configure_ticker(
+                "AAPL",
+                TrackedTickerConfiguration {
+                    active: false,
+                    historical_prices: true,
+                    option_snapshots: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            application
+                .configuration_coordinators
+                .lock()
+                .await
+                .is_empty()
+        );
+
+        let active = application.coordinator_for("MSFT").await;
+        application
+            .configure_ticker(
+                "AAPL",
+                TrackedTickerConfiguration {
+                    active: false,
+                    historical_prices: true,
+                    option_snapshots: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            application
+                .configuration_coordinators
+                .lock()
+                .await
+                .contains_key("MSFT")
+        );
+        application.release_coordinator("MSFT", &active).await;
+        assert!(
+            application
+                .configuration_coordinators
+                .lock()
+                .await
+                .is_empty()
+        );
     }
 }
