@@ -210,6 +210,7 @@ fn stream_symbol(ticker: &str) -> String {
     match ticker {
         "SPX" => "^GSPC".to_string(),
         "VIX" => "^VIX".to_string(),
+        "BRK.B" => "BRK-B".to_string(),
         _ => ticker.to_string(),
     }
 }
@@ -222,6 +223,7 @@ mod tests {
     fn maps_internal_index_symbols_to_yahoo() {
         assert_eq!(stream_symbol("SPX"), "^GSPC");
         assert_eq!(stream_symbol("VIX"), "^VIX");
+        assert_eq!(stream_symbol("BRK.B"), "BRK-B");
         assert_eq!(stream_symbol("AAPL"), "AAPL");
     }
 }

@@ -25,7 +25,9 @@ use hexagonal_backend::{
             yield_curves_port::SqliteYieldCurvesAdapter,
         },
         treasury::TreasuryYieldCurvesAdapter,
-        yahoo::{YahooLivePricesAdapter, YahooMarketHistoryAdapter},
+        yahoo::{
+            YahooLivePricesAdapter, YahooMarketHistoryAdapter, YahooUnderlyingResolverAdapter,
+        },
     },
     hexagon::driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
@@ -43,6 +45,7 @@ use hexagonal_backend::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
+        for_resolving_underlying_symbols::ForResolvingUnderlyingSymbols,
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
         for_storing_option_chains::ForStoringOptionChains,
@@ -76,11 +79,13 @@ fn implements_portfolio_loader_port<T: ForLoadingPortfolios>() {}
 fn implements_portfolio_store_port<T: ForStoringPortfolios>() {}
 fn implements_tracked_ticker_loader_port<T: ForLoadingTrackedTickers>() {}
 fn implements_tracked_ticker_store_port<T: ForStoringTrackedTickers>() {}
+fn implements_underlying_resolver_port<T: ForResolvingUnderlyingSymbols>() {}
 
 #[test]
 fn external_adapters_implement_provider_neutral_ports() {
     implements_market_history_port::<YahooMarketHistoryAdapter>();
     implements_live_prices_port::<YahooLivePricesAdapter>();
+    implements_underlying_resolver_port::<YahooUnderlyingResolverAdapter>();
     implements_option_chains_port::<CboeOptionChainsAdapter>();
     implements_volatility_indices_port::<CboeVolatilityIndicesAdapter>();
     implements_yield_curves_port::<TreasuryYieldCurvesAdapter>();

@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::sector_performance::{SECTOR_BENCHMARK_TICKER, SECTORS};
@@ -11,6 +12,28 @@ pub enum TrackedTickerSource {
     User,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnderlyingResolutionState {
+    Pending,
+    Resolved,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnderlyingMetadata {
+    pub currency: Option<String>,
+    pub exchange: Option<String>,
+    pub timezone: Option<String>,
+    pub instrument_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedUnderlying {
+    pub ticker: String,
+    pub metadata: UnderlyingMetadata,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackedTicker {
     pub ticker: String,
@@ -18,6 +41,9 @@ pub struct TrackedTicker {
     pub active: bool,
     pub historical_prices: bool,
     pub option_snapshots: bool,
+    pub resolution_state: UnderlyingResolutionState,
+    pub validated_at: Option<DateTime<Utc>>,
+    pub metadata: UnderlyingMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,7 +61,31 @@ impl TrackedTicker {
             active: configuration.active,
             historical_prices: configuration.historical_prices,
             option_snapshots: configuration.option_snapshots,
+            resolution_state: UnderlyingResolutionState::Pending,
+            validated_at: None,
+            metadata: UnderlyingMetadata::default(),
         })
+    }
+
+    pub fn resolve(
+        &mut self,
+        underlying: ResolvedUnderlying,
+        validated_at: DateTime<Utc>,
+    ) -> Result<(), String> {
+        let resolved_ticker = normalize_ticker(&underlying.ticker)?;
+        if resolved_ticker != self.ticker {
+            return Err("resolved underlying identity does not match tracked ticker".to_string());
+        }
+        self.resolution_state = UnderlyingResolutionState::Resolved;
+        self.validated_at = Some(validated_at);
+        self.metadata = underlying.metadata;
+        Ok(())
+    }
+
+    pub fn reject(&mut self) {
+        self.resolution_state = UnderlyingResolutionState::Rejected;
+        self.validated_at = None;
+        self.metadata = UnderlyingMetadata::default();
     }
 
     pub fn configuration(&self) -> TrackedTickerConfiguration {
@@ -71,6 +121,9 @@ pub fn system_tickers() -> Vec<TrackedTicker> {
             active: true,
             historical_prices: ticker != "VIX",
             option_snapshots: matches!(ticker, "SPX" | "SPY"),
+            resolution_state: UnderlyingResolutionState::Resolved,
+            validated_at: None,
+            metadata: UnderlyingMetadata::default(),
         })
         .collect()
 }
@@ -116,5 +169,36 @@ mod tests {
                 .iter()
                 .all(|sector| tickers.iter().any(|ticker| ticker.ticker == sector.etf))
         );
+    }
+
+    #[test]
+    fn resolution_cannot_replace_the_tracked_ticker_identity() {
+        let mut tracked = TrackedTicker::user(
+            "MSFT",
+            TrackedTickerConfiguration {
+                active: true,
+                historical_prices: true,
+                option_snapshots: false,
+            },
+        )
+        .unwrap();
+        let before = tracked.clone();
+
+        let result = tracked.resolve(
+            ResolvedUnderlying {
+                ticker: "AAPL".into(),
+                metadata: UnderlyingMetadata {
+                    exchange: Some("NMS".into()),
+                    ..UnderlyingMetadata::default()
+                },
+            },
+            Utc::now(),
+        );
+
+        assert_eq!(
+            result,
+            Err("resolved underlying identity does not match tracked ticker".into())
+        );
+        assert_eq!(tracked, before);
     }
 }

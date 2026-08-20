@@ -53,6 +53,12 @@ impl ForLoadingTrackedTickers for TwoHistoryTickersMock {
     async fn load_active_tickers(
         &self,
     ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        unreachable!("synchronization must not use active-only loading")
+    }
+
+    async fn load_refresh_eligible_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
         Ok(["XLE", "XLK"]
             .into_iter()
             .map(
@@ -62,6 +68,9 @@ impl ForLoadingTrackedTickers for TwoHistoryTickersMock {
                     active: true,
                     historical_prices: true,
                     option_snapshots: false,
+                    resolution_state: hexagonal_backend::hexagon::domain::tracked_ticker::UnderlyingResolutionState::Resolved,
+                    validated_at: None,
+                    metadata: hexagonal_backend::hexagon::domain::tracked_ticker::UnderlyingMetadata::default(),
                 },
             )
             .collect())
@@ -100,6 +109,12 @@ impl ForLoadingTrackedTickers for OptionTrackedTickersMock {
     async fn load_active_tickers(
         &self,
     ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        unreachable!("synchronization must not use active-only loading")
+    }
+
+    async fn load_refresh_eligible_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
         Ok(vec![
             hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                 ticker: "SPY".to_string(),
@@ -108,6 +123,9 @@ impl ForLoadingTrackedTickers for OptionTrackedTickersMock {
                 active: true,
                 historical_prices: false,
                 option_snapshots: true,
+                resolution_state: hexagonal_backend::hexagon::domain::tracked_ticker::UnderlyingResolutionState::Resolved,
+                validated_at: None,
+                metadata: hexagonal_backend::hexagon::domain::tracked_ticker::UnderlyingMetadata::default(),
             },
         ])
     }
@@ -197,6 +215,12 @@ impl ForLoadingTrackedTickers for TrackedTickersMock {
     async fn load_active_tickers(
         &self,
     ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
+        unreachable!("synchronization must not use active-only loading")
+    }
+
+    async fn load_refresh_eligible_tickers(
+        &self,
+    ) -> PortResult<Vec<hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker>> {
         Ok(vec![
             hexagonal_backend::hexagon::domain::tracked_ticker::TrackedTicker {
                 ticker: "SPY".to_string(),
@@ -205,6 +229,9 @@ impl ForLoadingTrackedTickers for TrackedTickersMock {
                 active: true,
                 historical_prices: true,
                 option_snapshots: false,
+                resolution_state: hexagonal_backend::hexagon::domain::tracked_ticker::UnderlyingResolutionState::Resolved,
+                validated_at: None,
+                metadata: hexagonal_backend::hexagon::domain::tracked_ticker::UnderlyingMetadata::default(),
             },
         ])
     }

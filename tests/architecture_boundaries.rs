@@ -183,7 +183,48 @@ fn tracked_ticker_loading_operations_have_no_semantic_fallback() {
     assert!(
         port.contains("async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>>;")
     );
+    assert!(port.contains(
+        "async fn load_refresh_eligible_tickers(&self) -> PortResult<Vec<TrackedTicker>>;"
+    ));
     assert!(!port.contains("self.load_active_tickers().await"));
+}
+
+#[test]
+fn underlying_resolution_remains_a_hexagonal_conversation() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let domain = fs::read_to_string(root.join("src/hexagon/domain/tracked_ticker.rs")).unwrap();
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/tracked_tickers/mod.rs")).unwrap();
+    let http = fs::read_to_string(root.join("src/driving_adapters/http/mod.rs")).unwrap();
+    let management_port = fs::read_to_string(
+        root.join("src/hexagon/driving_ports/for_managing_tracked_tickers/mod.rs"),
+    )
+    .unwrap();
+    let resolution_port =
+        fs::read_to_string(root.join("src/hexagon/driving_ports/for_resolving_underlyings/mod.rs"))
+            .unwrap();
+    let refresh =
+        fs::read_to_string(root.join("src/hexagon/application/data_refresh/mod.rs")).unwrap();
+    let synchronization =
+        fs::read_to_string(root.join("src/hexagon/application/synchronization/mod.rs")).unwrap();
+
+    assert!(!domain.contains("Yahoo"));
+    assert!(!domain.contains("reqwest"));
+    assert!(application.contains("ForResolvingUnderlyingSymbols"));
+    assert!(application.contains("ForResolvingUnderlyings"));
+    assert!(!management_port.contains("ForResolvingUnderlyings"));
+    assert!(management_port.contains("pub trait ForManagingTrackedTickers: Send + Sync"));
+    assert!(resolution_port.contains("pub trait ForResolvingUnderlyings: Send + Sync"));
+    assert!(http.contains("tracked_tickers: Arc<dyn ForManagingTrackedTickers>"));
+    assert!(http.contains("underlying_resolver: Arc<dyn ForResolvingUnderlyings>"));
+    assert!(http.contains(".underlying_resolver\n        .resolve_underlying"));
+    assert!(http.contains(".tracked_tickers\n        .configure_ticker"));
+    assert!(!http.contains("YahooUnderlyingResolverAdapter"));
+    assert!(!http.contains("driven_adapters::yahoo"));
+    assert!(refresh.contains("load_refresh_eligible_tickers()"));
+    assert!(!refresh.contains("load_active_tickers()"));
+    assert!(synchronization.contains("load_refresh_eligible_tickers()"));
+    assert!(!synchronization.contains("load_active_tickers()"));
 }
 
 #[test]

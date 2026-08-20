@@ -292,12 +292,43 @@ pub enum TrackedTickerSource {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnderlyingResolutionState {
+    Pending,
+    Resolved,
+    Rejected,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnderlyingMetadata {
+    pub currency: Option<String>,
+    pub exchange: Option<String>,
+    pub timezone: Option<String>,
+    pub instrument_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackedTicker {
     pub ticker: String,
     pub source: TrackedTickerSource,
     pub active: bool,
     pub historical_prices: bool,
     pub option_snapshots: bool,
+    pub resolution_state: UnderlyingResolutionState,
+    pub validated_at: Option<DateTime<Utc>>,
+    pub metadata: UnderlyingMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolveUnderlyingQuery {
+    pub ticker: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnderlyingResolution {
+    pub ticker: String,
+    pub validated_at: DateTime<Utc>,
+    pub metadata: UnderlyingMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

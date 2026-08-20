@@ -43,6 +43,8 @@ pub struct YahooMeta {
     pub currency: Option<String>,
     #[serde(rename = "exchangeName")]
     pub exchange_name: Option<String>,
+    #[serde(rename = "instrumentType")]
+    pub instrument_type: Option<String>,
     #[serde(rename = "exchangeTimezoneName")]
     pub exchange_timezone_name: Option<String>,
     #[serde(rename = "regularMarketPrice")]

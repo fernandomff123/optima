@@ -84,6 +84,7 @@ times is an external conversation represented by
 | Portfolio positions viewer | `ForViewingPortfolioPositions` |
 | Strategy library owner | `ForManagingSavedStrategies` |
 | Market-data operator | `ForManagingTrackedTickers` |
+| Underlying resolver client | `ForResolvingUnderlyings` |
 | Strategy analyst | `ForSimulatingStrategies` |
 | Interest-rate viewer | `ForViewingInterestRates` |
 | Volatility viewer | `ForViewingVolatility` |
@@ -134,6 +135,7 @@ contract tests replace the application with mocks and verify HTTP translation.
 | Store tracked tickers | `ForStoringTrackedTickers` | DuckDB (SQLite proof-of-concept also passes the contract) |
 | Export tracked ticker configuration during migration | `ForLoadingTrackedTickerArchive` | SQLite (temporary migration source only) |
 | Count tracked ticker configuration | `ForCountingTrackedTickers` | DuckDB |
+| Resolve an exact underlying symbol | `ForResolvingUnderlyingSymbols` | Yahoo chart metadata |
 | Obtain historical prices and corporate actions | `ForObtainingMarketHistory` | Yahoo |
 | Obtain live prices | `ForObtainingLivePrices` | Yahoo |
 | Stream live prices | `ForStreamingLivePrices` | Yahoo |
@@ -203,7 +205,37 @@ persisted through `ForStoringDataRefreshRuns`/`ForLoadingDataRefreshRuns`. The
 startup task, EOD scheduler, and manual HTTP request share that single use case.
 Required system assets remain seeded in `tracked_tickers`; future user-added
 underlyings must be distinguished there without creating another ticker list.
-The bounded backfill policy applies to every active tracked ticker.
+The bounded backfill policy applies only to refresh-eligible tracked tickers.
+`active` remains the user's requested configuration. Exact underlying
+resolution is a separate application conversation: user tickers are
+`pending`, `resolved`, or `rejected`, while system tickers are `resolved` by
+explicit bootstrap policy. `ForLoadingTrackedTickers` retains active-only
+loading for management and separately exposes refresh eligibility. Refresh and
+batch synchronization use only system tickers plus active, resolved user
+tickers. Pending and rejected entries therefore cannot create refresh failures
+or accelerate the global schedule.
+
+The Yahoo resolver implements the provider-neutral
+`ForResolvingUnderlyingSymbols` port. It returns only chart metadata actually
+present in the response (currency, exchange, timezone, and instrument type).
+It does not infer names, sectors, or option availability. Per-asset retry and
+backoff are deliberately deferred; acquisition failures for already-resolved
+assets still use the existing five-minute global retry policy.
+Whether a valid underlying has listed options remains unknown in this phase;
+requested `historical_prices` and `option_snapshots` are configuration, not
+provider capabilities. Capability resolution belongs to phase 2.
+
+Provider symbols remain inside the Yahoo adapter. The public identities
+`BRK.B` and `SPX` are translated to `BRK-B` and `^GSPC` only for Yahoo calls and
+are restored before crossing the driven port. Management and exact resolution
+are independent driving ports, injected separately into the HTTP adapter even
+when the composition root supplies the same application instance for both.
+Tracked-ticker configuration uses monotonic coordination per normalized ticker:
+the application records a new revision before provider access, does not hold a
+lock during that access, and persists a response only if its revision is still
+current. Independent tickers therefore do not block each other, and an older
+provider response cannot create even a temporary eligibility window after a
+newer deactivation or configuration.
 
 The former `atualizar_dados.sh` was removed because it only downloaded SPY
 option JSON in an independent one-minute loop and never participated in the

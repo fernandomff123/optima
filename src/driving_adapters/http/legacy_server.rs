@@ -1293,6 +1293,10 @@ mod tests {
             active: true,
             historical_prices: false,
             option_snapshots: true,
+            resolution_state:
+                crate::hexagon::domain::tracked_ticker::UnderlyingResolutionState::Resolved,
+            validated_at: None,
+            metadata: crate::hexagon::domain::tracked_ticker::UnderlyingMetadata::default(),
         };
 
         let summary = asset_summary(&tracked);
@@ -1309,6 +1313,10 @@ mod tests {
             active: true,
             historical_prices: false,
             option_snapshots: true,
+            resolution_state:
+                crate::hexagon::domain::tracked_ticker::UnderlyingResolutionState::Resolved,
+            validated_at: None,
+            metadata: crate::hexagon::domain::tracked_ticker::UnderlyingMetadata::default(),
         };
 
         let summary = asset_summary(&tracked);

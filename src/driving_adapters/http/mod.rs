@@ -24,6 +24,7 @@ use crate::hexagon::{
         for_managing_saved_strategies::ForManagingSavedStrategies,
         for_managing_tracked_tickers::ForManagingTrackedTickers,
         for_refreshing_market_data::ForRefreshingMarketData,
+        for_resolving_underlyings::ForResolvingUnderlyings,
         for_simulating_strategies::ForSimulatingStrategies,
         for_synchronizing_market_data::ForSynchronizingMarketData,
         for_synchronizing_market_data::SynchronizeTrackedTickers,
@@ -170,6 +171,7 @@ pub const EXISTING_CANONICAL_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/data-refresh/status"),
     ("POST", "/api/data-refresh"),
     ("GET", "/api/assets/live"),
+    ("GET", "/api/underlyings/resolve"),
 ];
 
 pub const NON_CANONICAL_SYNCHRONIZATION_ALIASES: &[(&str, &str)] = &[
@@ -190,6 +192,7 @@ struct HttpState {
     synchronization: Arc<dyn ForSynchronizingMarketData>,
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
     tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
+    underlying_resolver: Arc<dyn ForResolvingUnderlyings>,
     sector_performance: Arc<dyn ForViewingSectorPerformance>,
     data_refresh: Option<Arc<dyn ForRefreshingMarketData>>,
 }
@@ -202,6 +205,23 @@ pub struct MarketViewingPorts {
 pub struct SynchronizationPorts {
     synchronization: Arc<dyn ForSynchronizingMarketData>,
     data_refresh: Option<Arc<dyn ForRefreshingMarketData>>,
+}
+
+pub struct TrackedTickerPorts {
+    management: Arc<dyn ForManagingTrackedTickers>,
+    resolution: Arc<dyn ForResolvingUnderlyings>,
+}
+
+impl TrackedTickerPorts {
+    pub fn new(
+        management: Arc<dyn ForManagingTrackedTickers>,
+        resolution: Arc<dyn ForResolvingUnderlyings>,
+    ) -> Self {
+        Self {
+            management,
+            resolution,
+        }
+    }
 }
 
 impl SynchronizationPorts {
@@ -236,7 +256,7 @@ pub fn router(
     portfolios: Arc<dyn ForManagingPortfolios>,
     synchronization: Arc<dyn ForSynchronizingMarketData>,
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
-    tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
+    tracked_tickers: TrackedTickerPorts,
 ) -> Router {
     router_with_data_refresh(
         market_viewing,
@@ -259,7 +279,7 @@ pub fn router_with_data_refresh(
     portfolios: Arc<dyn ForManagingPortfolios>,
     synchronization: SynchronizationPorts,
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
-    tracked_tickers: Arc<dyn ForManagingTrackedTickers>,
+    tracked_tickers: TrackedTickerPorts,
 ) -> Router {
     let canonical = Router::new()
         .route("/api/market-data/{ticker}/history", get(market_history))
@@ -302,6 +322,7 @@ pub fn router_with_data_refresh(
             axum::routing::delete(delete_strategy),
         )
         .route("/api/tracked-tickers", get(list_tracked_tickers))
+        .route("/api/underlyings/resolve", get(resolve_underlying))
         .route(
             "/api/tracked-tickers/{ticker}",
             axum::routing::put(configure_tracked_ticker),
@@ -383,7 +404,8 @@ pub fn router_with_data_refresh(
         portfolios,
         synchronization: synchronization.synchronization,
         saved_strategies,
-        tracked_tickers,
+        tracked_tickers: tracked_tickers.management,
+        underlying_resolver: tracked_tickers.resolution,
         sector_performance: market_viewing.sector_performance,
         data_refresh: synchronization.data_refresh,
     })
@@ -586,6 +608,19 @@ async fn list_tracked_tickers(
                 .map(canonical_models::tracked_ticker)
                 .collect()
         })
+        .map(Json)
+        .map_err(HttpError)
+}
+
+async fn resolve_underlying(
+    State(state): State<HttpState>,
+    Query(query): Query<api_models::ResolveUnderlyingQuery>,
+) -> Result<Json<api_models::UnderlyingResolution>, HttpError> {
+    state
+        .underlying_resolver
+        .resolve_underlying(&query.ticker)
+        .await
+        .map(canonical_models::underlying_resolution)
         .map(Json)
         .map_err(HttpError)
 }

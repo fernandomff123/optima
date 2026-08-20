@@ -9,4 +9,6 @@ pub trait ForLoadingTrackedTickers: Send + Sync {
     async fn load_tracked_tickers(&self) -> PortResult<Vec<TrackedTicker>>;
 
     async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>>;
+
+    async fn load_refresh_eligible_tickers(&self) -> PortResult<Vec<TrackedTicker>>;
 }

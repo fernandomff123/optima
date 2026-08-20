@@ -143,7 +143,7 @@ impl DataRefreshCore {
         let mut obtained = 0_u64;
         let mut persisted = 0_u64;
         let mut failures = Vec::new();
-        let tickers = match self.tickers.load_active_tickers().await {
+        let tickers = match self.tickers.load_refresh_eligible_tickers().await {
             Ok(tickers) => tickers,
             Err(error) => {
                 failures.push(failure("system", "tracked_tickers", error));

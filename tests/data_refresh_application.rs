@@ -192,6 +192,10 @@ impl ForLoadingTrackedTickers for Tickers {
     }
 
     async fn load_active_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
+        unreachable!("refresh must not use active-only loading")
+    }
+
+    async fn load_refresh_eligible_tickers(&self) -> PortResult<Vec<TrackedTicker>> {
         Ok(vec![])
     }
 }

@@ -26,7 +26,7 @@ use hexagonal_backend::{
             simulation::{
                 Greeks, ScenarioGrid, SimulationRequest, SimulationResult, SimulationScenario,
             },
-            tracked_ticker::TrackedTicker,
+            tracked_ticker::{TrackedTicker, UnderlyingMetadata, UnderlyingResolutionState},
             volatility::TermStructure,
             volatility_surface::{VolatilitySkew, VolatilitySurface},
         },
@@ -35,6 +35,7 @@ use hexagonal_backend::{
             for_managing_portfolios::{CreatePortfolio, ForManagingPortfolios},
             for_managing_saved_strategies::{ForManagingSavedStrategies, SaveStrategy},
             for_managing_tracked_tickers::ForManagingTrackedTickers,
+            for_resolving_underlyings::{ForResolvingUnderlyings, UnderlyingResolution},
             for_simulating_strategies::{
                 ForSimulatingStrategies, ScenarioGridRequest, SimulateScenario,
             },
@@ -101,6 +102,32 @@ struct SavedStrategiesMock;
 struct TrackedTickersMock;
 struct SectorPerformanceMock;
 
+#[async_trait]
+impl ForResolvingUnderlyings for TrackedTickersMock {
+    async fn resolve_underlying(&self, ticker: &str) -> PortResult<UnderlyingResolution> {
+        match ticker {
+            "bad ticker" => Err(PortError::InvalidRequest("invalid tracked ticker".into())),
+            "MISSING" => Err(PortError::NotFound(
+                "underlying MISSING was not found".into(),
+            )),
+            "UNAVAILABLE" => Err(PortError::Unavailable("Yahoo unavailable".into())),
+            "INVALID" => Err(PortError::Unavailable(
+                "Yahoo response was incompatible".into(),
+            )),
+            _ => Ok(UnderlyingResolution {
+                ticker: ticker.trim().to_ascii_uppercase(),
+                validated_at: Utc::now(),
+                metadata: UnderlyingMetadata {
+                    currency: Some("USD".into()),
+                    exchange: Some("NMS".into()),
+                    timezone: Some("America/New_York".into()),
+                    instrument_type: Some("EQUITY".into()),
+                },
+            }),
+        }
+    }
+}
+
 fn market_ports(market_data: Arc<MarketDataMock>) -> http::MarketViewingPorts {
     http::MarketViewingPorts::new(market_data, Arc::new(SectorPerformanceMock))
 }
@@ -131,6 +158,9 @@ impl ForManagingTrackedTickers for TrackedTickersMock {
             active: false,
             historical_prices: true,
             option_snapshots: false,
+            resolution_state: UnderlyingResolutionState::Pending,
+            validated_at: None,
+            metadata: UnderlyingMetadata::default(),
         }];
         Ok(tickers
             .into_iter()
@@ -355,7 +385,7 @@ async fn http_adapter_drives_a_mock_application() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app
@@ -384,7 +414,7 @@ async fn http_adapter_translates_application_errors() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app
@@ -409,7 +439,7 @@ async fn http_adapter_drives_the_simulation_port_and_maps_validation_errors() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "spot": 0.0,
@@ -445,7 +475,7 @@ async fn http_adapter_drives_the_complete_portfolio_port() {
         portfolios.clone(),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "id": "main",
@@ -484,7 +514,7 @@ async fn http_adapter_drives_the_synchronization_port() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let term_response = app
@@ -523,7 +553,7 @@ async fn http_adapter_drives_saved_strategy_management() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "name": "Long call",
@@ -560,7 +590,7 @@ async fn http_adapter_drives_tracked_ticker_management() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let body = serde_json::json!({
         "active": true,
@@ -568,26 +598,29 @@ async fn http_adapter_drives_tracked_ticker_management() {
         "option_snapshots": true
     });
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/tracked-tickers/SPY")
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .expect("valid test request"),
-        )
-        .await
-        .expect("router must respond");
-
-    assert_eq!(response.status(), 204);
-    assert!(response.headers().get("content-type").is_none());
-    assert!(
-        axum::body::to_bytes(response.into_body(), usize::MAX)
+    for path in ["/api/tracked-tickers/SPY", "/tracked-tickers/SPY"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("valid test request"),
+            )
             .await
-            .unwrap()
-            .is_empty()
-    );
+            .expect("router must respond");
+
+        assert_eq!(response.status(), 204);
+        assert!(response.headers().get("content-type").is_none());
+        assert!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }
 
 #[tokio::test]
@@ -599,7 +632,7 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     for path in ["/api/tracked-tickers", "/tracked-tickers"] {
@@ -647,6 +680,14 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
                 "active": false,
                 "historical_prices": true,
                 "option_snapshots": false
+                ,"resolution_state": "pending",
+                "validated_at": null,
+                "metadata": {
+                    "currency": null,
+                    "exchange": null,
+                    "timezone": null,
+                    "instrument_type": null
+                }
             }])
         );
     }
@@ -674,6 +715,75 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
 }
 
 #[tokio::test]
+async fn exact_underlying_resolution_has_canonical_success_and_public_errors_only() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/underlyings/resolve?ticker=MSFT")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/json"
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ticker"], "MSFT");
+    assert_eq!(json["metadata"]["instrument_type"], "EQUITY");
+
+    for (ticker, status) in [
+        ("bad%20ticker", StatusCode::BAD_REQUEST),
+        ("MISSING", StatusCode::NOT_FOUND),
+        ("UNAVAILABLE", StatusCode::SERVICE_UNAVAILABLE),
+        ("INVALID", StatusCode::SERVICE_UNAVAILABLE),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/underlyings/resolve?ticker={ticker}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    let no_alias = app
+        .oneshot(
+            Request::builder()
+                .uri("/underlyings/resolve?ticker=MSFT")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_alias.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn sector_endpoint_accepts_supported_periods_and_returns_json() {
     let app = http::router(
         market_ports(Arc::new(MarketDataMock::default())),
@@ -682,7 +792,7 @@ async fn sector_endpoint_accepts_supported_periods_and_returns_json() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     for period in ["1w", "2w", "1m"] {
@@ -727,7 +837,7 @@ async fn canonical_route_and_alias_have_identical_http_response() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let canonical = app
@@ -773,7 +883,7 @@ async fn canonical_extractor_errors_are_json_without_changing_alias_errors() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let malformed = Request::builder()
@@ -833,7 +943,7 @@ async fn port_errors_keep_status_and_json_envelope_on_canonical_and_alias_routes
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
     let cases = [
         (
@@ -913,7 +1023,7 @@ async fn canonical_method_not_allowed_keeps_allow_header_and_returns_json() {
         Arc::new(PortfoliosMock::default()),
         Arc::new(SynchronizationMock),
         Arc::new(SavedStrategiesMock),
-        Arc::new(TrackedTickersMock),
+        http::TrackedTickerPorts::new(Arc::new(TrackedTickersMock), Arc::new(TrackedTickersMock)),
     );
 
     let response = app
