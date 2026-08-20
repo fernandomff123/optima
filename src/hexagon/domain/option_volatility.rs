@@ -461,6 +461,7 @@ mod tests {
             rho: 0.0,
             theo: 0.0,
             implied_volatility: None,
+            contract_specification: None,
         }
     }
 
@@ -502,6 +503,10 @@ mod tests {
                 .and_utc(),
             contratos: contracts,
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         };
 
         let result = calculate_volatility(&snapshot, expiration, 0.0, 39.0 / 365.0).unwrap();
@@ -520,6 +525,10 @@ mod tests {
             timestamp_utc: Utc::now(),
             contratos: Vec::new(),
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         };
         let expiration = NaiveDate::from_ymd_opt(2026, 8, 21).unwrap();
 
@@ -650,6 +659,10 @@ mod tests {
             timestamp_utc: snapshot_date.and_hms_opt(15, 0, 0).unwrap().and_utc(),
             contratos: contracts,
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         };
         let treasury = YieldCurve {
             date: snapshot_date,

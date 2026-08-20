@@ -147,6 +147,32 @@ fn applications_do_not_know_axum() {
 }
 
 #[test]
+fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/synchronization/mod.rs"))
+            .expect("synchronization application must be readable");
+    for forbidden in ["cboe", "duckdb", "sql", "axum", "http"] {
+        assert!(!application.to_ascii_lowercase().contains(forbidden));
+    }
+
+    let storage = fs::read_to_string(root.join("src/driven_adapters/duckdb/option_chains.rs"))
+        .expect("option storage adapter must be readable");
+    assert!(!storage.contains("SPX"));
+    assert!(!storage.contains("SPXW"));
+    assert!(!storage.contains("100.0"));
+
+    let configurator = fs::read_to_string(root.join("src/configurator/mod.rs"))
+        .expect("composition root must be readable");
+    assert_eq!(
+        configurator
+            .matches("OptionSnapshotEnrichment::new(CboeOptionContractSpecificationsAdapter)")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn tracked_ticker_policy_stays_inside_the_hexagon() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let adapter = fs::read_to_string(root.join("src/driven_adapters/duckdb/tracked_tickers.rs"))

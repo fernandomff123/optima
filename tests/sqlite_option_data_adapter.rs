@@ -51,6 +51,7 @@ async fn options_application_loads_all_inputs_through_the_sqlite_adapter() {
         rho: 0.01,
         theo: 1.1,
         implied_volatility: Some(0.25),
+        contract_specification: None,
     };
     let snapshot = Snapshot {
         ticker: "TEST".into(),
@@ -60,6 +61,10 @@ async fn options_application_loads_all_inputs_through_the_sqlite_adapter() {
             root: "TEST".into(),
             contratos: vec![contract],
         }],
+        underlying_price: None,
+        collected_at: None,
+        provider_timestamp: None,
+        ingestion_diagnostics: Default::default(),
     };
     option_snapshots::save_snapshot(&pool, &snapshot, snapshot_time)
         .await

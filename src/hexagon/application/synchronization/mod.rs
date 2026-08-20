@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
+use std::collections::BTreeSet;
 
+use crate::hexagon::domain::options::OptionIngestionWarning;
 use crate::hexagon::{
     PortError, PortResult,
     driven_ports::{
@@ -14,6 +16,9 @@ use crate::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
+        for_resolving_option_contract_specifications::{
+            ForResolvingOptionContractSpecifications, OptionContractIdentity,
+        },
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
         for_storing_option_chains::ForStoringOptionChains,
@@ -33,6 +38,36 @@ pub struct OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalenda
     option_chains: OptionChains,
     yield_curves: YieldCurves,
     trading_calendar: TradingCalendar,
+}
+
+pub struct OptionSnapshotEnrichment<ContractSpecifications> {
+    contract_specifications: ContractSpecifications,
+}
+
+impl<ContractSpecifications> OptionSnapshotEnrichment<ContractSpecifications> {
+    pub fn new(contract_specifications: ContractSpecifications) -> Self {
+        Self {
+            contract_specifications,
+        }
+    }
+}
+
+pub struct SynchronizationSources<History, Options, Indices, Curves> {
+    history: History,
+    options: Options,
+    indices: Indices,
+    curves: Curves,
+}
+
+impl<History, Options, Indices, Curves> SynchronizationSources<History, Options, Indices, Curves> {
+    pub fn new(history: History, options: Options, indices: Indices, curves: Curves) -> Self {
+        Self {
+            history,
+            options,
+            indices,
+            curves,
+        }
+    }
 }
 
 impl<OptionChains, YieldCurves, TradingCalendar>
@@ -96,15 +131,14 @@ pub struct SynchronizationApplication<
     OptionChains,
     YieldCurves,
     TradingCalendar,
+    ContractSpecifications,
 > {
-    history: History,
-    options: Options,
-    indices: Indices,
-    curves: Curves,
+    sources: SynchronizationSources<History, Options, Indices, Curves>,
     stores:
         SynchronizationStores<HistoryStore, OptionChainStore, OptionStore, IndexStore, CurveStore>,
     tracked_tickers: TrackedTickers,
     option_analysis: OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalendar>,
+    option_snapshot_enrichment: OptionSnapshotEnrichment<ContractSpecifications>,
 }
 
 impl<
@@ -121,6 +155,7 @@ impl<
     OptionChains,
     YieldCurves,
     TradingCalendar,
+    ContractSpecifications,
 >
     SynchronizationApplication<
         History,
@@ -136,13 +171,11 @@ impl<
         OptionChains,
         YieldCurves,
         TradingCalendar,
+        ContractSpecifications,
     >
 {
     pub fn new(
-        history: History,
-        options: Options,
-        indices: Indices,
-        curves: Curves,
+        sources: SynchronizationSources<History, Options, Indices, Curves>,
         stores: SynchronizationStores<
             HistoryStore,
             OptionChainStore,
@@ -152,15 +185,14 @@ impl<
         >,
         tracked_tickers: TrackedTickers,
         option_analysis: OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalendar>,
+        option_snapshot_enrichment: OptionSnapshotEnrichment<ContractSpecifications>,
     ) -> Self {
         Self {
-            history,
-            options,
-            indices,
-            curves,
+            sources,
             stores,
             tracked_tickers,
             option_analysis,
+            option_snapshot_enrichment,
         }
     }
 }
@@ -180,6 +212,7 @@ impl<
     OptionChains,
     YieldCurves,
     TradingCalendar,
+    ContractSpecifications,
 > ForSynchronizingMarketData
     for SynchronizationApplication<
         History,
@@ -195,6 +228,7 @@ impl<
         OptionChains,
         YieldCurves,
         TradingCalendar,
+        ContractSpecifications,
     >
 where
     History: ForObtainingMarketHistory,
@@ -210,6 +244,7 @@ where
     OptionChains: ForLoadingOptionChains,
     YieldCurves: ForLoadingYieldCurves,
     TradingCalendar: ForConsultingTradingCalendar,
+    ContractSpecifications: ForResolvingOptionContractSpecifications,
 {
     async fn synchronize_tracked_tickers(
         &self,
@@ -282,7 +317,11 @@ where
         since: NaiveDate,
     ) -> PortResult<SynchronizationReport> {
         let ticker = normalized_ticker(ticker)?;
-        let history = self.history.obtain_market_history(&ticker, since).await?;
+        let history = self
+            .sources
+            .history
+            .obtain_market_history(&ticker, since)
+            .await?;
         let items_obtained =
             history.daily_quotes.len() + history.dividends.len() + history.splits.len();
         let items_stored = self.stores.history.store_market_history(&history).await?;
@@ -298,7 +337,50 @@ where
         market_close: DateTime<Utc>,
     ) -> PortResult<SynchronizationReport> {
         let ticker = normalized_ticker(ticker)?;
-        let snapshot = self.options.obtain_option_chain(&ticker).await?;
+        let mut snapshot = self.sources.options.obtain_option_chain(&ticker).await?;
+        let mut unresolved_roots = BTreeSet::new();
+        for chain in &mut snapshot.chains {
+            for contract in &mut chain.contratos {
+                let specification = self
+                    .option_snapshot_enrichment
+                    .contract_specifications
+                    .resolve_option_contract_specification(OptionContractIdentity {
+                        root: &chain.root,
+                        occ_symbol: &contract.occ_symbol,
+                    })
+                    .await?;
+                if specification.is_none() {
+                    unresolved_roots.insert(chain.root.clone());
+                }
+                contract.contract_specification = specification;
+            }
+        }
+        let evidenced_currency =
+            single_evidenced_currency(snapshot.chains.iter().flat_map(|chain| {
+                chain.contratos.iter().map(|contract| {
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .map(|specification| specification.currency.as_str())
+                })
+            }));
+        snapshot.contratos = snapshot
+            .chains
+            .iter()
+            .flat_map(|chain| chain.contratos.iter().cloned())
+            .collect();
+        if unresolved_roots.is_empty()
+            && let (Some(underlying), Some(currency)) =
+                (&mut snapshot.underlying_price, evidenced_currency)
+        {
+            underlying.currency = Some(currency);
+        }
+        for warning in unresolved_roots
+            .into_iter()
+            .map(|root| OptionIngestionWarning::ContractSpecificationUnavailable { root })
+        {
+            snapshot.ingestion_diagnostics.record_warning(warning);
+        }
         let items_obtained = snapshot.contratos.len();
         let items_stored = self
             .stores
@@ -337,7 +419,11 @@ where
         ticker: &str,
     ) -> PortResult<SynchronizationReport> {
         let ticker = normalized_ticker(ticker)?;
-        let history = self.indices.obtain_volatility_index(&ticker).await?;
+        let history = self
+            .sources
+            .indices
+            .obtain_volatility_index(&ticker)
+            .await?;
         let items_obtained = history.daily_prices.len();
         let items_stored = self.stores.indices.store_index_history(&history).await?;
         Ok(SynchronizationReport {
@@ -350,13 +436,27 @@ where
         if !(1900..=2100).contains(&year) {
             return Err(PortError::InvalidRequest(format!("invalid year: {year}")));
         }
-        let curves = self.curves.obtain_yield_curves(year).await?;
+        let curves = self.sources.curves.obtain_yield_curves(year).await?;
         let items_obtained = curves.len();
         let items_stored = self.stores.curves.store_yield_curves(&curves).await?;
         Ok(SynchronizationReport {
             items_obtained,
             items_stored,
         })
+    }
+}
+
+fn single_evidenced_currency<'a>(
+    specifications: impl IntoIterator<Item = Option<&'a str>>,
+) -> Option<String> {
+    let mut currencies = BTreeSet::new();
+    for currency in specifications {
+        currencies.insert(currency?);
+    }
+    if currencies.len() == 1 {
+        currencies.into_iter().next().map(str::to_owned)
+    } else {
+        None
     }
 }
 
@@ -368,4 +468,29 @@ fn normalized_ticker(ticker: &str) -> PortResult<String> {
         ));
     }
     Ok(ticker.to_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::single_evidenced_currency;
+
+    #[test]
+    fn underlying_currency_requires_one_currency_on_every_contract() {
+        assert_eq!(
+            single_evidenced_currency([Some("USD"), Some("USD"), Some("USD")]),
+            Some("USD".to_string())
+        );
+        assert_eq!(
+            single_evidenced_currency([Some("USD"), Some("EUR"), Some("USD")]),
+            None
+        );
+        assert_eq!(
+            single_evidenced_currency([Some("EUR"), Some("USD"), Some("USD")]),
+            None
+        );
+        assert_eq!(
+            single_evidenced_currency([Some("USD"), None, Some("USD")]),
+            None
+        );
+    }
 }

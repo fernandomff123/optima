@@ -670,6 +670,7 @@ mod tests {
             rho: 0.01,
             theo: 1.15,
             implied_volatility: None,
+            contract_specification: None,
         };
         let snapshot = opt::Snapshot {
             ticker: "SPY".into(),
@@ -679,6 +680,10 @@ mod tests {
                 root: "SPY".into(),
                 contratos: vec![contract],
             }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         };
         assert_same_json(&snapshot, &option_snapshot(snapshot.clone()));
 

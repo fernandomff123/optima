@@ -5,7 +5,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use hexagonal_backend::hexagon::{
     PortError, PortResult,
     application::synchronization::{
-        OptionAnalysisCollaborators, SynchronizationApplication, SynchronizationStores,
+        OptionAnalysisCollaborators, OptionSnapshotEnrichment, SynchronizationApplication,
+        SynchronizationSources, SynchronizationStores,
     },
     domain::{
         index_history::IndexHistory, market_history::MarketHistory, options::Snapshot,
@@ -21,6 +22,9 @@ use hexagonal_backend::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
+        for_resolving_option_contract_specifications::{
+            ForResolvingOptionContractSpecifications, OptionContractIdentity,
+        },
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
         for_storing_option_chains::ForStoringOptionChains,
@@ -41,6 +45,18 @@ struct OptionTrackedTickersMock;
 struct OptionsSuccessMock;
 struct PartiallyFailingHistoryMock;
 struct TwoHistoryTickersMock;
+struct NoContractSpecifications;
+
+#[async_trait]
+impl ForResolvingOptionContractSpecifications for NoContractSpecifications {
+    async fn resolve_option_contract_specification(
+        &self,
+        _contract: OptionContractIdentity<'_>,
+    ) -> PortResult<Option<hexagonal_backend::hexagon::domain::options::OptionContractSpecification>>
+    {
+        Ok(None)
+    }
+}
 
 #[async_trait]
 impl ForLoadingTrackedTickers for TwoHistoryTickersMock {
@@ -139,6 +155,10 @@ impl ForObtainingOptionChains for OptionsSuccessMock {
             timestamp_utc: Utc::now(),
             contratos: Vec::new(),
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         })
     }
 }
@@ -329,10 +349,7 @@ async fn driving_port_orchestrates_provider_and_store_mocks() {
     let store = StoreMock::default();
     let observed = Arc::clone(&store.stored_tickers);
     let application = SynchronizationApplication::new(
-        HistoryMock,
-        OptionsMock,
-        IndicesMock,
-        CurvesMock,
+        SynchronizationSources::new(HistoryMock, OptionsMock, IndicesMock, CurvesMock),
         SynchronizationStores::new(
             store.clone(),
             store.clone(),
@@ -342,6 +359,7 @@ async fn driving_port_orchestrates_provider_and_store_mocks() {
         ),
         TrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(NoContractSpecifications),
     );
 
     let report = application
@@ -362,10 +380,7 @@ async fn driving_port_orchestrates_provider_and_store_mocks() {
 #[tokio::test]
 async fn invalid_year_is_rejected_before_calling_driven_ports() {
     let application = SynchronizationApplication::new(
-        HistoryMock,
-        OptionsMock,
-        IndicesMock,
-        CurvesMock,
+        SynchronizationSources::new(HistoryMock, OptionsMock, IndicesMock, CurvesMock),
         SynchronizationStores::new(
             StoreMock::default(),
             StoreMock::default(),
@@ -375,6 +390,7 @@ async fn invalid_year_is_rejected_before_calling_driven_ports() {
         ),
         TrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(NoContractSpecifications),
     );
 
     let error = application
@@ -393,10 +409,7 @@ async fn batch_synchronization_uses_tracked_ticker_configuration() {
     use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers;
 
     let application = SynchronizationApplication::new(
-        HistoryMock,
-        OptionsMock,
-        IndicesMock,
-        CurvesMock,
+        SynchronizationSources::new(HistoryMock, OptionsMock, IndicesMock, CurvesMock),
         SynchronizationStores::new(
             StoreMock::default(),
             StoreMock::default(),
@@ -406,6 +419,7 @@ async fn batch_synchronization_uses_tracked_ticker_configuration() {
         ),
         TrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(NoContractSpecifications),
     );
     let report = application
         .synchronize_tracked_tickers(SynchronizeTrackedTickers {
@@ -425,10 +439,7 @@ async fn batch_reports_term_structure_separately_after_storing_option_chain() {
     use hexagonal_backend::hexagon::driving_ports::for_synchronizing_market_data::SynchronizeTrackedTickers;
 
     let application = SynchronizationApplication::new(
-        HistoryMock,
-        OptionsSuccessMock,
-        IndicesMock,
-        CurvesMock,
+        SynchronizationSources::new(HistoryMock, OptionsSuccessMock, IndicesMock, CurvesMock),
         SynchronizationStores::new(
             StoreMock::default(),
             StoreMock::default(),
@@ -438,6 +449,7 @@ async fn batch_reports_term_structure_separately_after_storing_option_chain() {
         ),
         OptionTrackedTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(NoContractSpecifications),
     );
     let report = application
         .synchronize_tracked_tickers(SynchronizeTrackedTickers {
@@ -455,10 +467,12 @@ async fn batch_reports_term_structure_separately_after_storing_option_chain() {
 #[tokio::test]
 async fn batch_isolates_one_ticker_history_failure_and_continues() {
     let application = SynchronizationApplication::new(
-        PartiallyFailingHistoryMock,
-        OptionsMock,
-        IndicesMock,
-        CurvesMock,
+        SynchronizationSources::new(
+            PartiallyFailingHistoryMock,
+            OptionsMock,
+            IndicesMock,
+            CurvesMock,
+        ),
         SynchronizationStores::new(
             StoreMock::default(),
             StoreMock::default(),
@@ -468,6 +482,7 @@ async fn batch_isolates_one_ticker_history_failure_and_continues() {
         ),
         TwoHistoryTickersMock,
         OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(NoContractSpecifications),
     );
 
     let report = application

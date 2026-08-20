@@ -15,7 +15,10 @@ use crate::hexagon::driving_ports::for_managing_tracked_tickers::ForManagingTrac
 use crate::hexagon::driving_ports::for_refreshing_market_data::ForRefreshingMarketData;
 use crate::{
     driven_adapters::{
-        cboe::{CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter},
+        cboe::{
+            CboeOptionChainsAdapter, CboeVolatilityIndicesAdapter,
+            product_specifications::CboeOptionContractSpecificationsAdapter,
+        },
         data_refresh_tasks::TokioDataRefreshTaskRunner,
         duckdb::{
             data_refresh_runs::DuckDbDataRefreshRunsAdapter,
@@ -59,7 +62,8 @@ use crate::{
         simulation::SimulationApplication,
         strategy_migration::StrategyMigrationApplication,
         synchronization::{
-            OptionAnalysisCollaborators, SynchronizationApplication, SynchronizationStores,
+            OptionAnalysisCollaborators, OptionSnapshotEnrichment, SynchronizationApplication,
+            SynchronizationSources, SynchronizationStores,
         },
         tracked_ticker_migration::TrackedTickerMigrationApplication,
         tracked_tickers::TrackedTickersApplication,
@@ -163,6 +167,7 @@ pub type ConfiguredSynchronization = SynchronizationApplication<
     DuckDbOptionChainsAdapter,
     DuckDbYieldCurvesAdapter,
     ExchangeTradingCalendarAdapter,
+    CboeOptionContractSpecificationsAdapter,
 >;
 pub type ConfiguredOptionChainMigration =
     OptionChainMigrationApplication<SqliteOptionDataAdapter, DuckDbOptionChainsAdapter>;
@@ -348,10 +353,12 @@ fn configure_synchronization(
     tracked_tickers_adapter: DuckDbTrackedTickersAdapter,
 ) -> ConfiguredSynchronization {
     SynchronizationApplication::new(
-        YahooMarketHistoryAdapter,
-        CboeOptionChainsAdapter,
-        CboeVolatilityIndicesAdapter,
-        TreasuryYieldCurvesAdapter,
+        SynchronizationSources::new(
+            YahooMarketHistoryAdapter,
+            CboeOptionChainsAdapter,
+            CboeVolatilityIndicesAdapter,
+            TreasuryYieldCurvesAdapter,
+        ),
         SynchronizationStores::new(
             DuckDbMarketHistoryAdapter::new(path),
             DuckDbOptionChainsAdapter::new(path),
@@ -365,6 +372,7 @@ fn configure_synchronization(
             DuckDbYieldCurvesAdapter::new(path),
             ExchangeTradingCalendarAdapter,
         ),
+        OptionSnapshotEnrichment::new(CboeOptionContractSpecificationsAdapter),
     )
 }
 

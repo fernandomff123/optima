@@ -13,6 +13,8 @@ pub struct CboeData {
     pub options: Vec<CboeOptionRowRaw>,
     #[serde(default)]
     pub current_price: Option<f64>,
+    #[serde(default)]
+    pub last_trade_time: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

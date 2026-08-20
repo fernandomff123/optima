@@ -4,6 +4,7 @@ mod client;
 mod indices_client;
 mod indices_parser;
 mod parser;
+pub mod product_specifications;
 
 use async_trait::async_trait;
 
@@ -31,7 +32,8 @@ impl ForObtainingOptionChains for CboeOptionChainsAdapter {
         let response = client::download_snapshot(&ticker)
             .await
             .map_err(unavailable)?;
-        parser::response_to_snapshot(&ticker, response).map_err(unavailable)
+        parser::response_to_snapshot_collected_at(&ticker, response, chrono::Utc::now())
+            .map_err(unavailable)
     }
 }
 
@@ -57,4 +59,5 @@ pub(crate) use indices_client::download_indice;
 #[cfg(test)]
 pub(crate) use indices_parser::response_to_index_history;
 pub use parser::response_to_snapshot;
+pub use parser::response_to_snapshot_collected_at;
 pub use parser::{ParseError, parse_occ_symbol};

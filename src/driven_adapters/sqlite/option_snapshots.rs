@@ -5,18 +5,33 @@ use sqlx::{Row, SqlitePool};
 use std::error::Error;
 use std::fmt;
 
-use crate::hexagon::domain::options::{OptionChain, Snapshot};
+use crate::hexagon::domain::options::{
+    OptionChain, OptionIngestionDiagnostics, ProviderTimestamp, Snapshot,
+    UnderlyingPriceObservation,
+};
 
 const CURRENT_FORMAT_VERSION: i64 = 2;
 
 #[derive(Serialize)]
 struct SnapshotPayloadRef<'a> {
     chains: &'a [OptionChain],
+    underlying_price: &'a Option<UnderlyingPriceObservation>,
+    collected_at: Option<DateTime<Utc>>,
+    provider_timestamp: &'a Option<ProviderTimestamp>,
+    ingestion_diagnostics: &'a OptionIngestionDiagnostics,
 }
 
 #[derive(Deserialize)]
 struct SnapshotPayload {
     chains: Vec<OptionChain>,
+    #[serde(default)]
+    underlying_price: Option<UnderlyingPriceObservation>,
+    #[serde(default)]
+    collected_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    provider_timestamp: Option<ProviderTimestamp>,
+    #[serde(default)]
+    ingestion_diagnostics: OptionIngestionDiagnostics,
 }
 
 #[derive(Debug, PartialEq)]
@@ -158,6 +173,10 @@ pub async fn save_snapshot(
 
     let payload = rmp_serde::to_vec(&SnapshotPayloadRef {
         chains: &snapshot.chains,
+        underlying_price: &snapshot.underlying_price,
+        collected_at: snapshot.collected_at,
+        provider_timestamp: &snapshot.provider_timestamp,
+        ingestion_diagnostics: &snapshot.ingestion_diagnostics,
     })?;
     let hash = payload_hash(&payload);
     let already_exists: bool =
@@ -325,6 +344,10 @@ fn row_to_snapshot(row: sqlx::sqlite::SqliteRow) -> Result<Snapshot, Box<dyn Err
         timestamp_utc: row.try_get("timestamp")?,
         contratos,
         chains: payload.chains,
+        underlying_price: payload.underlying_price,
+        collected_at: payload.collected_at,
+        provider_timestamp: payload.provider_timestamp,
+        ingestion_diagnostics: payload.ingestion_diagnostics,
     })
 }
 
@@ -363,6 +386,7 @@ mod tests {
             rho: 0.03,
             theo: 10.1,
             implied_volatility: Some(0.2),
+            contract_specification: None,
         };
 
         Snapshot {
@@ -373,6 +397,10 @@ mod tests {
                 root: "SPY".to_string(),
                 contratos: vec![contract],
             }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: OptionIngestionDiagnostics::default(),
         }
     }
 
@@ -388,6 +416,34 @@ mod tests {
         let loaded = load_latest(&pool, "spy").await.unwrap().unwrap();
 
         assert_eq!(loaded, expected);
+    }
+
+    #[tokio::test]
+    async fn preserves_offsetless_timestamp_evidence_without_promoting_it() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let mut expected = sample_snapshot();
+        expected.collected_at = Some(Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 2).unwrap());
+        expected.provider_timestamp = Some(ProviderTimestamp {
+            raw: "2026-08-20 11:00:00".to_string(),
+            timezone: crate::hexagon::domain::options::ProviderTimestampTimezone::Unverified,
+        });
+        expected.underlying_price =
+            UnderlyingPriceObservation::new(500.0, None, None, "cboe_delayed_quotes").map(
+                |observation| {
+                    observation.with_provider_timestamp(
+                        Some("2026-08-20T10:59:58".to_string()),
+                        Some(
+                            crate::hexagon::domain::options::ProviderTimestampTimezone::Unverified,
+                        ),
+                    )
+                },
+            );
+
+        save_snapshot(&pool, &expected, expected.timestamp_utc)
+            .await
+            .unwrap();
+        assert_eq!(load_latest(&pool, "SPY").await.unwrap(), Some(expected));
     }
 
     #[tokio::test]
@@ -471,6 +527,10 @@ mod tests {
 
     #[tokio::test]
     async fn migrates_an_existing_table_and_backfills_its_hash() {
+        #[derive(Serialize)]
+        struct LegacyPayload<'a> {
+            chains: &'a [OptionChain],
+        }
         let pool = memory_pool().await;
         sqlx::query(
             "CREATE TABLE cboe_snapshots (
@@ -485,7 +545,7 @@ mod tests {
         .await
         .unwrap();
         let snapshot = sample_snapshot();
-        let payload = rmp_serde::to_vec(&SnapshotPayloadRef {
+        let payload = rmp_serde::to_vec(&LegacyPayload {
             chains: &snapshot.chains,
         })
         .unwrap();
@@ -509,6 +569,15 @@ mod tests {
             .unwrap();
         assert_eq!(hash, payload_hash(&payload));
         assert_eq!(hash.len(), 64);
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+        assert!(loaded.underlying_price.is_none());
+        assert!(loaded.collected_at.is_none());
+        assert!(loaded.provider_timestamp.is_none());
+        assert!(
+            loaded.chains[0].contratos[0]
+                .contract_specification
+                .is_none()
+        );
     }
 
     #[tokio::test]

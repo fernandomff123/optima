@@ -3,11 +3,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use chrono::{NaiveDate, TimeZone, Utc};
 use hexagonal_backend::{
     driven_adapters::{
+        cboe::CboeResponse,
         duckdb::option_chains::DuckDbOptionChainsAdapter,
         sqlite::{option_data::SqliteOptionDataAdapter, option_snapshots},
     },
     hexagon::{
-        domain::options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
+        domain::options::{
+            ContratoOpcao, OptionChain, OptionContractSpecification, OptionIngestionDiagnostics,
+            OptionType, ProviderTimestamp, ProviderTimestampTimezone, Snapshot,
+            UnderlyingPriceObservation,
+        },
         driven_ports::{
             for_loading_option_chains::ForLoadingOptionChains,
             for_storing_option_chains::ForStoringOptionChains,
@@ -35,6 +40,29 @@ fn sample_snapshot() -> Snapshot {
             root: "SPY".to_string(),
             contratos: contracts,
         }],
+        underlying_price: UnderlyingPriceObservation::new(
+            500.25,
+            Some(Utc.with_ymd_and_hms(2026, 8, 7, 20, 14, 0).unwrap()),
+            Some("USD".to_string()),
+            "cboe_delayed_quotes",
+        )
+        .map(|observation| {
+            observation.with_provider_timestamp(
+                Some("2026-08-07T16:14:00-04:00".to_string()),
+                Some(ProviderTimestampTimezone::VerifiedOffset),
+            )
+        }),
+        collected_at: Some(Utc.with_ymd_and_hms(2026, 8, 7, 20, 15, 2).unwrap()),
+        provider_timestamp: Some(ProviderTimestamp {
+            raw: "2026-08-07T16:14:00-04:00".to_string(),
+            timezone: ProviderTimestampTimezone::VerifiedOffset,
+        }),
+        ingestion_diagnostics: OptionIngestionDiagnostics {
+            invalid_occ_symbol_count: 1,
+            invalid_occ_symbol_samples: vec!["invalid".to_string()],
+            warning_count: 0,
+            warnings: Vec::new(),
+        },
     }
 }
 
@@ -62,6 +90,14 @@ fn contract(
         rho: 0.03,
         theo: 10.25,
         implied_volatility: Some(0.22),
+        contract_specification: OptionContractSpecification::new(
+            "SPY",
+            50.0,
+            "USD",
+            "fixture_adjusted_contract",
+            NaiveDate::from_ymd_opt(2026, 8, 20),
+            Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+        ),
     }
 }
 
@@ -131,6 +167,10 @@ async fn duckdb_satisfies_option_chain_storage_contract_with_columnar_rows() {
         .initialize()
         .await
         .expect("DuckDB option schema must initialize");
+    adapter
+        .initialize()
+        .await
+        .expect("DuckDB option schema migration must be repeatable");
 
     assert_option_chain_contract(&adapter).await;
     assert_eq!(
@@ -139,6 +179,187 @@ async fn duckdb_satisfies_option_chain_storage_contract_with_columnar_rows() {
     );
 
     std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
+}
+
+#[tokio::test]
+async fn duckdb_persists_a_snapshot_without_spot() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-no-spot-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    let mut snapshot = sample_snapshot();
+    snapshot.underlying_price = None;
+    adapter
+        .store_option_chain(
+            &snapshot,
+            Utc.with_ymd_and_hms(2026, 8, 7, 20, 0, 0).unwrap(),
+        )
+        .await
+        .expect("snapshot without spot remains persistible");
+    assert_eq!(
+        adapter.load_option_chain("SPY").await.unwrap(),
+        Some(snapshot)
+    );
+    std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
+}
+
+#[tokio::test]
+async fn cboe_spot_and_timestamp_survive_the_duckdb_round_trip() {
+    let response: CboeResponse = serde_json::from_str(
+        r#"{
+            "timestamp":"2026-08-20T11:00:00-04:00",
+            "data":{
+                "current_price":6420.5,
+                "last_trade_time":"2026-08-20T10:59:58-04:00",
+                "options":[{
+                    "option":"SPXW  260821C05000000","bid":1.0,"ask":1.2,
+                    "volume":10.0,"open_interest":20.0,"delta":0.5,
+                    "gamma":0.02,"vega":0.1,"theta":-0.03,"rho":0.01,
+                    "theo":1.1,"iv":0.2
+                }]
+            }
+        }"#,
+    )
+    .expect("fixture wire response must deserialize");
+    let collected_at = Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 2).unwrap();
+    let expected = hexagonal_backend::driven_adapters::cboe::response_to_snapshot_collected_at(
+        "SPX",
+        response,
+        collected_at,
+    )
+    .expect("wire response must map");
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-wire-round-trip-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    adapter
+        .store_option_chain(
+            &expected,
+            Utc.with_ymd_and_hms(2026, 8, 20, 20, 0, 0).unwrap(),
+        )
+        .await
+        .expect("parsed snapshot must store");
+    let loaded = adapter.load_option_chain("SPX").await.unwrap().unwrap();
+    assert_eq!(loaded.underlying_price, expected.underlying_price);
+    assert_eq!(loaded.provider_timestamp, expected.provider_timestamp);
+    assert_eq!(
+        loaded.collected_at.map(|value| value.timestamp_micros()),
+        expected.collected_at.map(|value| value.timestamp_micros())
+    );
+    std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
+}
+
+#[tokio::test]
+async fn offsetless_timestamps_survive_duckdb_without_becoming_utc() {
+    let response: CboeResponse = serde_json::from_str(
+        r#"{
+            "timestamp":"2026-08-20 11:00:00",
+            "data":{
+                "current_price":6420.5,
+                "last_trade_time":"2026-08-20T10:59:58",
+                "options":[{
+                    "option":"SPXW  260821C05000000","bid":1.0,"ask":1.2,
+                    "volume":10.0,"open_interest":20.0,"delta":0.5,
+                    "gamma":0.02,"vega":0.1,"theta":-0.03,"rho":0.01,
+                    "theo":1.1,"iv":0.2
+                }]
+            }
+        }"#,
+    )
+    .unwrap();
+    let collected_at = Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 2).unwrap();
+    let expected = hexagonal_backend::driven_adapters::cboe::response_to_snapshot_collected_at(
+        "SPX",
+        response,
+        collected_at,
+    )
+    .unwrap();
+    assert_eq!(
+        expected.underlying_price.as_ref().unwrap().observed_at,
+        None
+    );
+
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-offsetless-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    adapter
+        .store_option_chain(
+            &expected,
+            Utc.with_ymd_and_hms(2026, 8, 20, 20, 0, 0).unwrap(),
+        )
+        .await
+        .unwrap();
+    let loaded = adapter.load_option_chain("SPX").await.unwrap().unwrap();
+    assert_eq!(loaded.underlying_price, expected.underlying_price);
+    assert_eq!(loaded.provider_timestamp, expected.provider_timestamp);
+    assert_eq!(loaded.collected_at, Some(collected_at));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn duckdb_rolls_back_metadata_when_contract_storage_fails() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-rollback-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    let mut snapshot = sample_snapshot();
+    let duplicate = snapshot.chains[0].contratos[0].clone();
+    snapshot.chains[0].contratos.push(duplicate);
+    assert!(
+        adapter
+            .store_option_chain(
+                &snapshot,
+                Utc.with_ymd_and_hms(2026, 8, 7, 20, 0, 0).unwrap(),
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(adapter.counts().await.unwrap(), (0, 0));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn unique_market_close_preserves_original_snapshot_and_reports_no_insert() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-enrichment-conflict-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    let market_close = Utc.with_ymd_and_hms(2026, 8, 7, 20, 0, 0).unwrap();
+    let mut incomplete = sample_snapshot();
+    for contract in &mut incomplete.chains[0].contratos {
+        contract.contract_specification = None;
+    }
+    incomplete.contratos = incomplete.chains[0].contratos.clone();
+    assert_eq!(
+        adapter
+            .store_option_chain(&incomplete, market_close)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        adapter
+            .store_option_chain(&sample_snapshot(), market_close)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        adapter.load_option_chain("SPY").await.unwrap(),
+        Some(incomplete)
+    );
+    std::fs::remove_file(path).unwrap();
 }
 
 #[tokio::test]

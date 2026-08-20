@@ -6,8 +6,15 @@ async fn test_pipeline_msgpack_e_sqlite() {
     let response: hexagonal_backend::driven_adapters::cboe::CboeResponse =
         serde_json::from_str(include_str!("fixtures/snapshot.json"))
             .expect("o fixture deve conter um DTO CBOE válido");
-    let expected = hexagonal_backend::driven_adapters::cboe::response_to_snapshot("SPY", response)
-        .expect("o DTO deve ser convertido para o domínio");
+    let collected_at = chrono::DateTime::parse_from_rfc3339("2026-06-26T23:41:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let expected = hexagonal_backend::driven_adapters::cboe::response_to_snapshot_collected_at(
+        "SPY",
+        response,
+        collected_at,
+    )
+    .expect("o DTO deve ser convertido para o domínio");
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")

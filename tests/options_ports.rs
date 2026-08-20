@@ -115,6 +115,7 @@ fn contract(symbol: &str, option_type: OptionType, strike: f64) -> ContratoOpcao
         rho: 0.01,
         theo: 1.1,
         implied_volatility: Some(0.25),
+        contract_specification: None,
     }
 }
 
@@ -135,6 +136,10 @@ fn app_with_stored_term(
                 root: "TEST".into(),
                 contratos: contracts,
             }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         },
         term_structure: stored.then_some(TermStructure {
             ticker: "TEST".into(),
