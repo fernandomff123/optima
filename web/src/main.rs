@@ -1,7 +1,9 @@
 use api_models::{
-    AssetLivePrice, DataRefreshOrigin, DataRefreshRequestResponse, DataRefreshRequestState,
-    DataRefreshRun, DataRefreshState, DataRefreshStatusResponse, DataState, Freshness,
-    MarketSpxHistoryResponse, PriceHistoryOverview, PriceHistoryPoint,
+    ApiError, AssetLivePrice, ConfigureTrackedTickerRequest, DataRefreshOrigin,
+    DataRefreshRequestResponse, DataRefreshRequestState, DataRefreshRun, DataRefreshState,
+    DataRefreshStatusResponse, DataState, Freshness, MarketSpxHistoryResponse,
+    PriceHistoryOverview, PriceHistoryPoint, TrackedTicker, TrackedTickerSource,
+    UnderlyingResolution, UnderlyingResolutionState,
 };
 use futures_util::{
     StreamExt,
@@ -13,7 +15,10 @@ use leptos::leptos_dom::helpers::window_event_listener;
 use leptos::prelude::*;
 use send_wrapper::SendWrapper;
 use std::{
+    cell::Cell,
+    collections::BTreeSet,
     fmt,
+    rc::Rc,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -44,6 +49,13 @@ enum DataRefreshStatusResult {
     Error(String),
 }
 
+#[derive(Clone)]
+enum TrackedTickersLoadState {
+    Loading,
+    Success(Vec<TrackedTicker>),
+    Error(String),
+}
+
 #[derive(Clone, Default)]
 struct ObservationGuard(Arc<AtomicBool>);
 
@@ -66,6 +78,7 @@ enum Page {
     Dashboard,
     Sectors,
     Portfolio,
+    Underlyings,
     Builder,
     MarketAnalysis,
     Simulator,
@@ -73,10 +86,11 @@ enum Page {
 }
 
 impl Page {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Dashboard,
         Self::Sectors,
         Self::Portfolio,
+        Self::Underlyings,
         Self::Builder,
         Self::MarketAnalysis,
         Self::Simulator,
@@ -88,6 +102,7 @@ impl Page {
             Self::Dashboard => "Dashboard",
             Self::Sectors => "Setores",
             Self::Portfolio => "Portfolio",
+            Self::Underlyings => "Subjacentes",
             Self::Builder => "Construtor",
             Self::MarketAnalysis => "Análise de mercado",
             Self::Simulator => "Simulador",
@@ -100,6 +115,7 @@ impl Page {
             Self::Dashboard => "▦",
             Self::Sectors => "◫",
             Self::Portfolio => "▣",
+            Self::Underlyings => "◆",
             Self::Builder => "⌘",
             Self::MarketAnalysis => "⌁",
             Self::Simulator => "◎",
@@ -331,6 +347,7 @@ fn App() -> impl IntoView {
                     Page::Dashboard => view! { <DashboardPage /> }.into_any(),
                     Page::Sectors => view! { <SectorsPage /> }.into_any(),
                     Page::Portfolio => view! { <PortfolioPage /> }.into_any(),
+                    Page::Underlyings => view! { <UnderlyingsPage /> }.into_any(),
                     Page::Builder => view! { <BuilderPage /> }.into_any(),
                     Page::MarketAnalysis => view! { <MarketAnalysisPage /> }.into_any(),
                     Page::Simulator => view! { <SimulatorPage /> }.into_any(),
@@ -1909,6 +1926,404 @@ fn SettingsPage() -> impl IntoView {
     }
 }
 
+async fn load_tracked_tickers(set_state: WriteSignal<TrackedTickersLoadState>) -> bool {
+    let result = async {
+        let response = Request::get("/api/tracked-tickers?include_inactive=true")
+            .send()
+            .await
+            .map_err(|_| "Não foi possível contactar o serviço de subjacentes.".to_string())?;
+        let status = response.status();
+        if status != 200 {
+            return Err(format!(
+                "Não foi possível carregar o catálogo de subjacentes (HTTP {status})."
+            ));
+        }
+        response
+            .json::<Vec<TrackedTicker>>()
+            .await
+            .map_err(|_| "O serviço devolveu um catálogo de subjacentes inválido.".to_string())
+    }
+    .await;
+
+    let succeeded = result.is_ok();
+    set_state.set(match result {
+        Ok(tickers) => TrackedTickersLoadState::Success(tickers),
+        Err(message) => TrackedTickersLoadState::Error(message),
+    });
+    succeeded
+}
+
+fn normalize_user_ticker(value: &str) -> Result<String, &'static str> {
+    let ticker = value.trim().to_ascii_uppercase();
+    if ticker.is_empty() {
+        return Err("Introduza um ticker.");
+    }
+    if ticker.len() > 15 {
+        return Err("O ticker não pode exceder 15 caracteres.");
+    }
+    if !ticker
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '^' | '.' | '-'))
+    {
+        return Err("Use apenas letras, números, ponto, hífen ou acento circunflexo.");
+    }
+    Ok(ticker)
+}
+
+fn user_tracked_tickers(tickers: Vec<TrackedTicker>) -> Vec<TrackedTicker> {
+    tickers
+        .into_iter()
+        .filter(|item| item.source == TrackedTickerSource::User)
+        .collect()
+}
+
+async fn put_tracked_ticker(
+    ticker: &str,
+    configuration: &ConfigureTrackedTickerRequest,
+) -> Result<(), String> {
+    let request = Request::put(&format!("/api/tracked-tickers/{ticker}"))
+        .json(configuration)
+        .map_err(|_| "Não foi possível preparar a configuração do subjacente.".to_string())?;
+    let response = request
+        .send()
+        .await
+        .map_err(|_| "Não foi possível contactar o serviço de subjacentes.".to_string())?;
+    let status = response.status();
+    if status == 204 {
+        return Ok(());
+    }
+
+    let detail = response
+        .json::<ApiError>()
+        .await
+        .ok()
+        .map(|body| body.error);
+    let prefix = match status {
+        400 => "O pedido para guardar o subjacente é inválido (HTTP 400).",
+        404 => "O ticker não foi encontrado ao guardar (HTTP 404).",
+        409 => "O subjacente está protegido ou existe um conflito (HTTP 409).",
+        503 => "O serviço de validação está temporariamente indisponível (HTTP 503).",
+        _ => {
+            return Err(format!(
+                "Não foi possível guardar o subjacente (HTTP {status})."
+            ));
+        }
+    };
+    Err(detail
+        .filter(|message| !message.trim().is_empty())
+        .map_or_else(
+            || prefix.to_string(),
+            |message| format!("{prefix} {message}"),
+        ))
+}
+
+#[derive(Clone)]
+enum TickerResolutionState {
+    Idle,
+    Resolving,
+    Resolved(UnderlyingResolution),
+    InvalidFormat(String),
+    NotFound,
+    TemporarilyUnavailable,
+    NetworkError,
+}
+
+async fn resolve_ticker(ticker: &str) -> TickerResolutionState {
+    let encoded = js_sys::encode_uri_component(ticker)
+        .as_string()
+        .unwrap_or_else(|| ticker.to_string());
+    let response = match Request::get(&format!("/api/underlyings/resolve?ticker={encoded}"))
+        .send()
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return TickerResolutionState::NetworkError,
+    };
+
+    match response.status() {
+        200 => match response.json::<UnderlyingResolution>().await {
+            Ok(resolution) => TickerResolutionState::Resolved(resolution),
+            Err(_) => TickerResolutionState::TemporarilyUnavailable,
+        },
+        400 => TickerResolutionState::InvalidFormat(
+            "O formato do ticker não é válido para o serviço (HTTP 400).".to_string(),
+        ),
+        404 => TickerResolutionState::NotFound,
+        503 => TickerResolutionState::TemporarilyUnavailable,
+        _ => TickerResolutionState::TemporarilyUnavailable,
+    }
+}
+
+fn start_ticker_save(
+    ticker: String,
+    configuration: ConfigureTrackedTickerRequest,
+    next_update_notice: bool,
+    set_state: WriteSignal<TrackedTickersLoadState>,
+    set_saving: WriteSignal<BTreeSet<String>>,
+    set_feedback: WriteSignal<Option<(bool, String)>>,
+    on_reloaded: Option<Rc<dyn Fn()>>,
+) {
+    set_saving.update(|saving| {
+        saving.insert(ticker.clone());
+    });
+    set_feedback.set(None);
+    leptos::task::spawn_local(async move {
+        match put_tracked_ticker(&ticker, &configuration).await {
+            Ok(()) => {
+                let reloaded = load_tracked_tickers(set_state).await;
+                let message = if next_update_notice {
+                    format!("{ticker} foi guardado e entrará na próxima atualização de dados.")
+                } else {
+                    format!("Configuração de {ticker} guardada.")
+                };
+                set_feedback.set(Some((false, message)));
+                if reloaded && let Some(on_reloaded) = on_reloaded {
+                    on_reloaded();
+                }
+            }
+            Err(message) => {
+                if message.contains("HTTP 404") {
+                    load_tracked_tickers(set_state).await;
+                }
+                set_feedback.set(Some((true, message)));
+            }
+        }
+        set_saving.update(|saving| {
+            saving.remove(&ticker);
+        });
+    });
+}
+
+#[component]
+fn UnderlyingsPage() -> impl IntoView {
+    let (state, set_state) = signal(TrackedTickersLoadState::Loading);
+    let (saving, set_saving) = signal(BTreeSet::<String>::new());
+    let (feedback, set_feedback) = signal::<Option<(bool, String)>>(None);
+    leptos::task::spawn_local(async move {
+        load_tracked_tickers(set_state).await;
+    });
+
+    view! {
+        <section class="page underlyings-page">
+            <PageHeader eyebrow="UNIVERSO" title="Subjacentes" subtitle="Escolha os ativos que pretende acompanhar e analisar." />
+            <div class="underlyings-feedback" aria-live="polite" aria-atomic="true">
+                {move || feedback.get().map(|(is_error, message)| view! {
+                    <div class:error=is_error class="ticker-feedback" role=if is_error { "alert" } else { "status" }>{message}</div>
+                })}
+            </div>
+            <AddTrackedTickerForm
+                state=state
+                set_state=set_state
+                saving=saving
+                set_saving=set_saving
+                set_feedback=set_feedback
+            />
+            <section class="card my-underlyings" aria-labelledby="my-underlyings-title">
+                <header class="underlyings-section-header">
+                    <div><h2 id="my-underlyings-title">"Os meus subjacentes"</h2><p>"Os ativos inativos permanecem guardados e podem ser reativados."</p></div>
+                    <button class="secondary-button" type="button" disabled=move || matches!(state.get(), TrackedTickersLoadState::Loading) on:click=move |_| {
+                        set_state.set(TrackedTickersLoadState::Loading);
+                        leptos::task::spawn_local(async move {
+                            load_tracked_tickers(set_state).await;
+                        });
+                    }>"Recarregar"</button>
+                </header>
+                {move || match state.get() {
+                TrackedTickersLoadState::Loading => view! {
+                    <div class="underlyings-state" role="status" aria-live="polite">"A carregar os seus subjacentes…"</div>
+                }.into_any(),
+                TrackedTickersLoadState::Error(message) => view! {
+                    <div class="underlyings-state error" role="alert">{message}</div>
+                }.into_any(),
+                TrackedTickersLoadState::Success(tickers) => {
+                    let user = user_tracked_tickers(tickers);
+                    if user.is_empty() {
+                        view! { <div class="user-underlyings-empty"><strong>"Ainda não acompanha nenhum subjacente."</strong><span>"Adicione um ticker acima para começar. A pesquisa está limitada ao ticker."</span></div> }.into_any()
+                    } else {
+                        view! { <div class="underlyings-grid user-grid">{user.into_iter().map(|ticker| view! { <UserTickerCard ticker=ticker set_state=set_state saving=saving set_saving=set_saving set_feedback=set_feedback /> }).collect_view()}</div> }.into_any()
+                    }
+                }
+                }}
+            </section>
+        </section>
+    }
+}
+
+#[component]
+fn AddTrackedTickerForm(
+    state: ReadSignal<TrackedTickersLoadState>,
+    set_state: WriteSignal<TrackedTickersLoadState>,
+    saving: ReadSignal<BTreeSet<String>>,
+    set_saving: WriteSignal<BTreeSet<String>>,
+    set_feedback: WriteSignal<Option<(bool, String)>>,
+) -> impl IntoView {
+    let (ticker, set_ticker) = signal(String::new());
+    let (historical, set_historical) = signal(true);
+    let (snapshots, set_snapshots) = signal(false);
+    let (resolution, set_resolution) = signal(TickerResolutionState::Idle);
+    let (advanced_open, set_advanced_open) = signal(false);
+    let ticker_input = NodeRef::<leptos::html::Input>::new();
+    let request_generation = Rc::new(Cell::new(0_u64));
+    let normalized = move || ticker.get().trim().to_ascii_uppercase();
+    let existing_user = move || {
+        let normalized = normalized();
+        match state.get() {
+            TrackedTickersLoadState::Success(tickers) => tickers
+                .into_iter()
+                .find(|item| item.source == TrackedTickerSource::User && item.ticker == normalized),
+            TrackedTickersLoadState::Loading | TrackedTickersLoadState::Error(_) => None,
+        }
+    };
+    view! {
+        <form class="card add-underlying" aria-labelledby="add-underlying-title" on:submit=move |event| {
+            event.prevent_default();
+            let TickerResolutionState::Resolved(resolved) = resolution.get_untracked() else { return; };
+            let Ok(normalized_ticker) = normalize_user_ticker(&ticker.get_untracked()) else { return; };
+            if resolved.ticker != normalized_ticker || saving.get_untracked().contains(&normalized_ticker) { return; }
+            let reset_generation = request_generation.clone();
+            let reset_form = Rc::new(move || {
+                reset_generation.set(reset_generation.get() + 1);
+                set_ticker.set(String::new());
+                set_resolution.set(TickerResolutionState::Idle);
+                set_advanced_open.set(false);
+                set_historical.set(true);
+                set_snapshots.set(false);
+                if let Some(input) = ticker_input.get() {
+                    let _ = input.focus();
+                }
+            });
+            start_ticker_save(
+                resolved.ticker,
+                ConfigureTrackedTickerRequest { active: true, historical_prices: historical.get_untracked(), option_snapshots: snapshots.get_untracked() },
+                true,
+                set_state,
+                set_saving,
+                set_feedback,
+                Some(reset_form),
+            );
+        }>
+            <div class="add-underlying-heading"><h2 id="add-underlying-title">"Adicionar subjacente"</h2><p>"Por enquanto, a pesquisa é feita exatamente pelo ticker."</p></div>
+            <div class="add-underlying-fields">
+                <label class="ticker-field" for="new-underlying-ticker"><span>"Ticker"</span><input node_ref=ticker_input id="new-underlying-ticker" name="ticker" maxlength="15" autocomplete="off" prop:value=move || ticker.get() aria-invalid=move || matches!(resolution.get(), TickerResolutionState::InvalidFormat(_) | TickerResolutionState::NotFound).to_string() aria-describedby="new-underlying-help new-underlying-resolution" on:input={
+                    let request_generation = request_generation.clone();
+                    move |event| {
+                        request_generation.set(request_generation.get() + 1);
+                        set_ticker.set(event_target_value(&event).to_ascii_uppercase());
+                        set_resolution.set(TickerResolutionState::Idle);
+                    }
+                } /><small id="new-underlying-help">{move || { let value = normalized(); if value.is_empty() { "Introduza exatamente um ticker, por exemplo AAPL ou BRK.B.".to_string() } else { format!("Ticker introduzido: {value}") } }}</small></label>
+                <button class="secondary-button validate-ticker-button" type="button" disabled=move || matches!(resolution.get(), TickerResolutionState::Resolving) || existing_user().is_some() on:click={
+                    let request_generation = request_generation.clone();
+                    move |_| {
+                        let normalized_ticker = match normalize_user_ticker(&ticker.get_untracked()) {
+                            Ok(value) => value,
+                            Err(message) => { set_resolution.set(TickerResolutionState::InvalidFormat(message.to_string())); return; }
+                        };
+                        if matches!(state.get_untracked(), TrackedTickersLoadState::Success(tickers) if tickers.iter().any(|item| item.source == TrackedTickerSource::User && item.ticker == normalized_ticker)) {
+                            return;
+                        }
+                        if matches!(state.get_untracked(), TrackedTickersLoadState::Success(tickers) if tickers.iter().any(|item| item.source == TrackedTickerSource::System && item.ticker == normalized_ticker)) {
+                            set_resolution.set(TickerResolutionState::InvalidFormat("Este ticker é gerido pelo sistema e não pode ser adicionado.".to_string()));
+                            return;
+                        }
+                        set_ticker.set(normalized_ticker.clone());
+                        let generation = request_generation.get() + 1;
+                        request_generation.set(generation);
+                        set_resolution.set(TickerResolutionState::Resolving);
+                        let request_generation = request_generation.clone();
+                        leptos::task::spawn_local(async move {
+                            let result = resolve_ticker(&normalized_ticker).await;
+                            if request_generation.get() == generation {
+                                set_resolution.set(result);
+                            }
+                        });
+                    }
+                }>{move || if matches!(resolution.get(), TickerResolutionState::Resolving) { "A validar…" } else { "Validar ticker" }}</button>
+            </div>
+            <div id="new-underlying-resolution" class="ticker-resolution" aria-live="polite" aria-atomic="true">{move || if let Some(existing) = existing_user() {
+                view! { <div class="existing-underlying" role="status"><strong>"Este subjacente já está na sua lista"</strong><span>{if existing.active { "Está ativo." } else { "Está inativo." }}</span><a href=format!("#ticker-card-{}", existing.ticker)>"Ir para o cartão de configuração"</a></div> }.into_any()
+            } else { match resolution.get() {
+                TickerResolutionState::Idle => view! { <span>"Valide o ticker antes de o adicionar."</span> }.into_any(),
+                TickerResolutionState::Resolving => view! { <span role="status">"A validar o ticker…"</span> }.into_any(),
+                TickerResolutionState::InvalidFormat(message) => view! { <span class="error" role="alert">{message}</span> }.into_any(),
+                TickerResolutionState::NotFound => view! { <span class="error" role="alert">"Ticker não encontrado (HTTP 404)."</span> }.into_any(),
+                TickerResolutionState::TemporarilyUnavailable => view! { <span class="error" role="alert">"O serviço de validação está temporariamente indisponível (HTTP 503). Tente novamente mais tarde."</span> }.into_any(),
+                TickerResolutionState::NetworkError => view! { <span class="error" role="alert">"Erro de rede ao validar o ticker. Verifique a ligação e tente novamente."</span> }.into_any(),
+                TickerResolutionState::Resolved(result) => view! { <div class="resolution-confirmation" role="status"><strong>{format!("{} confirmado", result.ticker)}</strong><MetadataFacts metadata=result.metadata /><p>"A validação não adicionou nem ativou este ticker."</p></div> }.into_any(),
+            }}}</div>
+            <button class="advanced-toggle" type="button" aria-expanded=move || advanced_open.get().to_string() aria-controls="new-underlying-advanced" on:click=move |_| set_advanced_open.set(!advanced_open.get_untracked())><span>"Opções avançadas"</span><span aria-hidden="true">{move || if advanced_open.get() { "−" } else { "+" }}</span></button>
+            <div id="new-underlying-advanced" class="advanced-options" hidden=move || !advanced_open.get()>
+                <label class="check-control"><input type="checkbox" checked=move || historical.get() on:change=move |event| set_historical.set(event_target_checked(&event)) /><span><strong>"Histórico de preços"</strong><small>"Ativo por omissão"</small></span></label>
+                <label class="check-control"><input type="checkbox" checked=move || snapshots.get() on:change=move |event| set_snapshots.set(event_target_checked(&event)) /><span><strong>"Snapshots de opções"</strong><small>"Inativo por omissão"</small></span></label>
+            </div>
+            {move || existing_user().is_none().then(|| view! { <button class="add-underlying-button final-add-button" type="submit" disabled=move || {
+                let value = normalized();
+                saving.get().contains(&value) || !matches!(resolution.get(), TickerResolutionState::Resolved(result) if result.ticker == value)
+            }>{move || { let value = normalized(); if saving.get().contains(&value) { "A guardar…" } else { "Adicionar subjacente" } }}</button> })}
+            <p class="update-note">"Adicionar guarda a configuração pedida, mas não inicia uma atualização de dados."</p>
+        </form>
+    }
+}
+
+#[component]
+fn MetadataFacts(metadata: api_models::UnderlyingMetadata) -> impl IntoView {
+    let facts = [
+        ("Moeda", metadata.currency),
+        ("Bolsa", metadata.exchange),
+        ("Fuso horário", metadata.timezone),
+        ("Tipo de instrumento", metadata.instrument_type),
+    ]
+    .into_iter()
+    .filter_map(|(label, value)| value.map(|value| (label, value)))
+    .collect::<Vec<_>>();
+    view! { <>{if facts.is_empty() { None } else { Some(view! { <dl class="metadata-facts">{facts.into_iter().map(|(label, value)| view! { <div><dt>{label}</dt><dd>{value}</dd></div> }).collect_view()}</dl> }) }}</> }
+}
+
+#[component]
+fn UserTickerCard(
+    ticker: TrackedTicker,
+    set_state: WriteSignal<TrackedTickersLoadState>,
+    saving: ReadSignal<BTreeSet<String>>,
+    set_saving: WriteSignal<BTreeSet<String>>,
+    set_feedback: WriteSignal<Option<(bool, String)>>,
+) -> impl IntoView {
+    let ticker_name = ticker.ticker.clone();
+    let initial_active = ticker.active;
+    let (active, set_active) = signal(ticker.active);
+    let (historical, set_historical) = signal(ticker.historical_prices);
+    let (snapshots, set_snapshots) = signal(ticker.option_snapshots);
+    let (advanced_open, set_advanced_open) = signal(false);
+    let saving_key = ticker_name.clone();
+    let saving_this = Memo::new(move |_| saving.get().contains(&saving_key));
+    let resolution_state = ticker.resolution_state.clone();
+    let can_edit = resolution_state == UnderlyingResolutionState::Resolved;
+    let state_label = match resolution_state {
+        UnderlyingResolutionState::Pending => "Por validar",
+        UnderlyingResolutionState::Resolved => "Validado",
+        UnderlyingResolutionState::Rejected => "Não encontrado",
+    };
+    view! {
+        <article id=format!("ticker-card-{}", ticker.ticker) class:inactive=move || !active.get() class="underlying-card user-card">
+            <header><div><strong>{ticker.ticker.clone()}</strong><span class="resolution-badge">{state_label}</span></div><span class:inactive=move || !active.get() class="active-badge">{move || if active.get() { "Ativo" } else { "Inativo" }}</span></header>
+            <MetadataFacts metadata=ticker.metadata.clone() />
+            <p class="capability-summary">{move || format!("Configuração pedida — histórico de preços: {} · snapshots de opções: {}", if historical.get() { "sim" } else { "não" }, if snapshots.get() { "sim" } else { "não" })}</p>
+            {can_edit.then(|| view! {
+                <label class="active-control"><input type="checkbox" checked=move || active.get() disabled=saving_this on:change=move |event| set_active.set(event_target_checked(&event)) /><span><strong>{move || if active.get() { "Acompanhamento ativo" } else { "Acompanhamento inativo" }}</strong><small>"Desativar preserva este registo."</small></span></label>
+            })}
+            <button class="advanced-toggle" type="button" disabled=move || saving_this.get() || !can_edit aria-expanded=move || advanced_open.get().to_string() aria-controls=format!("advanced-{ticker_name}") on:click=move |_| set_advanced_open.set(!advanced_open.get_untracked())><span>"Opções avançadas"</span><span aria-hidden="true">{move || if advanced_open.get() { "−" } else { "+" }}</span></button>
+            <div id=format!("advanced-{}", ticker.ticker) class="advanced-options" hidden=move || !advanced_open.get()>
+                <label class="check-control"><input type="checkbox" checked=move || historical.get() disabled=saving_this on:change=move |event| set_historical.set(event_target_checked(&event)) /><span><strong>"Histórico de preços"</strong><small>"Recolher preços históricos"</small></span></label>
+                <label class="check-control"><input type="checkbox" checked=move || snapshots.get() disabled=saving_this on:change=move |event| set_snapshots.set(event_target_checked(&event)) /><span><strong>"Snapshots de opções"</strong><small>"Recolher snapshots de opções"</small></span></label>
+            </div>
+            <p class="update-note">{if can_edit { "Guardar não consulta novamente o provider nem inicia uma atualização de dados." } else { "A nova validação é feita ao guardar com o comportamento seguro do serviço." }}</p>
+            <button class="save-ticker-button" type="button" disabled=move || saving_this.get() aria-busy=move || saving_this.get().to_string() on:click=move |_| {
+                let requested_active = if can_edit { active.get_untracked() } else { true };
+                start_ticker_save(ticker_name.clone(), ConfigureTrackedTickerRequest { active: requested_active, historical_prices: historical.get_untracked(), option_snapshots: snapshots.get_untracked() }, !initial_active && requested_active, set_state, set_saving, set_feedback, None);
+            }>{move || if saving_this.get() { "A guardar…" } else if can_edit { "Guardar configuração" } else { "Validar novamente" }}</button>
+        </article>
+    }
+}
+
 async fn request_manual_data_refresh() -> Result<(String, Option<DataRefreshRun>), String> {
     let response = Request::post("/api/data-refresh")
         .send()
@@ -2067,6 +2482,55 @@ fn SettingRow(title: &'static str, detail: &'static str) -> impl IntoView {
             <div><strong>{title}</strong><span>{detail}</span></div>
             <button type="button" disabled aria-label=format!("Configurar {title}")>"—"</button>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tracked_ticker_tests {
+    use super::{
+        TrackedTicker, TrackedTickerSource, UnderlyingResolutionState, normalize_user_ticker,
+        user_tracked_tickers,
+    };
+
+    #[test]
+    fn normalizes_supported_user_tickers_for_display_and_submission() {
+        for (input, expected) in [(" aapl ", "AAPL"), ("brk.b", "BRK.B"), ("^spx", "^SPX")] {
+            assert_eq!(normalize_user_ticker(input), Ok(expected.to_string()));
+        }
+    }
+
+    #[test]
+    fn rejects_values_that_the_http_contract_will_reject() {
+        for input in ["", " ", "SP Y", "SPY/US", "ABCDEFGHIJKLMNOP"] {
+            assert!(normalize_user_ticker(input).is_err(), "{input:?}");
+        }
+    }
+
+    #[test]
+    fn presentation_excludes_every_system_ticker() {
+        let tickers = [TrackedTickerSource::System, TrackedTickerSource::User]
+            .into_iter()
+            .map(|source| TrackedTicker {
+                ticker: if source == TrackedTickerSource::System {
+                    "SPX"
+                } else {
+                    "AAPL"
+                }
+                .into(),
+                source,
+                active: true,
+                historical_prices: true,
+                option_snapshots: false,
+                resolution_state: UnderlyingResolutionState::Resolved,
+                validated_at: None,
+                metadata: Default::default(),
+            })
+            .collect();
+
+        let visible = user_tracked_tickers(tickers);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].ticker, "AAPL");
     }
 }
 
