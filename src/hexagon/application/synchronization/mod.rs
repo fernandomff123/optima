@@ -18,6 +18,7 @@ use crate::hexagon::{
         for_obtaining_yield_curves::ForObtainingYieldCurves,
         for_resolving_option_contract_specifications::{
             ForResolvingOptionContractSpecifications, OptionContractIdentity,
+            OptionContractSpecificationResolution,
         },
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
@@ -338,21 +339,55 @@ where
     ) -> PortResult<SynchronizationReport> {
         let ticker = normalized_ticker(ticker)?;
         let mut snapshot = self.sources.options.obtain_option_chain(&ticker).await?;
+        let identities: Vec<_> = snapshot
+            .chains
+            .iter()
+            .flat_map(|chain| {
+                chain
+                    .contratos
+                    .iter()
+                    .map(|contract| OptionContractIdentity {
+                        root: chain.root.clone(),
+                        occ_symbol: contract.occ_symbol.clone(),
+                    })
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let resolutions = self
+            .option_snapshot_enrichment
+            .contract_specifications
+            .resolve_option_contract_specifications(&identities)
+            .await?;
+        let requested_identities: BTreeSet<_> = identities.iter().cloned().collect();
+        let resolved_identities: BTreeSet<_> = resolutions.keys().cloned().collect();
+        if resolved_identities != requested_identities {
+            return Err(PortError::Unavailable(
+                "contract specification resolver returned an incompatible identity set".to_string(),
+            ));
+        }
         let mut unresolved_roots = BTreeSet::new();
         for chain in &mut snapshot.chains {
             for contract in &mut chain.contratos {
-                let specification = self
-                    .option_snapshot_enrichment
-                    .contract_specifications
-                    .resolve_option_contract_specification(OptionContractIdentity {
-                        root: &chain.root,
-                        occ_symbol: &contract.occ_symbol,
-                    })
-                    .await?;
-                if specification.is_none() {
-                    unresolved_roots.insert(chain.root.clone());
+                let identity = OptionContractIdentity {
+                    root: chain.root.clone(),
+                    occ_symbol: contract.occ_symbol.clone(),
+                };
+                match resolutions.get(&identity) {
+                    Some(OptionContractSpecificationResolution::Found(specification)) => {
+                        contract.contract_specification = Some(specification.clone());
+                    }
+                    Some(OptionContractSpecificationResolution::NotFound) => {
+                        unresolved_roots.insert(chain.root.clone());
+                        contract.contract_specification = None;
+                    }
+                    None => {
+                        return Err(PortError::Unavailable(
+                            "contract specification resolver returned an incompatible identity set"
+                                .to_string(),
+                        ));
+                    }
                 }
-                contract.contract_specification = specification;
             }
         }
         let evidenced_currency =

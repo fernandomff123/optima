@@ -204,8 +204,10 @@ pub struct ConfiguredApplication {
     pub tracked_tickers: ConfiguredTrackedTickers,
     pub sector_performance: ConfiguredSectorPerformance,
     pub simulation: SimulationApplication,
-    pub synchronization: ConfiguredSynchronization,
+    pub synchronization: Arc<ConfiguredSynchronization>,
     pub data_refresh: Arc<dyn ForRefreshingMarketData>,
+    #[cfg(test)]
+    data_refresh_application: Arc<DataRefreshApplication>,
 }
 
 /// Prepares every schema owned by a SQLite driven adapter.
@@ -284,7 +286,7 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
         tracked_tickers_adapter.clone(),
     ));
     let refresh_runs = Arc::new(DuckDbDataRefreshRunsAdapter::new(path));
-    let data_refresh: Arc<dyn ForRefreshingMarketData> = Arc::new(DataRefreshApplication::new(
+    let data_refresh_application = Arc::new(DataRefreshApplication::new(
         synchronization.clone(),
         refresh_runs,
         Arc::new(DuckDbMarketHistoryAdapter::new(path)),
@@ -292,6 +294,7 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
         Arc::new(ExchangeTradingCalendarAdapter),
         Arc::new(TokioDataRefreshTaskRunner),
     ));
+    let data_refresh: Arc<dyn ForRefreshingMarketData> = data_refresh_application.clone();
     ConfiguredApplication {
         composition_config: config.clone(),
         market_data: MarketDataApplication::new(
@@ -343,8 +346,10 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
             ExchangeTradingCalendarAdapter,
         ),
         simulation: SimulationApplication,
-        synchronization: configure_synchronization(path, tracked_tickers_adapter),
+        synchronization,
         data_refresh,
+        #[cfg(test)]
+        data_refresh_application,
     }
 }
 
@@ -470,7 +475,6 @@ pub fn configure_server_http_application(
     market_session: tokio::sync::watch::Receiver<bool>,
 ) -> Router {
     let ConfiguredApplication {
-        composition_config: _,
         market_data,
         market_stream,
         market_scheduling: _,
@@ -486,6 +490,7 @@ pub fn configure_server_http_application(
         simulation,
         synchronization,
         data_refresh,
+        ..
     } = configured;
 
     let market_data = Arc::new(market_data);
@@ -494,8 +499,6 @@ pub fn configure_server_http_application(
     let portfolios = Arc::new(portfolios);
     let saved_strategies = Arc::new(saved_strategies);
     let tracked_tickers = Arc::new(tracked_tickers);
-    let synchronization = Arc::new(synchronization);
-
     let modern = crate::driving_adapters::http::router_with_data_refresh(
         crate::driving_adapters::http::MarketViewingPorts::new(
             market_data.clone(),
@@ -532,4 +535,25 @@ pub fn configure_server_http_application(
     );
 
     modern.merge(legacy)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hexagon::driving_ports::for_synchronizing_market_data::ForSynchronizingMarketData;
+
+    #[test]
+    fn data_refresh_and_http_share_the_configured_synchronization_arc() {
+        let config = CompositionConfig::with_duckdb_path(
+            std::env::temp_dir().join("shared-synchronization-composition.duckdb"),
+        );
+        let configured = configure_with_config(&config);
+        let http_synchronization: Arc<dyn ForSynchronizingMarketData> =
+            configured.synchronization.clone();
+
+        assert!(Arc::ptr_eq(
+            configured.data_refresh_application.synchronization_port(),
+            &http_synchronization,
+        ));
+    }
 }

@@ -26,19 +26,29 @@ SQLx, Reqwest, SQLite, wire formats, or provider names such as Yahoo and CBOE.
 src/
 ├── hexagon/
 │   ├── application/
+│   │   ├── data_refresh/
+│   │   ├── index_history_migration/
 │   │   ├── interest_rates/
 │   │   ├── intraday_simulation/
 │   │   ├── market_data/
+│   │   ├── market_history_migration/
 │   │   ├── market_scheduling/
 │   │   ├── market_stream/
 │   │   ├── market_volatility/
+│   │   ├── option_chain_migration/
 │   │   ├── options/
 │   │   ├── portfolio/
+│   │   ├── portfolio_migration/
 │   │   ├── portfolio_valuation/
 │   │   ├── saved_strategies/
+│   │   ├── sector_performance/
 │   │   ├── simulation/
+│   │   ├── strategy_migration/
 │   │   ├── synchronization/
-│   │   └── tracked_tickers/
+│   │   ├── tracked_ticker_migration/
+│   │   ├── tracked_tickers/
+│   │   ├── volatility_term_structure_migration/
+│   │   └── yield_curve_migration/
 │   ├── domain/
 │   ├── driving_ports/
 │   │   └── for_doing_something/
@@ -46,7 +56,7 @@ src/
 │       └── for_doing_something/
 ├── driving_adapters/
 ├── driven_adapters/
-│   ├── cboe/                 # option-chain and volatility-index adapters
+│   ├── cboe/                 # option-chain, volatility-index, and product-catalog adapters
 │   ├── duckdb/               # columnar analytical persistence adapters
 │   ├── exchange_calendar/    # official trading-session adapter
 │   ├── sqlite/               # inactive proof-of-concept and migration sources
@@ -102,6 +112,9 @@ contract tests replace the application with mocks and verify HTTP translation.
 
 | Application need | Driven port | Production adapter |
 | --- | --- | --- |
+| Load data-refresh runs | `ForLoadingDataRefreshRuns` | DuckDB |
+| Store data-refresh runs | `ForStoringDataRefreshRuns` | DuckDB |
+| Run asynchronous refresh work | `ForRunningDataRefreshTasks` | Tokio task runner |
 | Store market history | `ForStoringMarketHistory` | DuckDB (SQLite proof-of-concept also passes the contract) |
 | Store option chains | `ForStoringOptionChains` | DuckDB (SQLite proof-of-concept also passes the contract) |
 | Store volatility term structures | `ForStoringVolatilityTermStructures` | DuckDB (SQLite proof-of-concept also passes the contract) |
@@ -140,6 +153,7 @@ contract tests replace the application with mocks and verify HTTP translation.
 | Obtain live prices | `ForObtainingLivePrices` | Yahoo |
 | Stream live prices | `ForStreamingLivePrices` | Yahoo |
 | Obtain option chains | `ForObtainingOptionChains` | CBOE |
+| Resolve evidenced contract specifications for one snapshot batch | `ForResolvingOptionContractSpecifications` | Cboe option product catalog |
 | Obtain volatility-index history | `ForObtainingVolatilityIndices` | CBOE |
 | Obtain risk-free yield curves | `ForObtainingYieldCurves` | U.S. Treasury |
 | Consult exchange sessions | `ForConsultingTradingCalendar` | exchange calendar library |
@@ -192,12 +206,19 @@ Cboe adapter
 → DuckDB
 ```
 
-The Cboe adapter translates the wire response and captures `collected_at` at
-receipt. The application coordinates contract enrichment through the resolver,
-which supplies evidence by contract identity. Storage only persists and
-reconstructs the resulting snapshot. The domain validates supported numeric
-values and represents absence and provenance explicitly; no layer invents
-missing market facts.
+The Cboe option-chain adapter translates the wire response and captures
+`collected_at` at receipt. `SynchronizationApplication` collects the unique
+root-and-OCC-symbol identities in a snapshot and makes exactly one batch call
+through `ForResolvingOptionContractSpecifications`. The separate Cboe product
+catalog adapter supplies evidence for each identity. Storage only persists and
+reconstructs the enriched snapshot: it never consults the catalog when loading
+historical snapshots. The domain validates supported numeric values and
+represents absence and provenance explicitly; no layer invents missing market
+facts.
+
+The composition root constructs one `SynchronizationApplication` (and thus one
+catalog resolver) inside an `Arc`. Startup/data refresh and operational HTTP
+receive clones of that same `Arc`; neither path recomposes synchronization.
 
 Time-related fields remain distinct: the provider timestamp is retained
 verbatim with a verified/unverified timezone state; the spot economic timestamp

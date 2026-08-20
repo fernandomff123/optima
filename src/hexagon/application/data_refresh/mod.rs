@@ -116,6 +116,11 @@ impl DataRefreshApplication {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn synchronization_port(&self) -> &Arc<dyn ForSynchronizingMarketData> {
+        &self.core.synchronization
+    }
+
     pub async fn recover_interrupted(&self, now: DateTime<Utc>) -> PortResult<u64> {
         let mut running = self.core.runs.load_running_data_refresh_runs().await?;
         for run in &mut running {

@@ -155,12 +155,23 @@ fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
     for forbidden in ["cboe", "duckdb", "sql", "axum", "http"] {
         assert!(!application.to_ascii_lowercase().contains(forbidden));
     }
+    assert!(application.contains("resolve_option_contract_specifications(&identities)"));
+    assert!(!application.contains("resolve_option_contract_specification("));
+
+    let port = fs::read_to_string(
+        root.join("src/hexagon/driven_ports/for_resolving_option_contract_specifications/mod.rs"),
+    )
+    .expect("contract specification port must be readable");
+    assert!(!port.to_ascii_lowercase().contains("cboe"));
+    assert!(port.contains("contracts: &[OptionContractIdentity]"));
 
     let storage = fs::read_to_string(root.join("src/driven_adapters/duckdb/option_chains.rs"))
         .expect("option storage adapter must be readable");
     assert!(!storage.contains("SPX"));
     assert!(!storage.contains("SPXW"));
     assert!(!storage.contains("100.0"));
+    assert!(!storage.contains("ForResolvingOptionContractSpecifications"));
+    assert!(!storage.contains("resolve_option_contract_specifications"));
 
     let configurator = fs::read_to_string(root.join("src/configurator/mod.rs"))
         .expect("composition root must be readable");

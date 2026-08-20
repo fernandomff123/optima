@@ -1,4 +1,10 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -9,8 +15,14 @@ use hexagonal_backend::hexagon::{
         SynchronizationSources, SynchronizationStores,
     },
     domain::{
-        index_history::IndexHistory, market_history::MarketHistory, options::Snapshot,
-        treasury::YieldCurve, volatility::TermStructure,
+        index_history::IndexHistory,
+        market_history::MarketHistory,
+        options::{
+            ContratoOpcao, OptionChain, OptionContractSpecification, OptionType, Snapshot,
+            UnderlyingPriceObservation,
+        },
+        treasury::YieldCurve,
+        volatility::TermStructure,
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
@@ -24,6 +36,7 @@ use hexagonal_backend::hexagon::{
         for_obtaining_yield_curves::ForObtainingYieldCurves,
         for_resolving_option_contract_specifications::{
             ForResolvingOptionContractSpecifications, OptionContractIdentity,
+            OptionContractSpecificationResolution,
         },
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
@@ -47,14 +60,53 @@ struct PartiallyFailingHistoryMock;
 struct TwoHistoryTickersMock;
 struct NoContractSpecifications;
 
+#[derive(Clone)]
+struct SnapshotOptionsMock(Snapshot);
+
+#[async_trait]
+impl ForObtainingOptionChains for SnapshotOptionsMock {
+    async fn obtain_option_chain(&self, _ticker: &str) -> PortResult<Snapshot> {
+        Ok(self.0.clone())
+    }
+}
+
+#[derive(Clone)]
+struct RecordingContractSpecifications {
+    calls: Arc<AtomicUsize>,
+    requested: Arc<Mutex<Vec<Vec<OptionContractIdentity>>>>,
+    resolutions: BTreeMap<OptionContractIdentity, OptionContractSpecificationResolution>,
+    fail: bool,
+}
+
+#[async_trait]
+impl ForResolvingOptionContractSpecifications for RecordingContractSpecifications {
+    async fn resolve_option_contract_specifications(
+        &self,
+        contracts: &[OptionContractIdentity],
+    ) -> PortResult<BTreeMap<OptionContractIdentity, OptionContractSpecificationResolution>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.requested
+            .lock()
+            .expect("requested batches mutex must be usable")
+            .push(contracts.to_vec());
+        if self.fail {
+            return Err(PortError::Unavailable("catalog unavailable".to_string()));
+        }
+        Ok(self.resolutions.clone())
+    }
+}
+
 #[async_trait]
 impl ForResolvingOptionContractSpecifications for NoContractSpecifications {
-    async fn resolve_option_contract_specification(
+    async fn resolve_option_contract_specifications(
         &self,
-        _contract: OptionContractIdentity<'_>,
-    ) -> PortResult<Option<hexagonal_backend::hexagon::domain::options::OptionContractSpecification>>
-    {
-        Ok(None)
+        contracts: &[OptionContractIdentity],
+    ) -> PortResult<BTreeMap<OptionContractIdentity, OptionContractSpecificationResolution>> {
+        Ok(contracts
+            .iter()
+            .cloned()
+            .map(|identity| (identity, OptionContractSpecificationResolution::NotFound))
+            .collect())
     }
 }
 
@@ -299,6 +351,7 @@ impl ForObtainingYieldCurves for CurvesMock {
 #[derive(Clone, Default)]
 struct StoreMock {
     stored_tickers: Arc<Mutex<Vec<String>>>,
+    stored_option_snapshots: Arc<Mutex<Vec<Snapshot>>>,
 }
 
 #[async_trait]
@@ -316,9 +369,13 @@ impl ForStoringMarketHistory for StoreMock {
 impl ForStoringOptionChains for StoreMock {
     async fn store_option_chain(
         &self,
-        _snapshot: &Snapshot,
+        snapshot: &Snapshot,
         _market_close: chrono::DateTime<Utc>,
     ) -> PortResult<u64> {
+        self.stored_option_snapshots
+            .lock()
+            .expect("stored option snapshots mutex must be usable")
+            .push(snapshot.clone());
         Ok(1)
     }
 }
@@ -500,4 +557,325 @@ async fn batch_isolates_one_ticker_history_failure_and_continues() {
     assert_eq!(report.failures.len(), 1);
     assert_eq!(report.failures[0].ticker, "XLE");
     assert_eq!(report.failures[0].operation, "market_history");
+}
+
+fn option_contract(occ_symbol: &str) -> ContratoOpcao {
+    ContratoOpcao {
+        occ_symbol: occ_symbol.to_string(),
+        option_type: OptionType::Call,
+        strike: 5_000.0,
+        expiration: NaiveDate::from_ymd_opt(2026, 9, 18).expect("valid expiration"),
+        bid: 1.0,
+        ask: 1.2,
+        mid: 1.1,
+        spread: 0.2,
+        volume: 10.0,
+        open_interest: 20.0,
+        delta: 0.5,
+        gamma: 0.02,
+        vega: 0.1,
+        theta: -0.03,
+        rho: 0.01,
+        theo: 1.1,
+        implied_volatility: Some(0.2),
+        contract_specification: None,
+    }
+}
+
+fn option_snapshot(chains: Vec<OptionChain>) -> Snapshot {
+    Snapshot {
+        ticker: "SPX".to_string(),
+        timestamp_utc: DateTime::from_timestamp(1_776_000_000, 0).expect("valid timestamp"),
+        contratos: Vec::new(),
+        chains,
+        underlying_price: UnderlyingPriceObservation::new(
+            5_000.0,
+            None,
+            None,
+            "provider-neutral-test",
+        ),
+        collected_at: Some(
+            DateTime::from_timestamp(1_776_000_001, 0).expect("valid collection timestamp"),
+        ),
+        provider_timestamp: None,
+        ingestion_diagnostics: Default::default(),
+    }
+}
+
+fn specification(root: &str, multiplier: f64, currency: &str) -> OptionContractSpecification {
+    OptionContractSpecification::new(
+        root,
+        multiplier,
+        currency,
+        "test-catalog",
+        NaiveDate::from_ymd_opt(2026, 8, 21),
+        None,
+    )
+    .expect("valid test specification")
+}
+
+#[tokio::test]
+async fn option_snapshot_resolves_one_unique_batch_and_enriches_each_identity() {
+    let standard = OptionContractIdentity {
+        root: "SPX".to_string(),
+        occ_symbol: "SPX   260918C05000000".to_string(),
+    };
+    let special = OptionContractIdentity {
+        root: "SPX".to_string(),
+        occ_symbol: "SPX   260918C05100000".to_string(),
+    };
+    let adjusted = OptionContractIdentity {
+        root: "SPX1".to_string(),
+        occ_symbol: "SPX1  260918C05000000".to_string(),
+    };
+    let resolutions = BTreeMap::from([
+        (
+            standard.clone(),
+            OptionContractSpecificationResolution::Found(specification("SPX", 100.0, "USD")),
+        ),
+        (
+            special.clone(),
+            OptionContractSpecificationResolution::Found(specification("SPX", 50.0, "EUR")),
+        ),
+        (
+            adjusted.clone(),
+            OptionContractSpecificationResolution::NotFound,
+        ),
+    ]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let requested = Arc::new(Mutex::new(Vec::new()));
+    let resolver = RecordingContractSpecifications {
+        calls: Arc::clone(&calls),
+        requested: Arc::clone(&requested),
+        resolutions,
+        fail: false,
+    };
+    let snapshot = option_snapshot(vec![
+        OptionChain {
+            root: "SPX".to_string(),
+            contratos: vec![
+                option_contract(&standard.occ_symbol),
+                option_contract(&special.occ_symbol),
+                option_contract(&standard.occ_symbol),
+            ],
+        },
+        OptionChain {
+            root: "SPX1".to_string(),
+            contratos: vec![option_contract(&adjusted.occ_symbol)],
+        },
+    ]);
+    let store = StoreMock::default();
+    let stored = Arc::clone(&store.stored_option_snapshots);
+    let application = SynchronizationApplication::new(
+        SynchronizationSources::new(
+            HistoryMock,
+            SnapshotOptionsMock(snapshot),
+            IndicesMock,
+            CurvesMock,
+        ),
+        SynchronizationStores::new(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store,
+        ),
+        TrackedTickersMock,
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(resolver),
+    );
+
+    application
+        .synchronize_option_chain(
+            "SPX",
+            DateTime::from_timestamp(1_776_000_000, 0).expect("valid market close"),
+        )
+        .await
+        .expect("batch enrichment must succeed");
+
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let batches = requested
+        .lock()
+        .expect("requested batches mutex must be usable");
+    assert_eq!(batches.len(), 1);
+    assert_eq!(
+        batches[0],
+        vec![standard.clone(), special.clone(), adjusted]
+    );
+    drop(batches);
+
+    let snapshots = stored
+        .lock()
+        .expect("stored option snapshots mutex must be usable");
+    let stored = &snapshots[0];
+    assert_eq!(stored.underlying_price.as_ref().unwrap().currency, None);
+    assert_eq!(
+        stored.chains[0].contratos[0]
+            .contract_specification
+            .as_ref()
+            .unwrap()
+            .contract_multiplier,
+        100.0
+    );
+    assert_eq!(
+        stored.chains[0].contratos[1]
+            .contract_specification
+            .as_ref()
+            .unwrap()
+            .contract_multiplier,
+        50.0
+    );
+    assert_eq!(
+        stored.chains[0].contratos[2].contract_specification,
+        stored.chains[0].contratos[0].contract_specification
+    );
+    assert!(
+        stored.chains[1].contratos[0]
+            .contract_specification
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn option_snapshot_propagates_resolver_failure_without_storing() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let resolver = RecordingContractSpecifications {
+        calls: Arc::clone(&calls),
+        requested: Arc::new(Mutex::new(Vec::new())),
+        resolutions: BTreeMap::new(),
+        fail: true,
+    };
+    let snapshot = option_snapshot(vec![OptionChain {
+        root: "SPX".to_string(),
+        contratos: vec![option_contract("SPX   260918C05000000")],
+    }]);
+    let store = StoreMock::default();
+    let stored = Arc::clone(&store.stored_option_snapshots);
+    let application = SynchronizationApplication::new(
+        SynchronizationSources::new(
+            HistoryMock,
+            SnapshotOptionsMock(snapshot),
+            IndicesMock,
+            CurvesMock,
+        ),
+        SynchronizationStores::new(
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store.clone(),
+            store,
+        ),
+        TrackedTickersMock,
+        OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+        OptionSnapshotEnrichment::new(resolver),
+    );
+
+    let error = application
+        .synchronize_option_chain(
+            "SPX",
+            DateTime::from_timestamp(1_776_000_000, 0).expect("valid market close"),
+        )
+        .await
+        .expect_err("resolver failure must remain a failure");
+
+    assert!(matches!(error, PortError::Unavailable(message) if message == "catalog unavailable"));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(
+        stored
+            .lock()
+            .expect("stored option snapshots mutex must be usable")
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn option_snapshot_rejects_missing_and_additional_batch_identities_before_storing() {
+    let requested_a = OptionContractIdentity {
+        root: "SPX".to_string(),
+        occ_symbol: "SPX   260918C05000000".to_string(),
+    };
+    let requested_b = OptionContractIdentity {
+        root: "SPXW".to_string(),
+        occ_symbol: "SPXW  260918C05100000".to_string(),
+    };
+    let additional = OptionContractIdentity {
+        root: "XSP".to_string(),
+        occ_symbol: "XSP   260918C00500000".to_string(),
+    };
+    let snapshot = option_snapshot(vec![
+        OptionChain {
+            root: requested_a.root.clone(),
+            contratos: vec![option_contract(&requested_a.occ_symbol)],
+        },
+        OptionChain {
+            root: requested_b.root.clone(),
+            contratos: vec![option_contract(&requested_b.occ_symbol)],
+        },
+    ]);
+    let incompatible_responses = [
+        BTreeMap::from([(
+            requested_a.clone(),
+            OptionContractSpecificationResolution::Found(specification("SPX", 100.0, "USD")),
+        )]),
+        BTreeMap::from([
+            (
+                requested_a.clone(),
+                OptionContractSpecificationResolution::Found(specification("SPX", 100.0, "USD")),
+            ),
+            (
+                requested_b.clone(),
+                OptionContractSpecificationResolution::NotFound,
+            ),
+            (additional, OptionContractSpecificationResolution::NotFound),
+        ]),
+    ];
+
+    for resolutions in incompatible_responses {
+        let store = StoreMock::default();
+        let stored = Arc::clone(&store.stored_option_snapshots);
+        let resolver = RecordingContractSpecifications {
+            calls: Arc::new(AtomicUsize::new(0)),
+            requested: Arc::new(Mutex::new(Vec::new())),
+            resolutions,
+            fail: false,
+        };
+        let application = SynchronizationApplication::new(
+            SynchronizationSources::new(
+                HistoryMock,
+                SnapshotOptionsMock(snapshot.clone()),
+                IndicesMock,
+                CurvesMock,
+            ),
+            SynchronizationStores::new(
+                store.clone(),
+                store.clone(),
+                store.clone(),
+                store.clone(),
+                store,
+            ),
+            TrackedTickersMock,
+            OptionAnalysisCollaborators::new(OptionDataMock, OptionDataMock, TradingCalendarMock),
+            OptionSnapshotEnrichment::new(resolver),
+        );
+
+        let error = application
+            .synchronize_option_chain(
+                "SPX",
+                DateTime::from_timestamp(1_776_000_000, 0).expect("valid market close"),
+            )
+            .await
+            .expect_err("incompatible identity set must fail");
+
+        assert!(matches!(
+            error,
+            PortError::Unavailable(message)
+                if message == "contract specification resolver returned an incompatible identity set"
+        ));
+        assert!(
+            stored
+                .lock()
+                .expect("stored option snapshots mutex must be usable")
+                .is_empty()
+        );
+    }
 }
