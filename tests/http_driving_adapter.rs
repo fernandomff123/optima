@@ -26,7 +26,7 @@ use hexagonal_backend::{
             simulation::{
                 Greeks, ScenarioGrid, SimulationRequest, SimulationResult, SimulationScenario,
             },
-            tracked_ticker::TrackedTicker,
+            tracked_ticker::{TrackedTicker, UnderlyingMetadata, UnderlyingResolutionState},
             volatility::TermStructure,
             volatility_surface::{VolatilitySkew, VolatilitySurface},
         },
@@ -35,6 +35,7 @@ use hexagonal_backend::{
             for_managing_portfolios::{CreatePortfolio, ForManagingPortfolios},
             for_managing_saved_strategies::{ForManagingSavedStrategies, SaveStrategy},
             for_managing_tracked_tickers::ForManagingTrackedTickers,
+            for_resolving_underlyings::{ForResolvingUnderlyings, UnderlyingResolution},
             for_simulating_strategies::{
                 ForSimulatingStrategies, ScenarioGridRequest, SimulateScenario,
             },
@@ -101,6 +102,32 @@ struct SavedStrategiesMock;
 struct TrackedTickersMock;
 struct SectorPerformanceMock;
 
+#[async_trait]
+impl ForResolvingUnderlyings for TrackedTickersMock {
+    async fn resolve_underlying(&self, ticker: &str) -> PortResult<UnderlyingResolution> {
+        match ticker {
+            "bad ticker" => Err(PortError::InvalidRequest("invalid tracked ticker".into())),
+            "MISSING" => Err(PortError::NotFound(
+                "underlying MISSING was not found".into(),
+            )),
+            "UNAVAILABLE" => Err(PortError::Unavailable("Yahoo unavailable".into())),
+            "INVALID" => Err(PortError::Unavailable(
+                "Yahoo response was incompatible".into(),
+            )),
+            _ => Ok(UnderlyingResolution {
+                ticker: ticker.trim().to_ascii_uppercase(),
+                validated_at: Utc::now(),
+                metadata: UnderlyingMetadata {
+                    currency: Some("USD".into()),
+                    exchange: Some("NMS".into()),
+                    timezone: Some("America/New_York".into()),
+                    instrument_type: Some("EQUITY".into()),
+                },
+            }),
+        }
+    }
+}
+
 fn market_ports(market_data: Arc<MarketDataMock>) -> http::MarketViewingPorts {
     http::MarketViewingPorts::new(market_data, Arc::new(SectorPerformanceMock))
 }
@@ -131,6 +158,9 @@ impl ForManagingTrackedTickers for TrackedTickersMock {
             active: false,
             historical_prices: true,
             option_snapshots: false,
+            resolution_state: UnderlyingResolutionState::Pending,
+            validated_at: None,
+            metadata: UnderlyingMetadata::default(),
         }];
         Ok(tickers
             .into_iter()
@@ -568,26 +598,29 @@ async fn http_adapter_drives_tracked_ticker_management() {
         "option_snapshots": true
     });
 
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("PUT")
-                .uri("/tracked-tickers/SPY")
-                .header("content-type", "application/json")
-                .body(Body::from(body.to_string()))
-                .expect("valid test request"),
-        )
-        .await
-        .expect("router must respond");
-
-    assert_eq!(response.status(), 204);
-    assert!(response.headers().get("content-type").is_none());
-    assert!(
-        axum::body::to_bytes(response.into_body(), usize::MAX)
+    for path in ["/api/tracked-tickers/SPY", "/tracked-tickers/SPY"] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(path)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .expect("valid test request"),
+            )
             .await
-            .unwrap()
-            .is_empty()
-    );
+            .expect("router must respond");
+
+        assert_eq!(response.status(), 204);
+        assert!(response.headers().get("content-type").is_none());
+        assert!(
+            axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
 }
 
 #[tokio::test]
@@ -647,6 +680,14 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
                 "active": false,
                 "historical_prices": true,
                 "option_snapshots": false
+                ,"resolution_state": "pending",
+                "validated_at": null,
+                "metadata": {
+                    "currency": null,
+                    "exchange": null,
+                    "timezone": null,
+                    "instrument_type": null
+                }
             }])
         );
     }
@@ -671,6 +712,75 @@ async fn tracked_ticker_http_contract_lists_inactive_and_maps_protection_and_val
             .unwrap();
         assert_eq!(response.status(), expected);
     }
+}
+
+#[tokio::test]
+async fn exact_underlying_resolution_has_canonical_success_and_public_errors_only() {
+    let app = http::router(
+        market_ports(Arc::new(MarketDataMock::default())),
+        Arc::new(OptionsMock),
+        Arc::new(SimulationMock),
+        Arc::new(PortfoliosMock::default()),
+        Arc::new(SynchronizationMock),
+        Arc::new(SavedStrategiesMock),
+        Arc::new(TrackedTickersMock),
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/underlyings/resolve?ticker=MSFT")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/json"
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ticker"], "MSFT");
+    assert_eq!(json["metadata"]["instrument_type"], "EQUITY");
+
+    for (ticker, status) in [
+        ("bad%20ticker", StatusCode::BAD_REQUEST),
+        ("MISSING", StatusCode::NOT_FOUND),
+        ("UNAVAILABLE", StatusCode::SERVICE_UNAVAILABLE),
+        ("INVALID", StatusCode::SERVICE_UNAVAILABLE),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/underlyings/resolve?ticker={ticker}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(
+            response.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+    }
+
+    let no_alias = app
+        .oneshot(
+            Request::builder()
+                .uri("/underlyings/resolve?ticker=MSFT")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(no_alias.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

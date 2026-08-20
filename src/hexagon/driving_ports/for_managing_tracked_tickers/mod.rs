@@ -2,13 +2,14 @@
 
 use async_trait::async_trait;
 
+use super::for_resolving_underlyings::ForResolvingUnderlyings;
 use crate::hexagon::{
     PortResult,
     domain::tracked_ticker::{TrackedTicker, TrackedTickerConfiguration},
 };
 
 #[async_trait]
-pub trait ForManagingTrackedTickers: Send + Sync {
+pub trait ForManagingTrackedTickers: ForResolvingUnderlyings + Send + Sync {
     async fn list_tickers(&self, include_inactive: bool) -> PortResult<Vec<TrackedTicker>>;
 
     async fn bootstrap_system_tickers(&self) -> PortResult<()>;

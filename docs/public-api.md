@@ -36,6 +36,7 @@ repository tests; no frontend source was inspected for this change.
 | DELETE | `/saved-strategies/{id}` | `delete_strategy` | path → empty 204 | no | tests/tools | `/api/saved-strategies/{id}` |
 | GET | `/tracked-tickers` | `list_tracked_tickers` | empty → tickers | response | tests/tools | `/api/tracked-tickers` |
 | PUT | `/tracked-tickers/{ticker}` | `configure_tracked_ticker` | configuration → empty 204 | constructed domain | tests/tools | `/api/tracked-tickers/{ticker}` |
+| GET | `/api/underlyings/resolve?ticker={ticker}` | `resolve_underlying` | exact ticker → factual resolution | mapped | frontend/tests | unchanged canonical; no alias |
 | GET | `/api/market/sectors` | `view_sector_performance` | period query → sector response | mapped | frontend/tests | unchanged canonical |
 | GET | `/api/data-refresh/status` | `data_refresh_status` | empty → refresh status | mapped | frontend/manual | unchanged canonical |
 | POST | `/api/data-refresh` | `request_data_refresh` | empty → refresh result | mapped | frontend/manual | unchanged canonical |
@@ -73,16 +74,23 @@ business rules are outside this normalization.
 `GET /api/tracked-tickers` preserves the historical behavior and returns only
 active entries. `GET /api/tracked-tickers?include_inactive=true` returns the
 complete catalog. Each entry contains `ticker`, `source` (`system` or `user`),
-`active`, `historical_prices`, and `option_snapshots`. The temporary
+`active`, `historical_prices`, `option_snapshots`, `resolution_state`,
+`validated_at`, and factual `metadata` (`currency`, `exchange`, `timezone`, and
+`instrument_type`). The temporary
 `GET /tracked-tickers` alias accepts the same query and returns the same status,
 `application/json` content type, and body.
 
 `PUT /api/tracked-tickers/{ticker}` accepts `active`, `historical_prices`, and
 `option_snapshots`, and returns `204 No Content`. It creates a user ticker when
 none exists (absence is otherwise represented by omission from the list) and
-otherwise replaces that user ticker's configuration. Repeating
-the same request is idempotent. Tickers are trimmed and uppercased in the
-domain. Invalid symbols return `400` with the canonical `ApiError` envelope;
+otherwise replaces that user ticker's configuration. Repeating the same
+request is idempotent. A new user ticker, or a pending user ticker being
+activated, is resolved factually before it becomes refresh-eligible. Conclusive absence returns `404`;
+transient provider failure returns `503`. Neither outcome creates a new
+eligible ticker. Existing resolved tickers can be updated or disabled without
+provider access, and an existing ticker can always be disabled without a
+resolution attempt. Tickers are trimmed and uppercased in the domain. Invalid
+symbols return `400` with the canonical `ApiError` envelope;
 an identical configuration of a protected system ticker is idempotent, while
 an attempted change returns `409`; persistence
 failures return `503`. The temporary `PUT /tracked-tickers/{ticker}` alias uses
@@ -93,3 +101,18 @@ There is deliberately no delete endpoint. Deactivation retains history,
 option snapshots, portfolio events, and saved-strategy references. SPX, SPY,
 VIX, XLB, XLC, XLE, XLF, XLI, XLK, XLP, XLRE, XLU, XLV, and XLY are active
 system entries and cannot be configured through this API.
+
+## Exact underlying resolution
+
+`GET /api/underlyings/resolve?ticker=MSFT` validates the ticker syntax and asks
+the exact-resolution application conversation to confirm it through the
+configured provider. Success returns `200 application/json` with `ticker`,
+`validated_at`, and factual `metadata`. The operation neither persists nor
+activates the ticker. Invalid syntax returns `400`, conclusive absence returns
+`404`, and transient or incompatible provider responses return `503`, all with
+the canonical `ApiError` envelope. There is intentionally no non-`/api` alias.
+
+Resolution confirms identity only. It does not claim historical-data or option
+capabilities, and it does not provide name, sector search, or autocomplete.
+In particular, a valid ticker with no listed options is not yet classified by
+this phase; `historical_prices` and `option_snapshots` remain user requests.

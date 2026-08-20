@@ -170,6 +170,7 @@ pub const EXISTING_CANONICAL_ROUTES: &[(&str, &str)] = &[
     ("GET", "/api/data-refresh/status"),
     ("POST", "/api/data-refresh"),
     ("GET", "/api/assets/live"),
+    ("GET", "/api/underlyings/resolve"),
 ];
 
 pub const NON_CANONICAL_SYNCHRONIZATION_ALIASES: &[(&str, &str)] = &[
@@ -302,6 +303,7 @@ pub fn router_with_data_refresh(
             axum::routing::delete(delete_strategy),
         )
         .route("/api/tracked-tickers", get(list_tracked_tickers))
+        .route("/api/underlyings/resolve", get(resolve_underlying))
         .route(
             "/api/tracked-tickers/{ticker}",
             axum::routing::put(configure_tracked_ticker),
@@ -586,6 +588,19 @@ async fn list_tracked_tickers(
                 .map(canonical_models::tracked_ticker)
                 .collect()
         })
+        .map(Json)
+        .map_err(HttpError)
+}
+
+async fn resolve_underlying(
+    State(state): State<HttpState>,
+    Query(query): Query<api_models::ResolveUnderlyingQuery>,
+) -> Result<Json<api_models::UnderlyingResolution>, HttpError> {
+    state
+        .tracked_tickers
+        .resolve_underlying(&query.ticker)
+        .await
+        .map(canonical_models::underlying_resolution)
         .map(Json)
         .map_err(HttpError)
 }

@@ -5,8 +5,14 @@ use chrono::{DateTime, Utc};
 use hexagonal_backend::hexagon::{
     PortError, PortResult,
     domain::{
-        index_history::IndexHistory, live_price::LivePrice, market_history::MarketHistory,
-        options::Snapshot, portfolio::Portfolio, treasury::YieldCurve, volatility::TermStructure,
+        index_history::IndexHistory,
+        live_price::LivePrice,
+        market_history::MarketHistory,
+        options::Snapshot,
+        portfolio::Portfolio,
+        tracked_ticker::{ResolvedUnderlying, UnderlyingMetadata},
+        treasury::YieldCurve,
+        volatility::TermStructure,
     },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
@@ -19,6 +25,9 @@ use hexagonal_backend::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
+        for_resolving_underlying_symbols::{
+            ForResolvingUnderlyingSymbols, UnderlyingResolutionError,
+        },
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
         for_storing_option_chains::ForStoringOptionChains,
@@ -31,6 +40,20 @@ use hexagonal_backend::hexagon::{
 struct LivePricesMock;
 
 struct MarketHistoryProviderMock;
+struct UnderlyingResolverMock;
+
+#[async_trait]
+impl ForResolvingUnderlyingSymbols for UnderlyingResolverMock {
+    async fn resolve_underlying(
+        &self,
+        ticker: &str,
+    ) -> Result<ResolvedUnderlying, UnderlyingResolutionError> {
+        Ok(ResolvedUnderlying {
+            ticker: ticker.to_string(),
+            metadata: UnderlyingMetadata::default(),
+        })
+    }
+}
 
 #[async_trait]
 impl ForObtainingMarketHistory for MarketHistoryProviderMock {
@@ -224,6 +247,7 @@ fn every_declared_driven_port_accepts_a_test_double() {
     fn store_index_history(_: &impl ForStoringIndexHistory) {}
     fn store_yield_curves(_: &impl ForStoringYieldCurves) {}
     fn calendar(_: &impl ForConsultingTradingCalendar) {}
+    fn resolve_underlying(_: &impl ForResolvingUnderlyingSymbols) {}
 
     live(&LivePricesMock);
     market_history(&MarketHistoryProviderMock);
@@ -242,4 +266,5 @@ fn every_declared_driven_port_accepts_a_test_double() {
     store_index_history(&IndexHistoryWriterMock);
     store_yield_curves(&YieldCurvesStoreMock);
     calendar(&TradingCalendarStub);
+    resolve_underlying(&UnderlyingResolverMock);
 }

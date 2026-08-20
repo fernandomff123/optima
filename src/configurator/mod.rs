@@ -35,7 +35,9 @@ use crate::{
             yield_curves_port::SqliteYieldCurvesAdapter,
         },
         treasury::TreasuryYieldCurvesAdapter,
-        yahoo::{YahooLivePricesAdapter, YahooMarketHistoryAdapter},
+        yahoo::{
+            YahooLivePricesAdapter, YahooMarketHistoryAdapter, YahooUnderlyingResolverAdapter,
+        },
     },
     hexagon::application::{
         data_refresh::DataRefreshApplication,
@@ -140,8 +142,11 @@ pub type ConfiguredPortfolioValuation = PortfolioValuationApplication<
 >;
 pub type ConfiguredSavedStrategies =
     SavedStrategiesApplication<DuckDbSavedStrategiesAdapter, DuckDbSavedStrategiesAdapter>;
-pub type ConfiguredTrackedTickers =
-    TrackedTickersApplication<DuckDbTrackedTickersAdapter, DuckDbTrackedTickersAdapter>;
+pub type ConfiguredTrackedTickers = TrackedTickersApplication<
+    DuckDbTrackedTickersAdapter,
+    DuckDbTrackedTickersAdapter,
+    YahooUnderlyingResolverAdapter,
+>;
 pub type ConfiguredSectorPerformance =
     SectorPerformanceApplication<DuckDbMarketHistoryAdapter, ExchangeTradingCalendarAdapter>;
 pub type ConfiguredSynchronization = SynchronizationApplication<
@@ -210,10 +215,14 @@ pub async fn initialize_storage(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     tracked_tickers::initialize(pool).await?;
     let tracked_tickers_adapter = SqliteTrackedTickersAdapter::new(pool.clone());
-    TrackedTickersApplication::new(tracked_tickers_adapter.clone(), tracked_tickers_adapter)
-        .bootstrap_system_tickers()
-        .await
-        .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+    TrackedTickersApplication::new(
+        tracked_tickers_adapter.clone(),
+        tracked_tickers_adapter,
+        YahooUnderlyingResolverAdapter::default(),
+    )
+    .bootstrap_system_tickers()
+    .await
+    .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
     migrations::remove_research_storage(pool).await?;
     market_history::initialize(pool).await?;
     index_history::initialize(pool).await?;
@@ -243,9 +252,13 @@ pub async fn initialize_analytical_storage_with_config(
         .await?;
     let tracked_tickers = DuckDbTrackedTickersAdapter::new(path);
     tracked_tickers.initialize().await?;
-    TrackedTickersApplication::new(tracked_tickers.clone(), tracked_tickers)
-        .bootstrap_system_tickers()
-        .await?;
+    TrackedTickersApplication::new(
+        tracked_tickers.clone(),
+        tracked_tickers,
+        YahooUnderlyingResolverAdapter::default(),
+    )
+    .bootstrap_system_tickers()
+    .await?;
     DuckDbPortfolioAdapter::new(path).initialize().await?;
     DuckDbSavedStrategiesAdapter::new(path).initialize().await?;
     DuckDbDataRefreshRunsAdapter::new(path).initialize().await
@@ -318,6 +331,7 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
         tracked_tickers: TrackedTickersApplication::new(
             tracked_tickers_adapter.clone(),
             tracked_tickers_adapter.clone(),
+            YahooUnderlyingResolverAdapter::default(),
         ),
         sector_performance: SectorPerformanceApplication::new(
             DuckDbMarketHistoryAdapter::new(path),

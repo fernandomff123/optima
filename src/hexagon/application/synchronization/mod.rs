@@ -215,7 +215,7 @@ where
         &self,
         request: SynchronizeTrackedTickers,
     ) -> PortResult<TrackedTickersSynchronizationReport> {
-        let tickers = self.tracked_tickers.load_active_tickers().await?;
+        let tickers = self.tracked_tickers.load_refresh_eligible_tickers().await?;
         let mut report = TrackedTickersSynchronizationReport {
             tickers: tickers.len(),
             items_obtained: 0,

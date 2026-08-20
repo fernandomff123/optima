@@ -326,6 +326,38 @@ pub fn tracked_ticker(value: tt::TrackedTicker) -> api_models::TrackedTicker {
         active: value.active,
         historical_prices: value.historical_prices,
         option_snapshots: value.option_snapshots,
+        resolution_state: match value.resolution_state {
+            tt::UnderlyingResolutionState::Pending => {
+                api_models::UnderlyingResolutionState::Pending
+            }
+            tt::UnderlyingResolutionState::Resolved => {
+                api_models::UnderlyingResolutionState::Resolved
+            }
+            tt::UnderlyingResolutionState::Rejected => {
+                api_models::UnderlyingResolutionState::Rejected
+            }
+        },
+        validated_at: value.validated_at,
+        metadata: underlying_metadata(value.metadata),
+    }
+}
+
+pub fn underlying_resolution(
+    value: crate::hexagon::driving_ports::for_resolving_underlyings::UnderlyingResolution,
+) -> api_models::UnderlyingResolution {
+    api_models::UnderlyingResolution {
+        ticker: value.ticker,
+        validated_at: value.validated_at,
+        metadata: underlying_metadata(value.metadata),
+    }
+}
+
+fn underlying_metadata(value: tt::UnderlyingMetadata) -> api_models::UnderlyingMetadata {
+    api_models::UnderlyingMetadata {
+        currency: value.currency,
+        exchange: value.exchange,
+        timezone: value.timezone,
+        instrument_type: value.instrument_type,
     }
 }
 
@@ -732,6 +764,9 @@ mod tests {
             active: true,
             historical_prices: false,
             option_snapshots: true,
+            resolution_state: tt::UnderlyingResolutionState::Resolved,
+            validated_at: None,
+            metadata: tt::UnderlyingMetadata::default(),
         };
         assert_same_json(&ticker, &tracked_ticker(ticker.clone()));
         let report = sync::TrackedTickersSynchronizationReport {
