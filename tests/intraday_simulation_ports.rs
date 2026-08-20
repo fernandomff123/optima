@@ -31,6 +31,10 @@ impl ForObtainingOptionChains for OptionChainsMock {
             timestamp_utc: Utc::now(),
             contratos: Vec::new(),
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         })
     }
 }

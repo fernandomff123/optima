@@ -106,6 +106,7 @@ mod tests {
             rho: 0.01,
             theo: 1.1,
             implied_volatility: iv,
+            contract_specification: None,
         }
     }
 
@@ -125,6 +126,10 @@ mod tests {
                 root: "TEST".to_string(),
                 contratos: contracts,
             }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         };
 
         let surface = VolatilitySurface::from_snapshot(&snapshot, 100.0).unwrap();

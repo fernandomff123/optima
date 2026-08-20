@@ -503,6 +503,7 @@ mod tests {
             rho: 0.01,
             theo: 4.25,
             implied_volatility: Some(0.2),
+            contract_specification: None,
         }
     }
 
@@ -520,6 +521,10 @@ mod tests {
                 contract("SPX-P105", OptionType::Put, 105.0),
             ],
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         }
     }
 

@@ -61,6 +61,10 @@ fn archived(ticker: &str, has_market_close: bool) -> ArchivedOptionChain {
             timestamp_utc: observed_at,
             contratos: Vec::new(),
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         },
         market_close: has_market_close.then_some(observed_at),
     }

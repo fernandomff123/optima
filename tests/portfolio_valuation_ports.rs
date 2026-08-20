@@ -92,8 +92,13 @@ impl ForObtainingOptionChains for LiveOptionsMock {
                 rho: 0.1,
                 theo: 2.5,
                 implied_volatility: Some(0.2),
+                contract_specification: None,
             }],
             chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
         })
     }
 }

@@ -179,6 +179,51 @@ adjusted close and falling back to close. Each sector must have observations
 on the benchmark's exact start and end dates. Relative strength is the sector
 return minus the `SPY` return, in percentage points.
 
+## Option snapshots prepared for future GEX analysis
+
+Option inputs use one acquisition and persistence pipeline:
+
+```text
+Cboe adapter
+→ factual Snapshot
+→ SynchronizationApplication
+→ ForResolvingOptionContractSpecifications
+→ ForStoringOptionChains
+→ DuckDB
+```
+
+The Cboe adapter translates the wire response and captures `collected_at` at
+receipt. The application coordinates contract enrichment through the resolver,
+which supplies evidence by contract identity. Storage only persists and
+reconstructs the resulting snapshot. The domain validates supported numeric
+values and represents absence and provenance explicitly; no layer invents
+missing market facts.
+
+Time-related fields remain distinct: the provider timestamp is retained
+verbatim with a verified/unverified timezone state; the spot economic timestamp
+is recorded separately and becomes `spot_as_of` only when its offset is
+verified; `collected_at` is the UTC acquisition instant; and `market_close` is
+the independent market-session key. An offsetless provider value is never
+promoted to confirmed UTC.
+
+The initial product catalog covers only SPX and SPXW, each with multiplier 100
+and currency USD. Its stable `source_reference` identifies the canonical
+[Cboe SPX specifications](https://www.cboe.com/tradable-products/sp-500/spx-options/spx-specifications/),
+whose Product Snapshot is labelled “as of March 19, 2024”. The catalog was
+reviewed on 2026-08-20 (`catalog_reviewed_at`); the specification's actual
+effective date is not established, so `effective_from` remains `None`. There is
+no fallback for SPY, XSP, equities, ETFs, unknown roots, or adjusted contracts.
+
+Resolved multiplier and evidence are copied into each stored contract, so a
+future catalog change cannot rewrite historical snapshots. Older snapshots
+remain readable with the new nullable fields absent. Structured and bounded
+ingestion diagnostics belong atomically to their snapshot and record totals
+plus limited samples without creating a second option-chain pipeline.
+
+This foundation does not calculate GEX, expose a GEX endpoint or DTO, define a
+GEX freshness policy, or calculate gamma flip. Those remain separate future
+application concerns.
+
 ## Dependency direction
 
 1. Driving actors or adapters depend on driving ports.

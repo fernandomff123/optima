@@ -7,7 +7,11 @@ use duckdb::{Connection, OptionalExt, params};
 
 use crate::hexagon::{
     PortError, PortResult,
-    domain::options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
+    domain::options::{
+        ContratoOpcao, OptionChain, OptionContractSpecification, OptionIngestionDiagnostics,
+        OptionIngestionWarning, OptionType, ProviderTimestamp, ProviderTimestampTimezone, Snapshot,
+        UnderlyingPriceObservation,
+    },
     driven_ports::{
         for_counting_option_chains::{ForCountingOptionChains, OptionChainCounts},
         for_loading_option_chains::ForLoadingOptionChains,
@@ -118,10 +122,35 @@ fn initialize_schema(connection: &Connection) -> Result<(), duckdb::Error> {
             theta DOUBLE,
             rho DOUBLE,
             theo DOUBLE,
+            contract_multiplier DOUBLE,
+            contract_currency VARCHAR,
+            contract_specification_source VARCHAR,
+            contract_specification_reviewed_at DATE,
+            contract_specification_effective_from DATE,
             PRIMARY KEY (snapshot_id, occ_symbol)
         );",
     )?;
     remove_legacy_hash_column(connection)?;
+    connection.execute_batch(
+        "ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS spot DOUBLE;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS spot_as_of TIMESTAMPTZ;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS collected_at TIMESTAMPTZ;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS spot_currency VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS spot_source VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS spot_as_of_raw VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS spot_as_of_timezone VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS provider_timestamp_raw VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS provider_timestamp_timezone VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS invalid_occ_symbols VARCHAR;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS invalid_occ_symbol_count UBIGINT;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS ingestion_warning_count UBIGINT;
+         ALTER TABLE option_snapshots ADD COLUMN IF NOT EXISTS ingestion_warnings VARCHAR;
+         ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS contract_multiplier DOUBLE;
+         ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS contract_currency VARCHAR;
+         ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS contract_specification_source VARCHAR;
+         ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS contract_specification_reviewed_at DATE;
+         ALTER TABLE option_contracts ADD COLUMN IF NOT EXISTS contract_specification_effective_from DATE;",
+    )?;
     connection.execute_batch(
         "
         CREATE INDEX IF NOT EXISTS idx_option_snapshots_ticker_time
@@ -183,10 +212,54 @@ fn store_snapshot(
     let transaction = connection.transaction()?;
     let inserted = transaction.execute(
         "INSERT INTO option_snapshots
-         (snapshot_id, ticker, observed_at, market_close, format_version)
-         VALUES (?, ?, ?, ?, 1)
+         (snapshot_id, ticker, observed_at, market_close, format_version,
+          spot, spot_as_of, collected_at, spot_currency, spot_source,
+          spot_as_of_raw, spot_as_of_timezone, provider_timestamp_raw, provider_timestamp_timezone,
+          invalid_occ_symbol_count, invalid_occ_symbols,
+          ingestion_warning_count, ingestion_warnings)
+         VALUES (?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT DO NOTHING",
-        params![&snapshot_id, ticker, snapshot.timestamp_utc, market_close,],
+        params![
+            &snapshot_id,
+            ticker,
+            snapshot.timestamp_utc,
+            market_close,
+            snapshot.underlying_price.as_ref().map(|spot| spot.value),
+            snapshot
+                .underlying_price
+                .as_ref()
+                .and_then(|spot| spot.observed_at),
+            snapshot.collected_at,
+            snapshot
+                .underlying_price
+                .as_ref()
+                .and_then(|spot| spot.currency.as_deref()),
+            snapshot
+                .underlying_price
+                .as_ref()
+                .map(|spot| spot.source.as_str()),
+            snapshot
+                .underlying_price
+                .as_ref()
+                .and_then(|spot| spot.observed_at_raw.as_deref()),
+            snapshot
+                .underlying_price
+                .as_ref()
+                .and_then(|spot| spot.observed_at_timezone.as_ref())
+                .map(timestamp_timezone_value),
+            snapshot
+                .provider_timestamp
+                .as_ref()
+                .map(|timestamp| timestamp.raw.as_str()),
+            snapshot
+                .provider_timestamp
+                .as_ref()
+                .map(|timestamp| { timestamp_timezone_value(&timestamp.timezone) }),
+            snapshot.ingestion_diagnostics.invalid_occ_symbol_count,
+            serde_json::to_string(&snapshot.ingestion_diagnostics.invalid_occ_symbol_samples)?,
+            snapshot.ingestion_diagnostics.warning_count,
+            serde_json::to_string(&snapshot.ingestion_diagnostics.warnings)?,
+        ],
     )?;
     if inserted == 0 {
         transaction.commit()?;
@@ -194,12 +267,21 @@ fn store_snapshot(
     }
 
     {
-        // DuckDB's Appender batches values into vectors instead of executing
-        // one SQL statement per contract. This is essential for large chains.
-        let mut appender = transaction.appender("option_contracts")?;
+        // Explicit columns make schema evolution independent from physical
+        // column order in databases migrated through different versions.
+        let mut statement = transaction.prepare(
+            "INSERT INTO option_contracts
+             (snapshot_id, occ_symbol, root, expiration, option_type, strike,
+              bid, ask, mid, spread, volume, open_interest, implied_volatility,
+              delta, gamma, vega, theta, rho, theo, contract_multiplier,
+              contract_currency, contract_specification_source,
+              contract_specification_reviewed_at,
+              contract_specification_effective_from)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )?;
         for chain in &snapshot.chains {
             for contract in &chain.contratos {
-                appender.append_row(params![
+                statement.execute(params![
                     &snapshot_id,
                     &contract.occ_symbol,
                     &chain.root,
@@ -219,10 +301,29 @@ fn store_snapshot(
                     contract.theta,
                     contract.rho,
                     contract.theo,
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .map(|specification| specification.contract_multiplier),
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .map(|specification| specification.currency.as_str()),
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .map(|specification| specification.source_reference.as_str()),
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .and_then(|specification| specification.catalog_reviewed_at),
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .and_then(|specification| specification.effective_from),
                 ])?;
             }
         }
-        appender.flush()?;
     }
     transaction.commit()?;
     Ok(1)
@@ -236,7 +337,12 @@ fn load_latest_snapshot(
     initialize_schema(&connection)?;
     let metadata = connection
         .query_row(
-            "SELECT snapshot_id, ticker, observed_at
+            "SELECT snapshot_id, ticker, observed_at, spot, spot_as_of,
+                    collected_at, spot_currency, spot_source,
+                    spot_as_of_raw, spot_as_of_timezone,
+                    provider_timestamp_raw, provider_timestamp_timezone,
+                    invalid_occ_symbol_count, invalid_occ_symbols,
+                    ingestion_warning_count, ingestion_warnings
              FROM option_snapshots
              WHERE ticker = ?
              ORDER BY observed_at DESC
@@ -247,18 +353,52 @@ fn load_latest_snapshot(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, DateTime<Utc>>(2)?,
+                    row.get::<_, Option<f64>>(3)?,
+                    row.get::<_, Option<DateTime<Utc>>>(4)?,
+                    row.get::<_, Option<DateTime<Utc>>>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, Option<String>>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<u64>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<u64>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                 ))
             },
         )
         .optional()?;
-    let Some((snapshot_id, ticker, timestamp_utc)) = metadata else {
+    let Some((
+        snapshot_id,
+        ticker,
+        timestamp_utc,
+        spot,
+        spot_as_of,
+        collected_at,
+        spot_currency,
+        spot_source,
+        spot_as_of_raw,
+        spot_as_of_timezone,
+        provider_timestamp_raw,
+        provider_timestamp_timezone,
+        invalid_occ_symbol_count,
+        invalid_occ_symbols,
+        ingestion_warning_count,
+        ingestion_warnings,
+    )) = metadata
+    else {
         return Ok(None);
     };
 
     let mut statement = connection.prepare(
         "SELECT occ_symbol, root, expiration, option_type, strike, bid, ask,
                 mid, spread, volume, open_interest, implied_volatility, delta,
-                gamma, vega, theta, rho, theo
+                gamma, vega, theta, rho, theo, contract_multiplier,
+                contract_currency, contract_specification_source,
+                contract_specification_reviewed_at,
+                contract_specification_effective_from
          FROM option_contracts
          WHERE snapshot_id = ?
          ORDER BY root, expiration, option_type, strike, occ_symbol",
@@ -282,7 +422,63 @@ fn load_latest_snapshot(
         timestamp_utc,
         contratos,
         chains,
+        underlying_price: spot.and_then(|value| {
+            UnderlyingPriceObservation::new(
+                value,
+                spot_as_of,
+                spot_currency,
+                spot_source.unwrap_or_default(),
+            )
+            .map(|observation| {
+                observation.with_provider_timestamp(
+                    spot_as_of_raw,
+                    spot_as_of_timezone.as_deref().map(parse_timestamp_timezone),
+                )
+            })
+        }),
+        collected_at,
+        provider_timestamp: provider_timestamp_raw.map(|raw| ProviderTimestamp {
+            raw,
+            timezone: parse_timestamp_timezone(
+                provider_timestamp_timezone
+                    .as_deref()
+                    .unwrap_or("unverified"),
+            ),
+        }),
+        ingestion_diagnostics: {
+            let invalid_occ_symbol_samples: Vec<String> = invalid_occ_symbols
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_default();
+            let warnings: Vec<OptionIngestionWarning> = ingestion_warnings
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()?
+                .unwrap_or_default();
+            OptionIngestionDiagnostics {
+                invalid_occ_symbol_count: invalid_occ_symbol_count
+                    .unwrap_or(invalid_occ_symbol_samples.len() as u64),
+                invalid_occ_symbol_samples,
+                warning_count: ingestion_warning_count.unwrap_or(warnings.len() as u64),
+                warnings,
+            }
+        },
     }))
+}
+
+fn timestamp_timezone_value(timezone: &ProviderTimestampTimezone) -> &'static str {
+    match timezone {
+        ProviderTimestampTimezone::VerifiedOffset => "verified_offset",
+        ProviderTimestampTimezone::Unverified => "unverified",
+    }
+}
+
+fn parse_timestamp_timezone(value: &str) -> ProviderTimestampTimezone {
+    match value {
+        "verified_offset" => ProviderTimestampTimezone::VerifiedOffset,
+        _ => ProviderTimestampTimezone::Unverified,
+    }
 }
 
 fn contract_from_row(row: &duckdb::Row<'_>) -> Result<(String, ContratoOpcao), duckdb::Error> {
@@ -317,6 +513,16 @@ fn contract_from_row(row: &duckdb::Row<'_>) -> Result<(String, ContratoOpcao), d
             theta: row.get(15)?,
             rho: row.get(16)?,
             theo: row.get(17)?,
+            contract_specification: row.get::<_, Option<f64>>(18)?.and_then(|multiplier| {
+                OptionContractSpecification::new(
+                    row.get::<_, String>(1).ok()?,
+                    multiplier,
+                    row.get::<_, Option<String>>(19).ok()??,
+                    row.get::<_, Option<String>>(20).ok()??,
+                    row.get::<_, Option<NaiveDate>>(21).ok()?,
+                    row.get::<_, Option<NaiveDate>>(22).ok()?,
+                )
+            }),
         },
     ))
 }

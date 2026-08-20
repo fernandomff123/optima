@@ -32,6 +32,7 @@ pub mod for_obtaining_market_history;
 pub mod for_obtaining_option_chains;
 pub mod for_obtaining_volatility_indices;
 pub mod for_obtaining_yield_curves;
+pub mod for_resolving_option_contract_specifications;
 pub mod for_resolving_underlying_symbols;
 pub mod for_running_data_refresh_tasks;
 pub mod for_storing_data_refresh_runs;
