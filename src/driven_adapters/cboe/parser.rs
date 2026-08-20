@@ -78,10 +78,12 @@ pub fn response_to_snapshot_collected_at(
             let (spot_as_of, spot_timezone) = spot_timestamp_raw
                 .as_deref()
                 .map(parse_cboe_timestamp)
-                .unwrap_or((provider_observed_at, timezone.clone()));
+                .map_or((None, None), |(observed_at, timezone)| {
+                    (observed_at, Some(timezone))
+                });
             UnderlyingPriceObservation::new(value, spot_as_of, None, "cboe_delayed_quotes").map(
                 |observation| {
-                    observation.with_provider_timestamp(spot_timestamp_raw, Some(spot_timezone))
+                    observation.with_provider_timestamp(spot_timestamp_raw, spot_timezone)
                 },
             )
         }),
@@ -173,6 +175,14 @@ mod tests {
         let spot = snapshot.underlying_price.unwrap();
         assert_eq!(spot.value, 6_420.5);
         assert_eq!(spot.observed_at, Some(snapshot.timestamp_utc));
+        assert_eq!(
+            spot.observed_at_raw.as_deref(),
+            Some("2026-08-20T11:00:00-04:00")
+        );
+        assert_eq!(
+            spot.observed_at_timezone,
+            Some(ProviderTimestampTimezone::VerifiedOffset)
+        );
         assert_eq!(snapshot.collected_at, Some(collected_at));
         assert_ne!(spot.observed_at, snapshot.collected_at);
     }
@@ -195,7 +205,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.timestamp_utc, collected_at);
-        assert_eq!(snapshot.underlying_price.unwrap().observed_at, None);
+        let spot = snapshot.underlying_price.unwrap();
+        assert_eq!(spot.observed_at, None);
+        assert_eq!(spot.observed_at_raw.as_deref(), Some("2026-08-20T11:00:00"));
+        assert_eq!(
+            spot.observed_at_timezone,
+            Some(ProviderTimestampTimezone::Unverified)
+        );
         assert_eq!(
             snapshot.ingestion_diagnostics.invalid_occ_symbol_samples,
             ["invalid"]
@@ -207,6 +223,38 @@ mod tests {
                 .warnings
                 .contains(&OptionIngestionWarning::ProviderTimestampTimezoneUnverified)
         );
+    }
+
+    #[test]
+    fn provider_timestamp_does_not_become_spot_time_without_last_trade_time() {
+        let collected_at = Utc.with_ymd_and_hms(2026, 8, 20, 15, 1, 0).unwrap();
+        let snapshot = response_to_snapshot_collected_at(
+            "SPX",
+            CboeResponse {
+                timestamp: "2026-08-20T11:00:00-04:00".to_string(),
+                data: CboeData {
+                    options: vec![row("SPXW  260821C05000000")],
+                    current_price: Some(6_420.5),
+                    last_trade_time: None,
+                },
+            },
+            collected_at,
+        )
+        .unwrap();
+
+        let spot = snapshot.underlying_price.unwrap();
+        assert_eq!(spot.observed_at, None);
+        assert_eq!(spot.observed_at_raw, None);
+        assert_eq!(spot.observed_at_timezone, None);
+        assert_eq!(
+            snapshot.timestamp_utc,
+            Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 0).unwrap()
+        );
+        assert_eq!(
+            snapshot.provider_timestamp.unwrap().raw,
+            "2026-08-20T11:00:00-04:00"
+        );
+        assert_eq!(snapshot.collected_at, Some(collected_at));
     }
 
     #[test]

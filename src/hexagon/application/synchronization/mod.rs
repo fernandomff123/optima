@@ -339,7 +339,6 @@ where
         let ticker = normalized_ticker(ticker)?;
         let mut snapshot = self.sources.options.obtain_option_chain(&ticker).await?;
         let mut unresolved_roots = BTreeSet::new();
-        let mut evidenced_currency = None::<String>;
         for chain in &mut snapshot.chains {
             for contract in &mut chain.contratos {
                 let specification = self
@@ -350,20 +349,21 @@ where
                         occ_symbol: &contract.occ_symbol,
                     })
                     .await?;
-                if let Some(specification) = &specification {
-                    match &evidenced_currency {
-                        None => evidenced_currency = Some(specification.currency.clone()),
-                        Some(currency) if currency != &specification.currency => {
-                            evidenced_currency = None;
-                        }
-                        Some(_) => {}
-                    }
-                } else {
+                if specification.is_none() {
                     unresolved_roots.insert(chain.root.clone());
                 }
                 contract.contract_specification = specification;
             }
         }
+        let evidenced_currency =
+            single_evidenced_currency(snapshot.chains.iter().flat_map(|chain| {
+                chain.contratos.iter().map(|contract| {
+                    contract
+                        .contract_specification
+                        .as_ref()
+                        .map(|specification| specification.currency.as_str())
+                })
+            }));
         snapshot.contratos = snapshot
             .chains
             .iter()
@@ -446,6 +446,20 @@ where
     }
 }
 
+fn single_evidenced_currency<'a>(
+    specifications: impl IntoIterator<Item = Option<&'a str>>,
+) -> Option<String> {
+    let mut currencies = BTreeSet::new();
+    for currency in specifications {
+        currencies.insert(currency?);
+    }
+    if currencies.len() == 1 {
+        currencies.into_iter().next().map(str::to_owned)
+    } else {
+        None
+    }
+}
+
 fn normalized_ticker(ticker: &str) -> PortResult<String> {
     let ticker = ticker.trim();
     if ticker.is_empty() {
@@ -454,4 +468,29 @@ fn normalized_ticker(ticker: &str) -> PortResult<String> {
         ));
     }
     Ok(ticker.to_ascii_uppercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::single_evidenced_currency;
+
+    #[test]
+    fn underlying_currency_requires_one_currency_on_every_contract() {
+        assert_eq!(
+            single_evidenced_currency([Some("USD"), Some("USD"), Some("USD")]),
+            Some("USD".to_string())
+        );
+        assert_eq!(
+            single_evidenced_currency([Some("USD"), Some("EUR"), Some("USD")]),
+            None
+        );
+        assert_eq!(
+            single_evidenced_currency([Some("EUR"), Some("USD"), Some("USD")]),
+            None
+        );
+        assert_eq!(
+            single_evidenced_currency([Some("USD"), None, Some("USD")]),
+            None
+        );
+    }
 }
