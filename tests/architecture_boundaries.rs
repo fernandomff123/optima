@@ -159,14 +159,24 @@ fn tracked_ticker_policy_stays_inside_the_hexagon() {
 
     assert!(!adapter.contains("SPX"));
     assert!(!adapter.contains("system_tickers"));
-    assert!(application.contains("is_system_ticker"));
+    assert!(application.contains("canonical_system_ticker"));
     assert!(domain.contains("super::sector_performance::{SECTOR_BENCHMARK_TICKER, SECTORS}"));
+    assert!(domain.contains("\"^GSPC\" => Some(\"SPX\")"));
+    assert!(domain.contains("\"^VIX\" => Some(\"VIX\")"));
     assert!(!domain.contains("\"XLK\""));
 
     let configurator = fs::read_to_string(root.join("src/configurator/mod.rs"))
         .expect("configurator source must be readable");
     assert!(configurator.contains(".bootstrap_system_tickers()"));
     assert!(!configurator.contains("domain::tracked_ticker::system_tickers"));
+
+    let http = fs::read_to_string(root.join("src/driving_adapters/http/mod.rs"))
+        .expect("HTTP adapter source must be readable");
+    for policy_symbol in ["^GSPC", "^VIX"] {
+        assert!(!http.contains(policy_symbol));
+        assert!(!configurator.contains(policy_symbol));
+        assert!(!adapter.contains(policy_symbol));
+    }
 }
 
 #[test]
