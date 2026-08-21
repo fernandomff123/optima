@@ -107,9 +107,9 @@ fn contract(symbol: &str, option_type: OptionType, strike: f64) -> ContratoOpcao
         mid: 1.1,
         spread: 0.2,
         volume: 10.0,
-        open_interest: 100.0,
+        open_interest: Some(100.0),
         delta: 0.4,
-        gamma: 0.02,
+        gamma: Some(0.02),
         vega: 0.1,
         theta: -0.03,
         rho: 0.01,
@@ -122,10 +122,18 @@ fn contract(symbol: &str, option_type: OptionType, strike: f64) -> ContratoOpcao
 fn app_with_stored_term(
     stored: bool,
 ) -> OptionsApplication<OptionDataMock, OptionDataMock, OptionDataMock, TradingCalendarStub> {
-    let contracts = vec![
-        contract("TEST-PUT", OptionType::Put, 95.0),
-        contract("TEST-CALL", OptionType::Call, 105.0),
-    ];
+    app_with_stored_term_and_gamma(stored, Some(0.02))
+}
+
+fn app_with_stored_term_and_gamma(
+    stored: bool,
+    gamma: Option<f64>,
+) -> OptionsApplication<OptionDataMock, OptionDataMock, OptionDataMock, TradingCalendarStub> {
+    let contracts = vec![contract("TEST-PUT", OptionType::Put, 95.0), {
+        let mut contract = contract("TEST-CALL", OptionType::Call, 105.0);
+        contract.gamma = gamma;
+        contract
+    }];
     let snapshot_time = Utc.with_ymd_and_hms(2026, 8, 3, 21, 0, 0).unwrap();
     let data = OptionDataMock {
         snapshot: Snapshot {
@@ -200,4 +208,23 @@ async fn one_driving_port_exposes_the_complete_options_conversation() {
         .delta,
         0.4
     );
+}
+
+#[tokio::test]
+async fn greeks_reports_missing_gamma_explicitly() {
+    let app = app_with_stored_term_and_gamma(true, None);
+
+    let error = app
+        .greeks(GreeksRequest {
+            ticker: "TEST".into(),
+            occ_symbol: "TEST-CALL".into(),
+        })
+        .await
+        .expect_err("missing gamma cannot produce complete Greeks");
+
+    assert!(matches!(
+        error,
+        hexagonal_backend::hexagon::PortError::Unavailable(_)
+    ));
+    assert!(error.to_string().contains("gamma"));
 }

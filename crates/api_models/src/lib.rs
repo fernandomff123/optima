@@ -81,9 +81,9 @@ pub struct OptionContract {
     pub mid: f64,
     pub spread: f64,
     pub volume: f64,
-    pub open_interest: f64,
+    pub open_interest: Option<f64>,
     pub delta: f64,
-    pub gamma: f64,
+    pub gamma: Option<f64>,
     pub vega: f64,
     pub theta: f64,
     pub rho: f64,
@@ -699,12 +699,12 @@ pub struct SimulationContractOverview {
     pub mid: f64,
     pub implied_volatility: Option<f64>,
     pub delta: f64,
-    pub gamma: f64,
+    pub gamma: Option<f64>,
     pub theta: f64,
     pub vega: f64,
     pub rho: f64,
     pub volume: f64,
-    pub open_interest: f64,
+    pub open_interest: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

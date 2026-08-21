@@ -184,6 +184,20 @@ fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
 }
 
 #[test]
+fn nullable_option_market_facts_do_not_introduce_gex_policy_in_adapters() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for relative in [
+        "src/driven_adapters/cboe/parser.rs",
+        "src/driven_adapters/duckdb/option_chains.rs",
+        "src/driven_adapters/sqlite/option_snapshots.rs",
+    ] {
+        let source = fs::read_to_string(root.join(relative)).expect("adapter must be readable");
+        assert!(!source.to_ascii_lowercase().contains("gex"));
+        assert!(!source.to_ascii_lowercase().contains("gamma exposure"));
+    }
+}
+
+#[test]
 fn tracked_ticker_policy_stays_inside_the_hexagon() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let adapter = fs::read_to_string(root.join("src/driven_adapters/duckdb/tracked_tickers.rs"))

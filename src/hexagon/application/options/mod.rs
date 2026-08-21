@@ -148,7 +148,12 @@ where
             })?;
         Ok(Greeks {
             delta: contract.delta,
-            gamma: contract.gamma,
+            gamma: contract.gamma.ok_or_else(|| {
+                PortError::Unavailable(format!(
+                    "gamma for option contract '{}' is unavailable",
+                    request.occ_symbol
+                ))
+            })?,
             vega: contract.vega,
             theta: contract.theta,
             rho: contract.rho,

@@ -82,9 +82,9 @@ fn contract(
         mid: 10.2,
         spread: 0.4,
         volume: 123.0,
-        open_interest: 4_567.0,
+        open_interest: Some(4_567.0),
         delta: 0.5,
-        gamma: 0.02,
+        gamma: Some(0.02),
         vega: 0.15,
         theta: -0.05,
         rho: 0.03,
@@ -140,6 +140,39 @@ async fn assert_option_chain_contract(
     );
 }
 
+async fn assert_nullable_market_facts_round_trip(
+    adapter: &(impl ForLoadingOptionChains + ForStoringOptionChains),
+) {
+    let mut snapshot = sample_snapshot();
+    snapshot.chains[0].contratos[0].gamma = None;
+    snapshot.chains[0].contratos[0].open_interest = None;
+    snapshot.chains[0].contratos[1].gamma = Some(0.0);
+    snapshot.chains[0].contratos[1].open_interest = Some(0.0);
+    snapshot.contratos = snapshot.chains[0].contratos.clone();
+    let market_close = Utc
+        .with_ymd_and_hms(2026, 8, 7, 20, 0, 0)
+        .single()
+        .expect("valid market close");
+
+    assert_eq!(
+        adapter
+            .store_option_chain(&snapshot, market_close)
+            .await
+            .expect("nullable market facts must store"),
+        1
+    );
+    let loaded = adapter
+        .load_option_chain("SPY")
+        .await
+        .expect("nullable market facts must load")
+        .expect("snapshot must exist");
+    assert_eq!(loaded, snapshot);
+    assert_eq!(loaded.contratos[0].gamma, None);
+    assert_eq!(loaded.contratos[0].open_interest, None);
+    assert_eq!(loaded.contratos[1].gamma, Some(0.0));
+    assert_eq!(loaded.contratos[1].open_interest, Some(0.0));
+}
+
 #[tokio::test]
 async fn sqlite_satisfies_option_chain_storage_contract() {
     let pool = SqlitePoolOptions::new()
@@ -153,6 +186,21 @@ async fn sqlite_satisfies_option_chain_storage_contract() {
     let adapter = SqliteOptionDataAdapter::new(pool);
 
     assert_option_chain_contract(&adapter).await;
+}
+
+#[tokio::test]
+async fn sqlite_preserves_null_zero_and_present_gamma_and_open_interest() {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("in-memory SQLite must open");
+    option_snapshots::initialize(&pool)
+        .await
+        .expect("SQLite option schema must initialize");
+    let adapter = SqliteOptionDataAdapter::new(pool);
+
+    assert_nullable_market_facts_round_trip(&adapter).await;
 }
 
 #[tokio::test]
@@ -178,6 +226,27 @@ async fn duckdb_satisfies_option_chain_storage_contract_with_columnar_rows() {
         (1, 2)
     );
 
+    std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
+}
+
+#[tokio::test]
+async fn duckdb_preserves_null_zero_and_present_gamma_and_open_interest() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-nullable-facts-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    adapter
+        .initialize()
+        .await
+        .expect("DuckDB option schema must initialize");
+    adapter
+        .initialize()
+        .await
+        .expect("DuckDB option schema migration must remain idempotent");
+
+    assert_nullable_market_facts_round_trip(&adapter).await;
     std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
 }
 

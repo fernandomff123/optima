@@ -359,6 +359,65 @@ mod tests {
     use super::*;
     use crate::hexagon::domain::options::{ContratoOpcao, OptionType};
 
+    #[derive(Serialize)]
+    struct LegacySnapshotPayload<Contract> {
+        chains: Vec<LegacyOptionChain<Contract>>,
+        underlying_price: Option<UnderlyingPriceObservation>,
+        collected_at: Option<DateTime<Utc>>,
+        provider_timestamp: Option<ProviderTimestamp>,
+        ingestion_diagnostics: OptionIngestionDiagnostics,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyOptionChain<Contract> {
+        root: String,
+        contratos: Vec<Contract>,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyContract {
+        occ_symbol: String,
+        option_type: OptionType,
+        strike: f64,
+        expiration: NaiveDate,
+        bid: f64,
+        ask: f64,
+        mid: f64,
+        spread: f64,
+        volume: f64,
+        open_interest: f64,
+        delta: f64,
+        gamma: f64,
+        vega: f64,
+        theta: f64,
+        rho: f64,
+        theo: f64,
+        implied_volatility: Option<f64>,
+        contract_specification:
+            Option<crate::hexagon::domain::options::OptionContractSpecification>,
+    }
+
+    #[derive(Serialize)]
+    struct ContractWithoutNullableMarketFacts {
+        occ_symbol: String,
+        option_type: OptionType,
+        strike: f64,
+        expiration: NaiveDate,
+        bid: f64,
+        ask: f64,
+        mid: f64,
+        spread: f64,
+        volume: f64,
+        delta: f64,
+        vega: f64,
+        theta: f64,
+        rho: f64,
+        theo: f64,
+        implied_volatility: Option<f64>,
+        contract_specification:
+            Option<crate::hexagon::domain::options::OptionContractSpecification>,
+    }
+
     async fn memory_pool() -> SqlitePool {
         SqlitePoolOptions::new()
             .max_connections(1)
@@ -378,9 +437,9 @@ mod tests {
             mid: 10.1,
             spread: 0.2,
             volume: 100.0,
-            open_interest: 1_000.0,
+            open_interest: Some(1_000.0),
             delta: 0.5,
-            gamma: 0.02,
+            gamma: Some(0.02),
             vega: 0.15,
             theta: -0.05,
             rho: 0.03,
@@ -444,6 +503,112 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(load_latest(&pool, "SPY").await.unwrap(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn loads_legacy_numeric_gamma_and_open_interest_as_present_values() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let timestamp = Utc.with_ymd_and_hms(2026, 7, 13, 15, 0, 0).unwrap();
+        let payload = rmp_serde::to_vec(&LegacySnapshotPayload {
+            chains: vec![LegacyOptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![LegacyContract {
+                    occ_symbol: "SPY   260717C00500000".to_string(),
+                    option_type: OptionType::Call,
+                    strike: 500.0,
+                    expiration: NaiveDate::from_ymd_opt(2026, 7, 17).unwrap(),
+                    bid: 10.0,
+                    ask: 10.2,
+                    mid: 10.1,
+                    spread: 0.2,
+                    volume: 100.0,
+                    open_interest: 1_000.0,
+                    delta: 0.5,
+                    gamma: 0.02,
+                    vega: 0.15,
+                    theta: -0.05,
+                    rho: 0.03,
+                    theo: 10.1,
+                    implied_volatility: Some(0.2),
+                    contract_specification: None,
+                }],
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: OptionIngestionDiagnostics::default(),
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO option_snapshots
+             (ticker, timestamp, market_close, format_version, payload, hash)
+             VALUES (?, ?, NULL, ?, ?, ?)",
+        )
+        .bind("SPY")
+        .bind(timestamp)
+        .bind(CURRENT_FORMAT_VERSION)
+        .bind(&payload)
+        .bind(payload_hash(&payload))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+        assert_eq!(loaded.contratos[0].gamma, Some(0.02));
+        assert_eq!(loaded.contratos[0].open_interest, Some(1_000.0));
+    }
+
+    #[tokio::test]
+    async fn loads_named_messagepack_with_missing_gamma_and_open_interest() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let timestamp = Utc.with_ymd_and_hms(2026, 7, 13, 15, 0, 0).unwrap();
+        let payload = rmp_serde::to_vec_named(&LegacySnapshotPayload {
+            chains: vec![LegacyOptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![ContractWithoutNullableMarketFacts {
+                    occ_symbol: "SPY   260717C00500000".to_string(),
+                    option_type: OptionType::Call,
+                    strike: 500.0,
+                    expiration: NaiveDate::from_ymd_opt(2026, 7, 17).unwrap(),
+                    bid: 10.0,
+                    ask: 10.2,
+                    mid: 10.1,
+                    spread: 0.2,
+                    volume: 100.0,
+                    delta: 0.5,
+                    vega: 0.15,
+                    theta: -0.05,
+                    rho: 0.03,
+                    theo: 10.1,
+                    implied_volatility: Some(0.2),
+                    contract_specification: None,
+                }],
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: OptionIngestionDiagnostics::default(),
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO option_snapshots
+             (ticker, timestamp, market_close, format_version, payload, hash)
+             VALUES (?, ?, NULL, ?, ?, ?)",
+        )
+        .bind("SPY")
+        .bind(timestamp)
+        .bind(CURRENT_FORMAT_VERSION)
+        .bind(&payload)
+        .bind(payload_hash(&payload))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+        assert_eq!(loaded.contratos[0].gamma, None);
+        assert_eq!(loaded.contratos[0].open_interest, None);
     }
 
     #[tokio::test]

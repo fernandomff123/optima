@@ -17,7 +17,7 @@ use hexagonal_backend::{
             index_history::IndexHistory,
             live_price::LivePrice,
             market_history::MarketHistory,
-            options::Snapshot,
+            options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
             portfolio::{
                 CashMovement, Currency, CurrencyExchange, Portfolio, PortfolioEvent, Position,
                 Trade,
@@ -96,6 +96,7 @@ impl ForViewingMarketData for MarketDataMock {
 }
 
 struct OptionsMock;
+struct NullableOptionsMock;
 struct SimulationMock;
 struct SynchronizationMock;
 struct SavedStrategiesMock;
@@ -378,6 +379,123 @@ impl ForAnalyzingOptions for OptionsMock {
 
     async fn greeks(&self, _request: GreeksRequest) -> PortResult<Greeks> {
         Err(PortError::Unavailable("unused".to_string()))
+    }
+}
+
+#[async_trait]
+impl ForAnalyzingOptions for NullableOptionsMock {
+    async fn option_chain(&self, _ticker: &str) -> PortResult<Snapshot> {
+        let expiration = NaiveDate::from_ymd_opt(2026, 9, 18).expect("valid expiration");
+        let base = ContratoOpcao {
+            occ_symbol: "MISSING-GAMMA".into(),
+            option_type: OptionType::Call,
+            strike: 100.0,
+            expiration,
+            bid: 1.0,
+            ask: 1.2,
+            mid: 1.1,
+            spread: 0.2,
+            volume: 1.0,
+            open_interest: Some(1.0),
+            delta: 0.5,
+            gamma: None,
+            vega: 0.1,
+            theta: -0.01,
+            rho: 0.01,
+            theo: 1.1,
+            implied_volatility: Some(0.2),
+            contract_specification: None,
+        };
+        let mut missing_open_interest = base.clone();
+        missing_open_interest.occ_symbol = "MISSING-OI".into();
+        missing_open_interest.gamma = Some(0.01);
+        missing_open_interest.open_interest = None;
+        let mut both_missing = base.clone();
+        both_missing.occ_symbol = "BOTH-MISSING".into();
+        both_missing.open_interest = None;
+        let mut zero = base.clone();
+        zero.occ_symbol = "ZERO".into();
+        zero.gamma = Some(0.0);
+        zero.open_interest = Some(0.0);
+        let contracts = vec![base, missing_open_interest, both_missing, zero];
+        Ok(Snapshot {
+            ticker: "SPY".into(),
+            timestamp_utc: Utc::now(),
+            contratos: contracts.clone(),
+            chains: vec![OptionChain {
+                root: "SPY".into(),
+                contratos: contracts,
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
+        })
+    }
+
+    async fn term_structure(&self, _ticker: &str) -> PortResult<TermStructure> {
+        Err(PortError::Unavailable("unused".into()))
+    }
+
+    async fn volatility_surface(&self, _ticker: &str) -> PortResult<VolatilitySurface> {
+        Err(PortError::Unavailable("unused".into()))
+    }
+
+    async fn volatility_skew(
+        &self,
+        _ticker: &str,
+        _expiration: NaiveDate,
+    ) -> PortResult<VolatilitySkew> {
+        Err(PortError::Unavailable("unused".into()))
+    }
+
+    async fn greeks(&self, _request: GreeksRequest) -> PortResult<Greeks> {
+        Err(PortError::Unavailable("unused".into()))
+    }
+}
+
+#[tokio::test]
+async fn canonical_and_alias_option_chain_preserve_nullable_contracts_and_order() {
+    for path in ["/api/options/SPY/chain", "/options/SPY/chain"] {
+        let app = http::router(
+            market_ports(Arc::new(MarketDataMock::default())),
+            Arc::new(NullableOptionsMock),
+            Arc::new(SimulationMock),
+            Arc::new(PortfoliosMock::default()),
+            Arc::new(SynchronizationMock),
+            Arc::new(SavedStrategiesMock),
+            http::TrackedTickerPorts::new(
+                Arc::new(TrackedTickersMock),
+                Arc::new(TrackedTickersMock),
+            ),
+        );
+        let response = app
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["contratos"].as_array().unwrap().len(), 4);
+        assert_eq!(json["chains"][0]["contratos"].as_array().unwrap().len(), 4);
+        assert_eq!(json["contratos"][0]["occ_symbol"], "MISSING-GAMMA");
+        assert_eq!(json["contratos"][0]["gamma"], serde_json::Value::Null);
+        assert_eq!(json["contratos"][1]["occ_symbol"], "MISSING-OI");
+        assert_eq!(
+            json["contratos"][1]["open_interest"],
+            serde_json::Value::Null
+        );
+        assert_eq!(json["contratos"][2]["occ_symbol"], "BOTH-MISSING");
+        assert_eq!(json["contratos"][2]["gamma"], serde_json::Value::Null);
+        assert_eq!(
+            json["contratos"][2]["open_interest"],
+            serde_json::Value::Null
+        );
+        assert_eq!(json["contratos"][3]["occ_symbol"], "ZERO");
+        assert_eq!(json["contratos"][3]["gamma"], 0.0);
+        assert_eq!(json["contratos"][3]["open_interest"], 0.0);
     }
 }
 

@@ -2,6 +2,64 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+fn deserialize_optional_f64<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct OptionalF64Visitor;
+
+    impl<'de> serde::de::Visitor<'de> for OptionalF64Visitor {
+        type Value = Option<f64>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a floating-point number or null")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(Self)
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E> {
+            Ok(Some(value))
+        }
+
+        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
+            let converted = value as f64;
+            if converted as i128 == i128::from(value) {
+                Ok(Some(converted))
+            } else {
+                Err(serde::de::Error::custom(
+                    "integer cannot be represented exactly as f64",
+                ))
+            }
+        }
+
+        fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
+            let converted = value as f64;
+            if converted as i128 == i128::from(value) {
+                Ok(Some(converted))
+            } else {
+                Err(serde::de::Error::custom(
+                    "integer cannot be represented exactly as f64",
+                ))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(OptionalF64Visitor)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UnderlyingPriceObservation {
     pub value: f64,
@@ -215,9 +273,11 @@ pub struct ContratoOpcao {
     pub mid: f64,
     pub spread: f64,
     pub volume: f64,
-    pub open_interest: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    pub open_interest: Option<f64>,
     pub delta: f64,
-    pub gamma: f64,
+    #[serde(default, deserialize_with = "deserialize_optional_f64")]
+    pub gamma: Option<f64>,
     pub vega: f64,
     pub theta: f64,
     pub rho: f64,
@@ -253,6 +313,12 @@ pub struct Snapshot {
 mod tests {
     use super::*;
 
+    #[derive(Deserialize)]
+    struct OptionalNumberFixture {
+        #[serde(default, deserialize_with = "deserialize_optional_f64")]
+        value: Option<f64>,
+    }
+
     #[test]
     fn rejects_invalid_positive_numeric_inputs() {
         for value in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
@@ -269,6 +335,29 @@ mod tests {
                 .is_none()
             );
         }
+    }
+
+    #[test]
+    fn optional_f64_rejects_inexact_integers_and_incompatible_types() {
+        let exact: OptionalNumberFixture =
+            serde_json::from_str(r#"{"value":9007199254740992}"#).unwrap();
+        assert_eq!(exact.value, Some(9_007_199_254_740_992.0));
+        assert!(
+            serde_json::from_str::<OptionalNumberFixture>(r#"{"value":9007199254740993}"#).is_err()
+        );
+        assert!(serde_json::from_str::<OptionalNumberFixture>(r#"{"value":"1.0"}"#).is_err());
+        assert_eq!(
+            serde_json::from_str::<OptionalNumberFixture>(r#"{"value":null}"#)
+                .unwrap()
+                .value,
+            None
+        );
+        assert_eq!(
+            serde_json::from_str::<OptionalNumberFixture>("{}")
+                .unwrap()
+                .value,
+            None
+        );
     }
 
     #[test]
