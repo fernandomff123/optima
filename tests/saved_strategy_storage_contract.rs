@@ -1,8 +1,5 @@
 use hexagonal_backend::{
-    driven_adapters::{
-        duckdb::saved_strategies::DuckDbSavedStrategiesAdapter,
-        sqlite::saved_strategies::SqliteSavedStrategiesAdapter,
-    },
+    driven_adapters::duckdb::saved_strategies::DuckDbSavedStrategiesAdapter,
     hexagon::{
         domain::saved_strategy::{SavedStrategyLeg, StrategySide},
         driven_ports::{
@@ -11,7 +8,6 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -52,16 +48,6 @@ async fn assert_contract(adapter: &(impl ForLoadingStrategies + ForStoringStrate
             .expect("must load")
             .is_empty()
     );
-}
-
-#[tokio::test]
-async fn sqlite_satisfies_saved_strategy_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("SQLite must open");
-    assert_contract(&SqliteSavedStrategiesAdapter::new(pool)).await;
 }
 
 #[tokio::test]

@@ -8,9 +8,7 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::portfolio::{Currency, Portfolio, PortfolioEvent},
     driven_ports::{
-        for_counting_portfolios::{ForCountingPortfolios, PortfolioCounts},
-        for_loading_portfolios::ForLoadingPortfolios,
-        for_storing_portfolios::ForStoringPortfolios,
+        for_loading_portfolios::ForLoadingPortfolios, for_storing_portfolios::ForStoringPortfolios,
     },
 };
 
@@ -50,28 +48,6 @@ impl ForStoringPortfolios for DuckDbPortfolioAdapter {
         let path = self.database_path.clone();
         let portfolio = portfolio.clone();
         run_blocking(move || save(&path, &portfolio)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingPortfolios for DuckDbPortfolioAdapter {
-    async fn count_portfolios(&self) -> PortResult<PortfolioCounts> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row(
-                "SELECT (SELECT COUNT(*) FROM portfolios), (SELECT COUNT(*) FROM portfolio_events)",
-                [],
-                |row| {
-                    Ok(PortfolioCounts {
-                        portfolios: row.get(0)?,
-                        events: row.get(1)?,
-                    })
-                },
-            )
-        })
-        .await
     }
 }
 

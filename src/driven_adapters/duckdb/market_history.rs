@@ -8,7 +8,6 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::market_history::{DailyQuote, Dividend, MarketHistory, StockSplit},
     driven_ports::{
-        for_counting_market_history::{ForCountingMarketHistory, MarketHistoryCounts},
         for_loading_market_history::ForLoadingMarketHistory,
         for_storing_market_history::ForStoringMarketHistory,
     },
@@ -51,32 +50,6 @@ impl ForStoringMarketHistory for DuckDbMarketHistoryAdapter {
         let path = self.database_path.clone();
         let history = history.clone();
         run_blocking(move || store_history(&path, &history)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingMarketHistory for DuckDbMarketHistoryAdapter {
-    async fn count_market_history(&self) -> PortResult<MarketHistoryCounts> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row(
-                "SELECT
-                    (SELECT COUNT(*) FROM market_prices),
-                    (SELECT COUNT(*) FROM dividends),
-                    (SELECT COUNT(*) FROM stock_splits)",
-                [],
-                |row| {
-                    Ok(MarketHistoryCounts {
-                        prices: row.get(0)?,
-                        dividends: row.get(1)?,
-                        splits: row.get(2)?,
-                    })
-                },
-            )
-        })
-        .await
     }
 }
 

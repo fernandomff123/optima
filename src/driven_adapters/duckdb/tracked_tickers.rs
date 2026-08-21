@@ -10,7 +10,6 @@ use crate::hexagon::{
         TrackedTicker, TrackedTickerSource, UnderlyingMetadata, UnderlyingResolutionState,
     },
     driven_ports::{
-        for_counting_tracked_tickers::ForCountingTrackedTickers,
         for_loading_tracked_tickers::ForLoadingTrackedTickers,
         for_storing_tracked_tickers::ForStoringTrackedTickers,
     },
@@ -62,19 +61,6 @@ impl ForStoringTrackedTickers for DuckDbTrackedTickersAdapter {
         let path = self.database_path.clone();
         let ticker = ticker.clone();
         run_blocking(move || store(&path, &ticker)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingTrackedTickers for DuckDbTrackedTickersAdapter {
-    async fn count_tracked_tickers(&self) -> PortResult<u64> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row("SELECT COUNT(*) FROM tracked_tickers", [], |row| row.get(0))
-        })
-        .await
     }
 }
 

@@ -8,10 +8,7 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::saved_strategy::{SavedStrategy, SavedStrategyLeg, StrategySide},
     driven_ports::{
-        for_counting_strategies::{ForCountingStrategies, StrategyCounts},
-        for_importing_strategy_archive::ForImportingStrategyArchive,
-        for_loading_strategies::ForLoadingStrategies,
-        for_storing_strategies::ForStoringStrategies,
+        for_loading_strategies::ForLoadingStrategies, for_storing_strategies::ForStoringStrategies,
     },
 };
 
@@ -63,38 +60,6 @@ impl ForStoringStrategies for DuckDbSavedStrategiesAdapter {
     async fn delete_strategy(&self, id: i64) -> PortResult<bool> {
         let path = self.database_path.clone();
         run_blocking(move || delete(&path, id)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForImportingStrategyArchive for DuckDbSavedStrategiesAdapter {
-    async fn import_strategy(&self, strategy: &SavedStrategy) -> PortResult<()> {
-        let path = self.database_path.clone();
-        let strategy = strategy.clone();
-        run_blocking(move || import(&path, &strategy)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingStrategies for DuckDbSavedStrategiesAdapter {
-    async fn count_strategies(&self) -> PortResult<StrategyCounts> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row(
-                "SELECT (SELECT COUNT(*) FROM saved_strategies),
-                        (SELECT COUNT(*) FROM saved_strategy_legs)",
-                [],
-                |row| {
-                    Ok(StrategyCounts {
-                        strategies: row.get(0)?,
-                        legs: row.get(1)?,
-                    })
-                },
-            )
-        })
-        .await
     }
 }
 
@@ -160,29 +125,6 @@ fn store(
     replace_legs(&transaction, id, legs)?;
     transaction.commit()?;
     load_by_id(path, id)?.ok_or_else(|| "stored strategy could not be loaded".into())
-}
-
-fn import(
-    path: &PathBuf,
-    strategy: &SavedStrategy,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut connection = Connection::open(path)?;
-    initialize_schema(&connection)?;
-    let transaction = connection.transaction()?;
-    transaction.execute(
-        "INSERT INTO saved_strategies (strategy_id, name, ticker, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (strategy_id) DO UPDATE SET name = excluded.name,
-             ticker = excluded.ticker, updated_at = excluded.updated_at",
-        params![
-            strategy.id,
-            &strategy.name,
-            &strategy.ticker,
-            strategy.updated_at
-        ],
-    )?;
-    replace_legs(&transaction, strategy.id, &strategy.legs)?;
-    transaction.commit()?;
-    Ok(())
 }
 
 fn replace_legs(

@@ -16,14 +16,6 @@ use hexagonal_backend::{
             yield_curves::DuckDbYieldCurvesAdapter,
         },
         exchange_calendar::ExchangeTradingCalendarAdapter,
-        sqlite::portfolio::SqlitePortfolioAdapter,
-        sqlite::saved_strategies::SqliteSavedStrategiesAdapter,
-        sqlite::tracked_tickers::SqliteTrackedTickersAdapter,
-        sqlite::{
-            index_history_port::SqliteIndexHistoryAdapter,
-            market_history::SqliteMarketHistoryAdapter, option_data::SqliteOptionDataAdapter,
-            yield_curves_port::SqliteYieldCurvesAdapter,
-        },
         treasury::TreasuryYieldCurvesAdapter,
         yahoo::{
             YahooLivePricesAdapter, YahooMarketHistoryAdapter, YahooUnderlyingResolverAdapter,
@@ -90,38 +82,21 @@ fn external_adapters_implement_provider_neutral_ports() {
     implements_volatility_indices_port::<CboeVolatilityIndicesAdapter>();
     implements_yield_curves_port::<TreasuryYieldCurvesAdapter>();
     implements_trading_calendar_port::<ExchangeTradingCalendarAdapter>();
-    implements_market_history_store_port::<SqliteMarketHistoryAdapter>();
-    implements_market_history_loader_port::<SqliteMarketHistoryAdapter>();
     implements_market_history_store_port::<DuckDbMarketHistoryAdapter>();
     implements_market_history_loader_port::<DuckDbMarketHistoryAdapter>();
-    implements_option_data_store_port::<SqliteOptionDataAdapter>();
-    implements_term_structure_loader_port::<SqliteOptionDataAdapter>();
-    implements_reference_price_loader_port::<SqliteOptionDataAdapter>();
     implements_option_data_store_port::<DuckDbVolatilityTermStructuresAdapter>();
     implements_term_structure_loader_port::<DuckDbVolatilityTermStructuresAdapter>();
     implements_reference_price_loader_port::<DuckDbVolatilityTermStructuresAdapter>();
-    implements_option_chain_loader_port::<SqliteOptionDataAdapter>();
-    implements_option_chain_store_port::<SqliteOptionDataAdapter>();
     implements_option_chain_loader_port::<DuckDbOptionChainsAdapter>();
     implements_option_chain_store_port::<DuckDbOptionChainsAdapter>();
-    implements_index_history_store_port::<SqliteIndexHistoryAdapter>();
-    implements_index_history_loader_port::<SqliteIndexHistoryAdapter>();
     implements_index_history_store_port::<DuckDbIndexHistoryAdapter>();
     implements_index_history_loader_port::<DuckDbIndexHistoryAdapter>();
-    implements_yield_curves_store_port::<SqliteYieldCurvesAdapter>();
-    implements_yield_curves_loader_port::<SqliteYieldCurvesAdapter>();
     implements_yield_curves_store_port::<DuckDbYieldCurvesAdapter>();
     implements_yield_curves_loader_port::<DuckDbYieldCurvesAdapter>();
-    implements_strategy_loader_port::<SqliteSavedStrategiesAdapter>();
-    implements_strategy_store_port::<SqliteSavedStrategiesAdapter>();
     implements_strategy_loader_port::<DuckDbSavedStrategiesAdapter>();
     implements_strategy_store_port::<DuckDbSavedStrategiesAdapter>();
     implements_portfolio_loader_port::<DuckDbPortfolioAdapter>();
     implements_portfolio_store_port::<DuckDbPortfolioAdapter>();
-    implements_portfolio_loader_port::<SqlitePortfolioAdapter>();
-    implements_portfolio_store_port::<SqlitePortfolioAdapter>();
-    implements_tracked_ticker_loader_port::<SqliteTrackedTickersAdapter>();
-    implements_tracked_ticker_store_port::<SqliteTrackedTickersAdapter>();
     implements_tracked_ticker_loader_port::<DuckDbTrackedTickersAdapter>();
     implements_tracked_ticker_store_port::<DuckDbTrackedTickersAdapter>();
 }

@@ -27,7 +27,7 @@ Options analyst
 ```
 
 Stored snapshots enter through `ForLoadingOptionChains`; the production adapter
-is DuckDB and the SQLite adapter remains a tested proof of concept. Reference
+is DuckDB. Reference
 prices, derived volatility structures, and yield curves enter through separate
 technology-neutral ports implemented by DuckDB production adapters.
 Exchange-session timing enters separately through

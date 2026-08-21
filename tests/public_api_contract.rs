@@ -98,14 +98,7 @@ fn api_models_is_a_wire_only_independent_crate() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(root.join("crates/api_models/Cargo.toml"))
         .expect("api_models manifest must be readable");
-    for forbidden in [
-        "hexagonal_backend",
-        "axum",
-        "tokio",
-        "sqlx",
-        "duckdb",
-        "reqwest",
-    ] {
+    for forbidden in ["hexagonal_backend", "axum", "tokio", "duckdb", "reqwest"] {
         assert!(
             !manifest.contains(forbidden),
             "api_models depends on {forbidden}"

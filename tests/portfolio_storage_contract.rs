@@ -1,8 +1,6 @@
 use chrono::{TimeZone, Utc};
 use hexagonal_backend::{
-    driven_adapters::{
-        duckdb::portfolio::DuckDbPortfolioAdapter, sqlite::portfolio::SqlitePortfolioAdapter,
-    },
+    driven_adapters::duckdb::portfolio::DuckDbPortfolioAdapter,
     hexagon::{
         domain::portfolio::{
             CashMovement, CashMovementKind, Currency, Money, Portfolio, PortfolioEvent, decimal,
@@ -13,7 +11,6 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -51,16 +48,6 @@ async fn assert_contract(adapter: &(impl ForLoadingPortfolios + ForStoringPortfo
         .expect("portfolio must load")
         .expect("portfolio must exist");
     assert_eq!(loaded, portfolio);
-}
-
-#[tokio::test]
-async fn sqlite_satisfies_portfolio_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("SQLite must open");
-    assert_contract(&SqlitePortfolioAdapter::new(pool)).await;
 }
 
 #[tokio::test]
