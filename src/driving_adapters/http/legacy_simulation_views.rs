@@ -132,3 +132,85 @@ pub fn catalog(ticker: &str, snapshot: &Snapshot, spot: f64) -> SimulationCatalo
         contracts,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, TimeZone, Utc};
+
+    use super::*;
+    use crate::hexagon::domain::options::{ContratoOpcao, OptionChain};
+
+    fn contract(symbol: &str, gamma: Option<f64>, open_interest: Option<f64>) -> ContratoOpcao {
+        ContratoOpcao {
+            occ_symbol: symbol.to_string(),
+            option_type: OptionType::Call,
+            strike: 100.0,
+            expiration: NaiveDate::from_ymd_opt(2026, 9, 18).unwrap(),
+            bid: 1.0,
+            ask: 1.2,
+            mid: 1.1,
+            spread: 0.2,
+            volume: 1.0,
+            open_interest,
+            delta: 0.5,
+            gamma,
+            vega: 0.1,
+            theta: -0.01,
+            rho: 0.01,
+            theo: 1.1,
+            implied_volatility: Some(0.2),
+            contract_specification: None,
+        }
+    }
+
+    #[test]
+    fn catalog_preserves_nullable_market_facts_order_and_contract_count() {
+        let contracts = vec![
+            contract("MISSING-GAMMA", None, Some(1.0)),
+            contract("MISSING-OI", Some(0.01), None),
+            contract("BOTH-MISSING", None, None),
+            contract("ZERO", Some(0.0), Some(0.0)),
+        ];
+        let snapshot = Snapshot {
+            ticker: "SPY".to_string(),
+            timestamp_utc: Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 0).unwrap(),
+            contratos: contracts.clone(),
+            chains: vec![OptionChain {
+                root: "SPY".to_string(),
+                contratos: contracts,
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
+        };
+
+        let result = catalog("SPY", &snapshot, 100.0);
+        assert_eq!(result.contracts.len(), 4);
+        assert_eq!(
+            result
+                .contracts
+                .iter()
+                .map(|contract| contract.occ_symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["MISSING-GAMMA", "MISSING-OI", "BOTH-MISSING", "ZERO"]
+        );
+        assert_eq!(result.contracts[0].gamma, None);
+        assert_eq!(result.contracts[0].open_interest, Some(1.0));
+        assert_eq!(result.contracts[1].gamma, Some(0.01));
+        assert_eq!(result.contracts[1].open_interest, None);
+        assert_eq!(result.contracts[2].gamma, None);
+        assert_eq!(result.contracts[2].open_interest, None);
+        assert_eq!(result.contracts[3].gamma, Some(0.0));
+        assert_eq!(result.contracts[3].open_interest, Some(0.0));
+
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["contracts"][0]["gamma"], serde_json::Value::Null);
+        assert_eq!(
+            json["contracts"][1]["open_interest"],
+            serde_json::Value::Null
+        );
+        assert_eq!(json["contracts"][3]["gamma"], 0.0);
+        assert_eq!(json["contracts"][3]["open_interest"], 0.0);
+    }
+}

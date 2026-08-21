@@ -662,9 +662,9 @@ mod tests {
             mid: 1.1,
             spread: 0.2,
             volume: 3.0,
-            open_interest: 4.0,
+            open_interest: Some(4.0),
             delta: 0.5,
-            gamma: 0.02,
+            gamma: Some(0.02),
             vega: 0.1,
             theta: -0.03,
             rho: 0.01,
@@ -709,6 +709,79 @@ mod tests {
             rho: 5.0,
         };
         assert_same_json(&legacy_greeks, &greeks(legacy_greeks));
+    }
+
+    #[test]
+    fn option_snapshot_preserves_nullable_market_facts_order_and_contract_count() {
+        let timestamp = Utc.with_ymd_and_hms(2026, 8, 13, 20, 0, 0).unwrap();
+        let complete = opt::ContratoOpcao {
+            occ_symbol: "SPY260821C00500000".into(),
+            option_type: opt::OptionType::Call,
+            strike: 500.0,
+            expiration: NaiveDate::from_ymd_opt(2026, 8, 21).unwrap(),
+            bid: 1.0,
+            ask: 1.2,
+            mid: 1.1,
+            spread: 0.2,
+            volume: 3.0,
+            open_interest: Some(0.0),
+            delta: 0.5,
+            gamma: Some(0.0),
+            vega: 0.1,
+            theta: -0.03,
+            rho: 0.01,
+            theo: 1.15,
+            implied_volatility: None,
+            contract_specification: None,
+        };
+        let mut missing_gamma = complete.clone();
+        missing_gamma.occ_symbol = "SPY260821P00500000".into();
+        missing_gamma.gamma = None;
+        let mut missing_open_interest = complete.clone();
+        missing_open_interest.occ_symbol = "SPY260821C00510000".into();
+        missing_open_interest.open_interest = None;
+        let mut both_missing = complete.clone();
+        both_missing.occ_symbol = "SPY260821P00510000".into();
+        both_missing.gamma = None;
+        both_missing.open_interest = None;
+        let contracts = vec![missing_gamma, missing_open_interest, both_missing, complete];
+        let domain = opt::Snapshot {
+            ticker: "SPY".into(),
+            timestamp_utc: timestamp,
+            contratos: contracts.clone(),
+            chains: vec![opt::OptionChain {
+                root: "SPY".into(),
+                contratos: contracts,
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
+        };
+
+        let dto = option_snapshot(domain);
+        assert_eq!(dto.contratos.len(), 4);
+        assert_eq!(dto.chains[0].contratos.len(), 4);
+        assert_eq!(
+            dto.contratos
+                .iter()
+                .map(|contract| contract.occ_symbol.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "SPY260821P00500000",
+                "SPY260821C00510000",
+                "SPY260821P00510000",
+                "SPY260821C00500000",
+            ]
+        );
+        assert_eq!(dto.contratos[0].gamma, None);
+        assert_eq!(dto.contratos[0].open_interest, Some(0.0));
+        assert_eq!(dto.contratos[1].gamma, Some(0.0));
+        assert_eq!(dto.contratos[1].open_interest, None);
+        assert_eq!(dto.contratos[2].gamma, None);
+        assert_eq!(dto.contratos[2].open_interest, None);
+        assert_eq!(dto.contratos[3].gamma, Some(0.0));
+        assert_eq!(dto.contratos[3].open_interest, Some(0.0));
     }
 
     #[test]

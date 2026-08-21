@@ -10,7 +10,8 @@ use crate::hexagon::domain::options::{
     UnderlyingPriceObservation,
 };
 
-const CURRENT_FORMAT_VERSION: i64 = 2;
+const LEGACY_FORMAT_VERSION: i64 = 2;
+const CURRENT_FORMAT_VERSION: i64 = 3;
 
 #[derive(Serialize)]
 struct SnapshotPayloadRef<'a> {
@@ -327,12 +328,12 @@ pub async fn load_all_with_metadata(
 
 fn row_to_snapshot(row: sqlx::sqlite::SqliteRow) -> Result<Snapshot, Box<dyn Error + Send + Sync>> {
     let format_version: i64 = row.try_get("format_version")?;
-    if format_version != CURRENT_FORMAT_VERSION {
-        return Err(SnapshotStorageError::UnsupportedFormat(format_version).into());
-    }
-
     let payload: Vec<u8> = row.try_get("payload")?;
-    let payload: SnapshotPayload = rmp_serde::from_slice(&payload)?;
+    let payload = match format_version {
+        LEGACY_FORMAT_VERSION => decode_v2_payload(&payload)?,
+        CURRENT_FORMAT_VERSION => decode_v3_payload(&payload)?,
+        version => return Err(SnapshotStorageError::UnsupportedFormat(version).into()),
+    };
     let contratos = payload
         .chains
         .iter()
@@ -351,6 +352,14 @@ fn row_to_snapshot(row: sqlx::sqlite::SqliteRow) -> Result<Snapshot, Box<dyn Err
     })
 }
 
+fn decode_v2_payload(payload: &[u8]) -> Result<SnapshotPayload, rmp_serde::decode::Error> {
+    rmp_serde::from_slice(payload)
+}
+
+fn decode_v3_payload(payload: &[u8]) -> Result<SnapshotPayload, rmp_serde::decode::Error> {
+    rmp_serde::from_slice(payload)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::{NaiveDate, TimeZone};
@@ -358,6 +367,65 @@ mod tests {
 
     use super::*;
     use crate::hexagon::domain::options::{ContratoOpcao, OptionType};
+
+    #[derive(Serialize)]
+    struct LegacySnapshotPayload<Contract> {
+        chains: Vec<LegacyOptionChain<Contract>>,
+        underlying_price: Option<UnderlyingPriceObservation>,
+        collected_at: Option<DateTime<Utc>>,
+        provider_timestamp: Option<ProviderTimestamp>,
+        ingestion_diagnostics: OptionIngestionDiagnostics,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyOptionChain<Contract> {
+        root: String,
+        contratos: Vec<Contract>,
+    }
+
+    #[derive(Serialize)]
+    struct LegacyContract {
+        occ_symbol: String,
+        option_type: OptionType,
+        strike: f64,
+        expiration: NaiveDate,
+        bid: f64,
+        ask: f64,
+        mid: f64,
+        spread: f64,
+        volume: f64,
+        open_interest: f64,
+        delta: f64,
+        gamma: f64,
+        vega: f64,
+        theta: f64,
+        rho: f64,
+        theo: f64,
+        implied_volatility: Option<f64>,
+        contract_specification:
+            Option<crate::hexagon::domain::options::OptionContractSpecification>,
+    }
+
+    #[derive(Serialize)]
+    struct ContractWithoutNullableMarketFacts {
+        occ_symbol: String,
+        option_type: OptionType,
+        strike: f64,
+        expiration: NaiveDate,
+        bid: f64,
+        ask: f64,
+        mid: f64,
+        spread: f64,
+        volume: f64,
+        delta: f64,
+        vega: f64,
+        theta: f64,
+        rho: f64,
+        theo: f64,
+        implied_volatility: Option<f64>,
+        contract_specification:
+            Option<crate::hexagon::domain::options::OptionContractSpecification>,
+    }
 
     async fn memory_pool() -> SqlitePool {
         SqlitePoolOptions::new()
@@ -378,9 +446,9 @@ mod tests {
             mid: 10.1,
             spread: 0.2,
             volume: 100.0,
-            open_interest: 1_000.0,
+            open_interest: Some(1_000.0),
             delta: 0.5,
-            gamma: 0.02,
+            gamma: Some(0.02),
             vega: 0.15,
             theta: -0.05,
             rho: 0.03,
@@ -414,8 +482,13 @@ mod tests {
             .await
             .unwrap();
         let loaded = load_latest(&pool, "spy").await.unwrap().unwrap();
+        let format_version: i64 = sqlx::query_scalar("SELECT format_version FROM option_snapshots")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
         assert_eq!(loaded, expected);
+        assert_eq!(format_version, CURRENT_FORMAT_VERSION);
     }
 
     #[tokio::test]
@@ -444,6 +517,208 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(load_latest(&pool, "SPY").await.unwrap(), Some(expected));
+    }
+
+    #[tokio::test]
+    async fn loads_legacy_numeric_gamma_and_open_interest_as_present_values() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let timestamp = Utc.with_ymd_and_hms(2026, 7, 13, 15, 0, 0).unwrap();
+        let payload = rmp_serde::to_vec(&LegacySnapshotPayload {
+            chains: vec![LegacyOptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![LegacyContract {
+                    occ_symbol: "SPY   260717C00500000".to_string(),
+                    option_type: OptionType::Call,
+                    strike: 500.0,
+                    expiration: NaiveDate::from_ymd_opt(2026, 7, 17).unwrap(),
+                    bid: 10.0,
+                    ask: 10.2,
+                    mid: 10.1,
+                    spread: 0.2,
+                    volume: 100.0,
+                    open_interest: 1_000.0,
+                    delta: 0.5,
+                    gamma: 0.02,
+                    vega: 0.15,
+                    theta: -0.05,
+                    rho: 0.03,
+                    theo: 10.1,
+                    implied_volatility: Some(0.2),
+                    contract_specification: None,
+                }],
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: OptionIngestionDiagnostics::default(),
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO option_snapshots
+             (ticker, timestamp, market_close, format_version, payload, hash)
+             VALUES (?, ?, NULL, ?, ?, ?)",
+        )
+        .bind("SPY")
+        .bind(timestamp)
+        .bind(LEGACY_FORMAT_VERSION)
+        .bind(&payload)
+        .bind(payload_hash(&payload))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+        assert_eq!(loaded.contratos[0].gamma, Some(0.02));
+        assert_eq!(loaded.contratos[0].open_interest, Some(1_000.0));
+    }
+
+    #[tokio::test]
+    async fn loads_v3_named_messagepack_with_missing_gamma_and_open_interest() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let timestamp = Utc.with_ymd_and_hms(2026, 7, 13, 15, 0, 0).unwrap();
+        let payload = rmp_serde::to_vec_named(&LegacySnapshotPayload {
+            chains: vec![LegacyOptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![ContractWithoutNullableMarketFacts {
+                    occ_symbol: "SPY   260717C00500000".to_string(),
+                    option_type: OptionType::Call,
+                    strike: 500.0,
+                    expiration: NaiveDate::from_ymd_opt(2026, 7, 17).unwrap(),
+                    bid: 10.0,
+                    ask: 10.2,
+                    mid: 10.1,
+                    spread: 0.2,
+                    volume: 100.0,
+                    delta: 0.5,
+                    vega: 0.15,
+                    theta: -0.05,
+                    rho: 0.03,
+                    theo: 10.1,
+                    implied_volatility: Some(0.2),
+                    contract_specification: None,
+                }],
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: OptionIngestionDiagnostics::default(),
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO option_snapshots
+             (ticker, timestamp, market_close, format_version, payload, hash)
+             VALUES (?, ?, NULL, ?, ?, ?)",
+        )
+        .bind("SPY")
+        .bind(timestamp)
+        .bind(CURRENT_FORMAT_VERSION)
+        .bind(&payload)
+        .bind(payload_hash(&payload))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+        assert_eq!(loaded.contratos[0].gamma, None);
+        assert_eq!(loaded.contratos[0].open_interest, None);
+    }
+
+    #[tokio::test]
+    async fn v3_round_trip_distinguishes_present_zero_and_missing_values() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let mut snapshot = sample_snapshot();
+        let zero = &mut snapshot.chains[0].contratos[0];
+        zero.gamma = Some(0.0);
+        zero.open_interest = Some(0.0);
+        snapshot.contratos[0] = zero.clone();
+        let mut missing = zero.clone();
+        missing.occ_symbol = "SPY   260717P00500000".to_string();
+        missing.option_type = OptionType::Put;
+        missing.gamma = None;
+        missing.open_interest = None;
+        snapshot.chains[0].contratos.push(missing.clone());
+        snapshot.contratos.push(missing);
+
+        save_snapshot(&pool, &snapshot, snapshot.timestamp_utc)
+            .await
+            .unwrap();
+        let loaded = load_latest(&pool, "SPY").await.unwrap().unwrap();
+
+        assert_eq!(loaded.contratos[0].gamma, Some(0.0));
+        assert_eq!(loaded.contratos[0].open_interest, Some(0.0));
+        assert_eq!(loaded.contratos[1].gamma, None);
+        assert_eq!(loaded.contratos[1].open_interest, None);
+    }
+
+    #[tokio::test]
+    async fn loads_v2_and_v3_rows_from_the_same_database() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let legacy_timestamp = Utc.with_ymd_and_hms(2026, 7, 13, 15, 0, 0).unwrap();
+        let legacy_payload = rmp_serde::to_vec(&LegacySnapshotPayload {
+            chains: vec![LegacyOptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![LegacyContract {
+                    occ_symbol: "SPY   260717C00500000".to_string(),
+                    option_type: OptionType::Call,
+                    strike: 500.0,
+                    expiration: NaiveDate::from_ymd_opt(2026, 7, 17).unwrap(),
+                    bid: 10.0,
+                    ask: 10.2,
+                    mid: 10.1,
+                    spread: 0.2,
+                    volume: 100.0,
+                    open_interest: 1_000.0,
+                    delta: 0.5,
+                    gamma: 0.02,
+                    vega: 0.15,
+                    theta: -0.05,
+                    rho: 0.03,
+                    theo: 10.1,
+                    implied_volatility: Some(0.2),
+                    contract_specification: None,
+                }],
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: OptionIngestionDiagnostics::default(),
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO option_snapshots
+             (ticker, timestamp, market_close, format_version, payload, hash)
+             VALUES (?, ?, NULL, ?, ?, ?)",
+        )
+        .bind("SPY")
+        .bind(legacy_timestamp)
+        .bind(LEGACY_FORMAT_VERSION)
+        .bind(&legacy_payload)
+        .bind(payload_hash(&legacy_payload))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut current = sample_snapshot();
+        current.ticker = "AAPL".to_string();
+        current.timestamp_utc += chrono::Duration::days(1);
+        current.chains[0].root = "AAPL".to_string();
+        current.chains[0].contratos[0].gamma = None;
+        current.chains[0].contratos[0].open_interest = None;
+        current.contratos = current.chains[0].contratos.clone();
+        save_snapshot(&pool, &current, current.timestamp_utc)
+            .await
+            .unwrap();
+
+        let loaded = load_all(&pool).await.unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].contratos[0].gamma, Some(0.02));
+        assert_eq!(loaded[0].contratos[0].open_interest, Some(1_000.0));
+        assert_eq!(loaded[1].contratos[0].gamma, None);
+        assert_eq!(loaded[1].contratos[0].open_interest, None);
     }
 
     #[tokio::test]
@@ -555,7 +830,7 @@ mod tests {
         )
         .bind(&snapshot.ticker)
         .bind(snapshot.timestamp_utc)
-        .bind(CURRENT_FORMAT_VERSION)
+        .bind(LEGACY_FORMAT_VERSION)
         .bind(&payload)
         .execute(&pool)
         .await
@@ -578,6 +853,36 @@ mod tests {
                 .contract_specification
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_initialization_does_not_rewrite_existing_rows() {
+        let pool = memory_pool().await;
+        initialize(&pool).await.unwrap();
+        let snapshot = sample_snapshot();
+        save_snapshot(&pool, &snapshot, snapshot.timestamp_utc)
+            .await
+            .unwrap();
+        let before: (i64, Vec<u8>, String) = sqlx::query_as(
+            "SELECT format_version, payload, hash FROM option_snapshots WHERE ticker = ?",
+        )
+        .bind("SPY")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        initialize(&pool).await.unwrap();
+        initialize(&pool).await.unwrap();
+
+        let after: (i64, Vec<u8>, String) = sqlx::query_as(
+            "SELECT format_version, payload, hash FROM option_snapshots WHERE ticker = ?",
+        )
+        .bind("SPY")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(after, before);
+        assert_eq!(after.0, CURRENT_FORMAT_VERSION);
     }
 
     #[tokio::test]

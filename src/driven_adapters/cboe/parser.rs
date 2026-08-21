@@ -144,14 +144,109 @@ mod tests {
             bid: 1.0,
             ask: 1.2,
             volume: 10.0,
-            open_interest: 20.0,
+            open_interest: Some(20.0),
             delta: 0.5,
-            gamma: 0.02,
+            gamma: Some(0.02),
             vega: 0.1,
             theta: -0.03,
             rho: 0.01,
             theo: 1.1,
             iv: 0.2,
+        }
+    }
+
+    fn response_with_nullable_market_facts(
+        gamma: serde_json::Value,
+        open_interest: serde_json::Value,
+    ) -> CboeResponse {
+        serde_json::from_value(serde_json::json!({
+            "timestamp": "2026-08-20T11:00:00-04:00",
+            "data": {
+                "options": [
+                    {
+                        "option": "SPXW  260821C05000000",
+                        "bid": 1.0,
+                        "ask": 1.2,
+                        "volume": 10.0,
+                        "open_interest": open_interest,
+                        "delta": 0.5,
+                        "gamma": gamma,
+                        "vega": 0.1,
+                        "theta": -0.03,
+                        "rho": 0.01,
+                        "theo": 1.1,
+                        "iv": 0.2
+                    },
+                    {
+                        "option": "SPXW  260821P05000000",
+                        "bid": 1.1,
+                        "ask": 1.3,
+                        "volume": 11.0,
+                        "open_interest": 7.0,
+                        "delta": -0.5,
+                        "gamma": 0.03,
+                        "vega": 0.1,
+                        "theta": -0.03,
+                        "rho": 0.01,
+                        "theo": 1.2,
+                        "iv": 0.21
+                    }
+                ]
+            }
+        }))
+        .expect("nullable Cboe fixture must deserialize")
+    }
+
+    #[test]
+    fn preserves_nullable_gamma_and_open_interest_without_dropping_contracts() {
+        for (gamma, open_interest, expected_gamma, expected_open_interest) in [
+            (
+                serde_json::Value::Null,
+                serde_json::json!(5.0),
+                None,
+                Some(5.0),
+            ),
+            (
+                serde_json::json!(0.02),
+                serde_json::Value::Null,
+                Some(0.02),
+                None,
+            ),
+            (serde_json::Value::Null, serde_json::Value::Null, None, None),
+            (
+                serde_json::json!(0.0),
+                serde_json::json!(0.0),
+                Some(0.0),
+                Some(0.0),
+            ),
+        ] {
+            let snapshot = response_to_snapshot_collected_at(
+                "SPX",
+                response_with_nullable_market_facts(gamma, open_interest),
+                Utc.with_ymd_and_hms(2026, 8, 20, 15, 1, 0).unwrap(),
+            )
+            .expect("one incomplete contract must not invalidate its snapshot");
+
+            assert_eq!(snapshot.contratos.len(), 2);
+            assert_eq!(snapshot.chains[0].contratos.len(), 2);
+            let incomplete = snapshot
+                .contratos
+                .iter()
+                .find(|contract| {
+                    contract.option_type == crate::hexagon::domain::options::OptionType::Call
+                })
+                .expect("incomplete contract must remain present");
+            assert_eq!(incomplete.gamma, expected_gamma);
+            assert_eq!(incomplete.open_interest, expected_open_interest);
+            let complete = snapshot
+                .contratos
+                .iter()
+                .find(|contract| {
+                    contract.option_type == crate::hexagon::domain::options::OptionType::Put
+                })
+                .expect("other contracts must remain present");
+            assert_eq!(complete.gamma, Some(0.03));
+            assert_eq!(complete.open_interest, Some(7.0));
         }
     }
 

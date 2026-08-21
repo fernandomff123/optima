@@ -3,7 +3,22 @@
 This is the mechanical inventory captured before normalization. `domain` means
 the old modern handler accepted or serialized a hexagon type directly. The
 known consumer is based on the adapter's existing compatibility contract and
-repository tests; no frontend source was inspected for this change.
+repository tests. The frontend source was inspected for the nullable option
+market facts described below and does not currently consume them.
+
+## Nullable option market facts
+
+Option contracts returned by `GET /api/options/{ticker}/chain`, its
+`GET /options/{ticker}/chain` compatibility alias,
+`GET /api/simulation/contracts`, and
+`GET /api/assets/{ticker}/options/intraday` preserve `gamma` and
+`open_interest` factually:
+
+- a JSON number is the value published in the snapshot;
+- `0.0` is a published zero and is distinct from absence;
+- JSON `null` means that the value is unavailable in that snapshot.
+
+Absence of either field never removes its contract from these responses.
 
 ## Modern router before normalization
 
