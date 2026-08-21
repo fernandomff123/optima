@@ -8,7 +8,6 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::index_history::{DailyIndexPrice, IndexHistory},
     driven_ports::{
-        for_counting_index_history::ForCountingIndexHistory,
         for_loading_index_history::ForLoadingIndexHistory,
         for_storing_index_history::ForStoringIndexHistory,
     },
@@ -51,19 +50,6 @@ impl ForStoringIndexHistory for DuckDbIndexHistoryAdapter {
         let path = self.database_path.clone();
         let history = history.clone();
         run_blocking(move || store_history(&path, &history)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingIndexHistory for DuckDbIndexHistoryAdapter {
-    async fn count_index_history(&self) -> PortResult<u64> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row("SELECT COUNT(*) FROM index_prices", [], |row| row.get(0))
-        })
-        .await
     }
 }
 

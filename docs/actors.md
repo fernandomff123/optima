@@ -3,7 +3,7 @@
 An **actor** is a participant outside the hexagon. An **adapter** is technical
 code that translates between an actor and a port. They are deliberately not
 synonyms: replacing Axum with another web framework changes an adapter, not the
-human or system driving the conversation; replacing SQLite with PostgreSQL
+human or system driving the conversation; replacing DuckDB with PostgreSQL
 changes a driven adapter, not the application's need for persistence.
 
 ```text
@@ -41,8 +41,7 @@ and an automated test can all drive the same port without changing the use case.
 
 | Actor | Role in conversations | Driven ports | Production adapter(s) |
 | --- | --- | --- | --- |
-| SQLite database | Temporary migration source and inactive proof of concept | Contract-tested domain ports and migration-only archive ports | Domain-focused `Sqlite*Adapter` implementations |
-| DuckDB database | Production persistence for all application-owned data | Domain-focused loading, storing, and migration-verification ports | Domain-focused `DuckDb*Adapter` implementations |
+| DuckDB database | Production persistence for all application-owned data | Domain-focused loading and storing ports | Domain-focused `DuckDb*Adapter` implementations |
 | Yahoo Finance | Supply historical market data, current prices, and price streams | `ForObtainingMarketHistory`, `ForObtainingLivePrices`, `ForStreamingLivePrices` | `YahooMarketHistoryAdapter`, `YahooLivePricesAdapter` |
 | Cboe | Supply option chains and volatility-index histories | `ForObtainingOptionChains`, `ForObtainingVolatilityIndices` | `CboeOptionChainsAdapter`, `CboeVolatilityIndicesAdapter` |
 | U.S. Treasury | Supply published risk-free yield curves | `ForObtainingYieldCurves` | `TreasuryYieldCurvesAdapter` |

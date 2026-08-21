@@ -27,8 +27,3 @@ impl ForObtainingYieldCurves for TreasuryYieldCurvesAdapter {
 fn unavailable(error: impl std::fmt::Display) -> PortError {
     PortError::Unavailable(error.to_string())
 }
-
-#[cfg(test)]
-pub(crate) use client::download_ano;
-#[cfg(test)]
-pub(crate) use parser::feed_to_yield_curves;

@@ -13,7 +13,6 @@ use crate::hexagon::{
         UnderlyingPriceObservation,
     },
     driven_ports::{
-        for_counting_option_chains::{ForCountingOptionChains, OptionChainCounts},
         for_loading_option_chains::ForLoadingOptionChains,
         for_storing_option_chains::ForStoringOptionChains,
     },
@@ -22,17 +21,6 @@ use crate::hexagon::{
 #[derive(Debug, Clone)]
 pub struct DuckDbOptionChainsAdapter {
     database_path: PathBuf,
-}
-
-#[async_trait::async_trait]
-impl ForCountingOptionChains for DuckDbOptionChainsAdapter {
-    async fn count_option_chains(&self) -> PortResult<OptionChainCounts> {
-        let (snapshots, contracts) = self.counts().await?;
-        Ok(OptionChainCounts {
-            snapshots,
-            contracts,
-        })
-    }
 }
 
 impl DuckDbOptionChainsAdapter {
@@ -52,7 +40,7 @@ impl DuckDbOptionChainsAdapter {
         .await
     }
 
-    /// Returns physical row counts for migration verification and diagnostics.
+    /// Returns physical row counts for storage diagnostics.
     pub async fn counts(&self) -> PortResult<(u64, u64)> {
         let path = self.database_path.clone();
         run_blocking(move || {

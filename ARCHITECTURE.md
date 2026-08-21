@@ -20,35 +20,27 @@ The architecture can also be explored by intent rather than by source tree:
 
 The application owns all port definitions. Nothing crosses the application
 boundary except through a port. Code inside the hexagon cannot depend on Axum,
-SQLx, Reqwest, SQLite, wire formats, or provider names such as Yahoo and CBOE.
+DuckDB, Reqwest, wire formats, or provider names such as Yahoo and CBOE.
 
 ```text
 src/
 ├── hexagon/
 │   ├── application/
 │   │   ├── data_refresh/
-│   │   ├── index_history_migration/
 │   │   ├── interest_rates/
 │   │   ├── intraday_simulation/
 │   │   ├── market_data/
-│   │   ├── market_history_migration/
 │   │   ├── market_scheduling/
 │   │   ├── market_stream/
 │   │   ├── market_volatility/
-│   │   ├── option_chain_migration/
 │   │   ├── options/
 │   │   ├── portfolio/
-│   │   ├── portfolio_migration/
 │   │   ├── portfolio_valuation/
 │   │   ├── saved_strategies/
 │   │   ├── sector_performance/
 │   │   ├── simulation/
-│   │   ├── strategy_migration/
 │   │   ├── synchronization/
-│   │   ├── tracked_ticker_migration/
-│   │   ├── tracked_tickers/
-│   │   ├── volatility_term_structure_migration/
-│   │   └── yield_curve_migration/
+│   │   └── tracked_tickers/
 │   ├── domain/
 │   ├── driving_ports/
 │   │   └── for_doing_something/
@@ -59,7 +51,6 @@ src/
 │   ├── cboe/                 # option-chain, volatility-index, and product-catalog adapters
 │   ├── duckdb/               # columnar analytical persistence adapters
 │   ├── exchange_calendar/    # official trading-session adapter
-│   ├── sqlite/               # inactive proof-of-concept and migration sources
 │   ├── treasury/             # risk-free yield-curve adapter
 │   └── yahoo/                # historical and live-price adapters
 └── configurator/
@@ -115,39 +106,23 @@ contract tests replace the application with mocks and verify HTTP translation.
 | Load data-refresh runs | `ForLoadingDataRefreshRuns` | DuckDB |
 | Store data-refresh runs | `ForStoringDataRefreshRuns` | DuckDB |
 | Run asynchronous refresh work | `ForRunningDataRefreshTasks` | Tokio task runner |
-| Store market history | `ForStoringMarketHistory` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Store option chains | `ForStoringOptionChains` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Store volatility term structures | `ForStoringVolatilityTermStructures` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Store volatility-index history | `ForStoringIndexHistory` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Store risk-free yield curves | `ForStoringYieldCurves` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Load stored market history | `ForLoadingMarketHistory` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Export market histories during migration | `ForLoadingMarketHistoryArchive` | SQLite (temporary migration source only) |
-| Count market-history observations | `ForCountingMarketHistory` | DuckDB |
-| Load stored index history | `ForLoadingIndexHistory` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Export index histories during migration | `ForLoadingIndexHistoryArchive` | SQLite (temporary migration source only) |
-| Count index observations | `ForCountingIndexHistory` | DuckDB |
-| Load stored option chains | `ForLoadingOptionChains` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Export archived option chains during migration | `ForLoadingOptionChainArchive` | SQLite (temporary migration source only) |
-| Count option-chain observations | `ForCountingOptionChains` | DuckDB |
-| Load volatility term structures | `ForLoadingVolatilityTermStructures` | DuckDB (SQLite proof-of-concept also passes the contract) |
+| Store market history | `ForStoringMarketHistory` | DuckDB |
+| Store option chains | `ForStoringOptionChains` | DuckDB |
+| Store volatility term structures | `ForStoringVolatilityTermStructures` | DuckDB |
+| Store volatility-index history | `ForStoringIndexHistory` | DuckDB |
+| Store risk-free yield curves | `ForStoringYieldCurves` | DuckDB |
+| Load stored market history | `ForLoadingMarketHistory` | DuckDB |
+| Load stored index history | `ForLoadingIndexHistory` | DuckDB |
+| Load stored option chains | `ForLoadingOptionChains` | DuckDB |
+| Load volatility term structures | `ForLoadingVolatilityTermStructures` | DuckDB |
 | Load underlying reference prices | `ForLoadingReferencePrices` | DuckDB |
-| Export volatility structures during migration | `ForLoadingVolatilityTermStructureArchive` | SQLite (temporary migration source only) |
-| Count volatility structure points | `ForCountingVolatilityTermStructures` | DuckDB |
-| Load stored yield curves | `ForLoadingYieldCurves` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Export yield curves during migration | `ForLoadingYieldCurveArchive` | SQLite (temporary migration source only) |
-| Count yield curves | `ForCountingYieldCurves` | DuckDB |
-| Load portfolios | `ForLoadingPortfolios` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Store portfolios | `ForStoringPortfolios` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Export portfolio ledgers during migration | `ForLoadingPortfolioArchive` | SQLite (temporary migration source only) |
-| Count portfolio ledgers | `ForCountingPortfolios` | DuckDB |
-| Store strategies | `ForStoringStrategies` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Load strategies | `ForLoadingStrategies` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Import complete strategy records during migration | `ForImportingStrategyArchive` | DuckDB |
-| Count saved strategies and legs | `ForCountingStrategies` | DuckDB |
-| Load tracked tickers | `ForLoadingTrackedTickers` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Store tracked tickers | `ForStoringTrackedTickers` | DuckDB (SQLite proof-of-concept also passes the contract) |
-| Export tracked ticker configuration during migration | `ForLoadingTrackedTickerArchive` | SQLite (temporary migration source only) |
-| Count tracked ticker configuration | `ForCountingTrackedTickers` | DuckDB |
+| Load stored yield curves | `ForLoadingYieldCurves` | DuckDB |
+| Load portfolios | `ForLoadingPortfolios` | DuckDB |
+| Store portfolios | `ForStoringPortfolios` | DuckDB |
+| Store strategies | `ForStoringStrategies` | DuckDB |
+| Load strategies | `ForLoadingStrategies` | DuckDB |
+| Load tracked tickers | `ForLoadingTrackedTickers` | DuckDB |
+| Store tracked tickers | `ForStoringTrackedTickers` | DuckDB |
 | Resolve an exact underlying symbol | `ForResolvingUnderlyingSymbols` | Yahoo chart metadata |
 | Obtain historical prices and corporate actions | `ForObtainingMarketHistory` | Yahoo |
 | Obtain live prices | `ForObtainingLivePrices` | Yahoo |
@@ -165,12 +140,10 @@ same driven port.
 Portfolio valuation is application orchestration rather than a driven actor.
 It selects live or stored observations using the trading-calendar port, then
 uses the specialized live-price, market-history, live-option, or stored-option
-port. Consequently no adapter mixes Yahoo, CBOE, SQLite, and calendar logic.
+port. Consequently no adapter mixes Yahoo, CBOE, DuckDB, and calendar logic.
 
-SQLite and DuckDB are not selected dynamically by the application. The
-production configurator selects DuckDB for every persistence port. Separate
-offline driving conversations read SQLite only to migrate and verify legacy
-data; SQLite remains an inactive, contract-tested proof of concept.
+The production configurator selects DuckDB for every persistence port. Storage
+technology remains confined to driven adapters and composition.
 
 Provider aliases and wire formats are translated at the adapter boundary. For
 example, the Yahoo adapter maps the domain ticker `SPX` to `^GSPC` and restores
@@ -342,7 +315,7 @@ Development follows the book's sequence:
    actors are mocks, stubs, fakes, or other in-memory test doubles.
 2. **Real-to-test:** production driving adapters are tested against a fake
    application or test doubles.
-3. **Test-to-real:** adapter contract tests exercise SQLite and recorded wire
+3. **Test-to-real:** adapter contract tests exercise DuckDB and recorded wire
    fixtures.
 4. **Real-to-real:** opt-in integration tests exercise production providers.
 
@@ -360,6 +333,6 @@ env RUSTDOCFLAGS=-Dwarnings \
 ```
 
 The autonomous backend crate is published locally at
-`target/doc/hexagonal_backend/index.html`. `target/`, SQLite files, and DuckDB files
+`target/doc/hexagonal_backend/index.html`. `target/` and DuckDB files
 under `data/` belong to this repository at runtime but are intentionally not
 committed.

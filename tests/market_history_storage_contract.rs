@@ -2,10 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{TimeZone, Utc};
 use hexagonal_backend::{
-    driven_adapters::{
-        duckdb::market_history::DuckDbMarketHistoryAdapter,
-        sqlite::{market_history, market_history::SqliteMarketHistoryAdapter},
-    },
+    driven_adapters::duckdb::market_history::DuckDbMarketHistoryAdapter,
     hexagon::{
         domain::market_history::{DailyQuote, Dividend, MarketHistory, StockSplit},
         driven_ports::{
@@ -14,7 +11,6 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -71,19 +67,6 @@ async fn assert_contract(adapter: &(impl ForLoadingMarketHistory + ForStoringMar
     assert_eq!(loaded.daily_quotes, expected.daily_quotes);
     assert_eq!(loaded.dividends, expected.dividends);
     assert_eq!(loaded.splits, expected.splits);
-}
-
-#[tokio::test]
-async fn sqlite_satisfies_market_history_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("in-memory SQLite must open");
-    market_history::initialize(&pool)
-        .await
-        .expect("SQLite schema must initialize");
-    assert_contract(&SqliteMarketHistoryAdapter::new(pool)).await;
 }
 
 #[tokio::test]

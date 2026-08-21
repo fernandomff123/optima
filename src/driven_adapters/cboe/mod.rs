@@ -52,12 +52,6 @@ fn unavailable(error: impl std::fmt::Display) -> PortError {
 }
 
 pub use client::CboeResponse;
-#[cfg(test)]
-pub(crate) use client::download_snapshot;
-#[cfg(test)]
-pub(crate) use indices_client::download_indice;
-#[cfg(test)]
-pub(crate) use indices_parser::response_to_index_history;
 pub use parser::response_to_snapshot;
 pub use parser::response_to_snapshot_collected_at;
 pub use parser::{ParseError, parse_occ_symbol};

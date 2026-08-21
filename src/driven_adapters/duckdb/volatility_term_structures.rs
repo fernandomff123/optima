@@ -11,7 +11,6 @@ use crate::hexagon::{
         ConstantMaturityVolatilityPoint, TermStructure, TermStructurePoint, TermStructureSource,
     },
     driven_ports::{
-        for_counting_volatility_term_structures::ForCountingVolatilityTermStructures,
         for_loading_reference_prices::ForLoadingReferencePrices,
         for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
         for_storing_volatility_term_structures::ForStoringVolatilityTermStructures,
@@ -92,23 +91,6 @@ impl ForStoringVolatilityTermStructures for DuckDbVolatilityTermStructuresAdapte
         let path = self.database_path.clone();
         let structure = term_structure.clone();
         run_blocking(move || store(&path, &structure)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingVolatilityTermStructures for DuckDbVolatilityTermStructuresAdapter {
-    async fn count_volatility_term_structure_points(&self) -> PortResult<u64> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row(
-                "SELECT COUNT(*) FROM volatility_term_structure_points",
-                [],
-                |row| row.get(0),
-            )
-        })
-        .await
     }
 }
 

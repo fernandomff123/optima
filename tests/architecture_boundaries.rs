@@ -33,8 +33,6 @@ fn hexagon_does_not_depend_on_external_actors_or_adapters() {
     let forbidden = [
         "axum",
         "reqwest",
-        "sqlx",
-        "sqlite",
         "yahoo",
         "cboe",
         "treasury.gov",
@@ -189,7 +187,6 @@ fn nullable_option_market_facts_do_not_introduce_gex_policy_in_adapters() {
     for relative in [
         "src/driven_adapters/cboe/parser.rs",
         "src/driven_adapters/duckdb/option_chains.rs",
-        "src/driven_adapters/sqlite/option_snapshots.rs",
     ] {
         let source = fs::read_to_string(root.join(relative)).expect("adapter must be readable");
         assert!(!source.to_ascii_lowercase().contains("gex"));

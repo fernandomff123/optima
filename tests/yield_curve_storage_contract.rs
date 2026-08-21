@@ -2,10 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::NaiveDate;
 use hexagonal_backend::{
-    driven_adapters::{
-        duckdb::yield_curves::DuckDbYieldCurvesAdapter,
-        sqlite::{yield_curves, yield_curves_port::SqliteYieldCurvesAdapter},
-    },
+    driven_adapters::duckdb::yield_curves::DuckDbYieldCurvesAdapter,
     hexagon::{
         domain::treasury::YieldCurve,
         driven_ports::{
@@ -14,7 +11,6 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -49,19 +45,6 @@ async fn assert_contract(adapter: &(impl ForLoadingYieldCurves + ForStoringYield
             .expect("curve must load"),
         Some(expected)
     );
-}
-
-#[tokio::test]
-async fn sqlite_satisfies_yield_curve_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("SQLite must open");
-    yield_curves::initialize(&pool)
-        .await
-        .expect("SQLite schema must initialize");
-    assert_contract(&SqliteYieldCurvesAdapter::new(pool)).await;
 }
 
 #[tokio::test]

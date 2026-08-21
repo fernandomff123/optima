@@ -1,8 +1,5 @@
 use hexagonal_backend::{
-    driven_adapters::{
-        duckdb::tracked_tickers::DuckDbTrackedTickersAdapter,
-        sqlite::{tracked_tickers, tracked_tickers::SqliteTrackedTickersAdapter},
-    },
+    driven_adapters::duckdb::tracked_tickers::DuckDbTrackedTickersAdapter,
     hexagon::{
         PortError,
         application::tracked_tickers::TrackedTickersApplication,
@@ -20,7 +17,6 @@ use hexagonal_backend::{
         driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers,
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::atomic::{AtomicU64, Ordering};
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -125,17 +121,6 @@ where
         .map(|tracked| tracked.ticker)
         .collect::<Vec<_>>();
     assert_eq!(relevant, vec!["SPX", "VIX"]);
-}
-
-#[tokio::test]
-async fn sqlite_bootstrap_reconciles_legacy_protected_aliases_across_restart() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
-    tracked_tickers::initialize(&pool).await.unwrap();
-    assert_legacy_alias_reconciliation(SqliteTrackedTickersAdapter::new(pool)).await;
 }
 
 #[tokio::test]
@@ -262,21 +247,6 @@ async fn assert_resolution_eligibility(
 }
 
 #[tokio::test]
-async fn sqlite_satisfies_tracked_ticker_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("SQLite must open");
-    tracked_tickers::initialize(&pool)
-        .await
-        .expect("schema must initialize");
-    let adapter = SqliteTrackedTickersAdapter::new(pool);
-    assert_contract(&adapter).await;
-    assert_resolution_eligibility(&adapter).await;
-}
-
-#[tokio::test]
 async fn duckdb_satisfies_tracked_ticker_contract() {
     let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
@@ -288,40 +258,6 @@ async fn duckdb_satisfies_tracked_ticker_contract() {
     assert_contract(&adapter).await;
     assert_resolution_eligibility(&adapter).await;
     std::fs::remove_file(path).expect("temporary DuckDB must be removable");
-}
-
-#[tokio::test]
-async fn sqlite_rejects_unknown_persisted_source_and_resolution_state() {
-    for (column, value) in [("source", "external"), ("resolution_state", "unknown")] {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap();
-        tracked_tickers::initialize(&pool).await.unwrap();
-        sqlx::query(
-            "INSERT INTO tracked_tickers
-             (ticker, source, active, yahoo_prices, cboe_snapshot, resolution_state)
-             VALUES ('BROKEN', 'user', 1, 1, 0, 'pending')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(&format!(
-            "UPDATE tracked_tickers SET {column} = ? WHERE ticker = 'BROKEN'"
-        ))
-        .bind(value)
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        let error = SqliteTrackedTickersAdapter::new(pool)
-            .load_tracked_tickers()
-            .await
-            .expect_err("unknown persisted enum must fail loading");
-        assert!(error.to_string().contains(column));
-        assert!(error.to_string().contains(value));
-    }
 }
 
 #[tokio::test]
@@ -537,63 +473,6 @@ async fn duckdb_migrates_the_legacy_schema_idempotently() {
     std::fs::remove_file(path).expect("temporary DuckDB must be removable");
 }
 
-#[tokio::test]
-async fn sqlite_migrates_legacy_users_to_pending_and_system_rows_to_resolved() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
-    sqlx::query(
-        "CREATE TABLE tracked_tickers (
-            ticker TEXT PRIMARY KEY NOT NULL,
-            source TEXT NOT NULL,
-            active INTEGER NOT NULL,
-            yahoo_prices INTEGER NOT NULL,
-            cboe_snapshot INTEGER NOT NULL
-        )",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO tracked_tickers VALUES
-         ('OLDUSER', 'user', 1, 1, 0), ('SPX', 'system', 1, 1, 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    tracked_tickers::initialize(&pool).await.unwrap();
-    tracked_tickers::initialize(&pool).await.unwrap();
-    let adapter = SqliteTrackedTickersAdapter::new(pool);
-    let stored = adapter.load_tracked_tickers().await.unwrap();
-    assert_eq!(
-        stored
-            .iter()
-            .find(|ticker| ticker.ticker == "OLDUSER")
-            .unwrap()
-            .resolution_state,
-        UnderlyingResolutionState::Pending
-    );
-    assert_eq!(
-        stored
-            .iter()
-            .find(|ticker| ticker.ticker == "SPX")
-            .unwrap()
-            .resolution_state,
-        UnderlyingResolutionState::Resolved
-    );
-    assert!(
-        adapter
-            .load_refresh_eligible_tickers()
-            .await
-            .unwrap()
-            .iter()
-            .all(|ticker| ticker.ticker != "OLDUSER")
-    );
-}
-
 async fn seed_resolution_states(
     adapter: &(impl ForLoadingTrackedTickers + ForStoringTrackedTickers),
 ) -> chrono::DateTime<chrono::Utc> {
@@ -702,32 +581,4 @@ async fn repeated_duckdb_initialization_and_bootstrap_preserve_resolution_eviden
         1
     );
     std::fs::remove_file(path).unwrap();
-}
-
-#[tokio::test]
-async fn repeated_sqlite_initialization_and_bootstrap_preserve_resolution_evidence() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
-    tracked_tickers::initialize(&pool).await.unwrap();
-    let adapter = SqliteTrackedTickersAdapter::new(pool.clone());
-    let validated_at = seed_resolution_states(&adapter).await;
-
-    tracked_tickers::initialize(&pool).await.unwrap();
-    tracked_tickers::initialize(&pool).await.unwrap();
-    let application = TrackedTickersApplication::new(adapter.clone(), adapter.clone(), Resolver);
-    application.bootstrap_system_tickers().await.unwrap();
-    application.bootstrap_system_tickers().await.unwrap();
-
-    let stored = adapter.load_tracked_tickers().await.unwrap();
-    assert_preserved_resolution_states(&stored, validated_at);
-    assert_eq!(
-        stored
-            .iter()
-            .filter(|ticker| ticker.ticker == "SPX")
-            .count(),
-        1
-    );
 }

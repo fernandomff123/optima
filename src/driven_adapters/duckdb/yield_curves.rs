@@ -9,7 +9,6 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::treasury::YieldCurve,
     driven_ports::{
-        for_counting_yield_curves::ForCountingYieldCurves,
         for_loading_yield_curves::ForLoadingYieldCurves,
         for_storing_yield_curves::ForStoringYieldCurves,
     },
@@ -51,19 +50,6 @@ impl ForStoringYieldCurves for DuckDbYieldCurvesAdapter {
         let path = self.database_path.clone();
         let curves = curves.to_vec();
         run_blocking(move || store_curves(&path, &curves)).await
-    }
-}
-
-#[async_trait::async_trait]
-impl ForCountingYieldCurves for DuckDbYieldCurvesAdapter {
-    async fn count_yield_curves(&self) -> PortResult<u64> {
-        let path = self.database_path.clone();
-        run_blocking(move || {
-            let connection = Connection::open(path)?;
-            initialize_schema(&connection)?;
-            connection.query_row("SELECT COUNT(*) FROM yield_curves", [], |row| row.get(0))
-        })
-        .await
     }
 }
 

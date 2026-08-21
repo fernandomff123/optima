@@ -2,11 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{NaiveDate, TimeZone, Utc};
 use hexagonal_backend::{
-    driven_adapters::{
-        cboe::CboeResponse,
-        duckdb::option_chains::DuckDbOptionChainsAdapter,
-        sqlite::{option_data::SqliteOptionDataAdapter, option_snapshots},
-    },
+    driven_adapters::{cboe::CboeResponse, duckdb::option_chains::DuckDbOptionChainsAdapter},
     hexagon::{
         domain::options::{
             ContratoOpcao, OptionChain, OptionContractSpecification, OptionIngestionDiagnostics,
@@ -19,7 +15,6 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -171,36 +166,6 @@ async fn assert_nullable_market_facts_round_trip(
     assert_eq!(loaded.contratos[0].open_interest, None);
     assert_eq!(loaded.contratos[1].gamma, Some(0.0));
     assert_eq!(loaded.contratos[1].open_interest, Some(0.0));
-}
-
-#[tokio::test]
-async fn sqlite_satisfies_option_chain_storage_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("in-memory SQLite must open");
-    option_snapshots::initialize(&pool)
-        .await
-        .expect("SQLite option schema must initialize");
-    let adapter = SqliteOptionDataAdapter::new(pool);
-
-    assert_option_chain_contract(&adapter).await;
-}
-
-#[tokio::test]
-async fn sqlite_preserves_null_zero_and_present_gamma_and_open_interest() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("in-memory SQLite must open");
-    option_snapshots::initialize(&pool)
-        .await
-        .expect("SQLite option schema must initialize");
-    let adapter = SqliteOptionDataAdapter::new(pool);
-
-    assert_nullable_market_facts_round_trip(&adapter).await;
 }
 
 #[tokio::test]

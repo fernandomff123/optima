@@ -2,10 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::NaiveDate;
 use hexagonal_backend::{
-    driven_adapters::{
-        duckdb::index_history::DuckDbIndexHistoryAdapter,
-        sqlite::{index_history, index_history_port::SqliteIndexHistoryAdapter},
-    },
+    driven_adapters::duckdb::index_history::DuckDbIndexHistoryAdapter,
     hexagon::{
         domain::index_history::{DailyIndexPrice, IndexHistory},
         driven_ports::{
@@ -14,7 +11,6 @@ use hexagonal_backend::{
         },
     },
 };
-use sqlx::sqlite::SqlitePoolOptions;
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -54,19 +50,6 @@ async fn assert_contract(adapter: &(impl ForLoadingIndexHistory + ForStoringInde
             .expect("history must load"),
         expected
     );
-}
-
-#[tokio::test]
-async fn sqlite_satisfies_index_history_contract() {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .expect("SQLite must open");
-    index_history::initialize(&pool)
-        .await
-        .expect("SQLite schema must initialize");
-    assert_contract(&SqliteIndexHistoryAdapter::new(pool)).await;
 }
 
 #[tokio::test]
