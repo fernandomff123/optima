@@ -512,6 +512,28 @@ mod tests {
     }
 
     #[test]
+    fn resolving_current_gex_updates_three_gex_targets_and_never_history() {
+        const HISTORY: &str = "spx-history-plot";
+        let gex_targets = ["gex-profile-plot", "gex-strike-plot", "gex-expiration-plot"];
+        let mut operations = TestOperationLog::default();
+        operations.dispatch(HISTORY, TestOperationKind::NewPlot, &test_plot(90));
+        for target in gex_targets {
+            operations.dispatch(target, TestOperationKind::NewPlot, &test_plot(3));
+        }
+        let history_before = operations.for_target(HISTORY).len();
+        for target in gex_targets {
+            operations.dispatch(target, TestOperationKind::React, &test_plot(4));
+        }
+        assert_eq!(operations.for_target(HISTORY).len(), history_before);
+        for target in gex_targets {
+            assert_eq!(
+                operations.for_target(target).last().unwrap().kind,
+                TestOperationKind::React
+            );
+        }
+    }
+
+    #[test]
     fn repeated_gex_reacts_preserve_full_history_trace() {
         const HISTORY: &str = "spx-history-plot";
         const GEX: &str = "gex-profile-plot";
@@ -609,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn page_declares_exactly_one_history_and_one_gex_target() {
+    fn page_declares_exactly_one_history_and_three_independent_gex_targets() {
         let main = include_str!("main.rs");
         let gex = include_str!("gamma_exposure.rs");
         let gex_runtime = gex.split("#[cfg(test)]").next().unwrap();
@@ -621,8 +643,25 @@ mod tests {
             gex_runtime.matches("<PlotlyChart id=GEX_PLOT_ID").count(),
             1
         );
+        assert_eq!(
+            gex_runtime
+                .matches("<PlotlyChart id=GEX_STRIKE_PLOT_ID")
+                .count(),
+            1
+        );
+        assert_eq!(
+            gex_runtime
+                .matches("<PlotlyChart id=GEX_EXPIRATION_PLOT_ID")
+                .count(),
+            1
+        );
         assert_eq!(main.matches("const SPX_HISTORY_PLOT_ID:").count(), 1);
         assert_eq!(gex_runtime.matches("const GEX_PLOT_ID:").count(), 1);
+        assert_eq!(gex_runtime.matches("const GEX_STRIKE_PLOT_ID:").count(), 1);
+        assert_eq!(
+            gex_runtime.matches("const GEX_EXPIRATION_PLOT_ID:").count(),
+            1
+        );
     }
 
     #[test]
