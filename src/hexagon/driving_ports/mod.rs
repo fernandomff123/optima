@@ -11,6 +11,7 @@ pub mod for_scheduling_market_operations;
 pub mod for_simulating_strategies;
 pub mod for_streaming_market_prices;
 pub mod for_synchronizing_market_data;
+pub mod for_viewing_gamma_exposure;
 pub mod for_viewing_interest_rates;
 pub mod for_viewing_intraday_options;
 pub mod for_viewing_market_data;

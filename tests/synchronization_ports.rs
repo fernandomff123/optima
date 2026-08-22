@@ -19,7 +19,7 @@ use hexagonal_backend::hexagon::{
         market_history::MarketHistory,
         options::{
             ContratoOpcao, OptionChain, OptionContractSpecification, OptionType, Snapshot,
-            UnderlyingPriceObservation,
+            StoredOptionChainSnapshot, UnderlyingPriceObservation,
         },
         treasury::YieldCurve,
         volatility::TermStructure,
@@ -217,7 +217,10 @@ impl ForObtainingOptionChains for OptionsSuccessMock {
 
 #[async_trait]
 impl ForLoadingOptionChains for OptionDataMock {
-    async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
+    async fn load_option_chain(
+        &self,
+        _ticker: &str,
+    ) -> PortResult<Option<StoredOptionChainSnapshot>> {
         Ok(None)
     }
 }

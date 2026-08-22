@@ -416,6 +416,27 @@ fn black_scholes(
     })
 }
 
+/// Returns the Black-Scholes gamma used by strategy simulation.
+pub fn black_scholes_gamma(
+    spot: f64,
+    strike: f64,
+    time: f64,
+    rate: f64,
+    dividend_yield: f64,
+    volatility: f64,
+) -> Result<f64, SimulationError> {
+    black_scholes(
+        OptionType::Call,
+        spot,
+        strike,
+        time,
+        rate,
+        dividend_yield,
+        volatility,
+    )
+    .map(|priced| priced.greeks.gamma)
+}
+
 fn intrinsic_value(option_type: OptionType, spot: f64, strike: f64) -> f64 {
     match option_type {
         OptionType::Call => (spot - strike).max(0.0),

@@ -1,5 +1,64 @@
 # Public API route inventory
 
+## Gamma exposure v1
+
+`GET /api/options/gamma-exposure/{ticker}` returns the factual option snapshot's
+gamma exposure and an optional modeled spot profile. There is deliberately no
+compatibility alias. Query parameters are `range_percent` (default `20`, range
+`5..=50`) and `points` (default `81`, odd values in `21..=201`).
+
+During the regular session defined by the existing exchange calendar, the
+endpoint obtains a transient intraday option-chain snapshot from the existing
+provider, resolves its contract specifications once as a deduplicated batch,
+and does not persist it. A `not_found` specification excludes only its affected
+contracts; resolver failures and incompatible identity sets fail factually.
+Outside that session it loads the latest
+persisted end-of-day snapshot and does not contact the intraday provider. A
+missing end-of-day snapshot returns an unavailable response without fabricated
+values.
+
+For each eligible contract, GEX per 1% spot move is
+`gamma × open_interest × contract_multiplier × spot² × 0.01`. The response uses
+the snapshot's factual spot, gamma, open interest, multiplier, currency (when
+present), and as-of timestamp. Missing, non-finite, or invalid inputs exclude
+only the affected contracts; published zero gamma or open interest remains a
+valid zero. Spot and multiplier must be positive, and open interest cannot be
+negative.
+
+Non-finite formula intermediates or aggregate overflows exclude the affected
+contract with a structured `numeric_overflow` diagnostic. Non-finite numbers
+are never emitted in the public JSON.
+
+At least one eligible contract is required. An empty snapshot, invalid or
+missing spot, or a snapshot whose contracts are all excluded returns the
+canonical unavailable error instead of presenting a fabricated zero. A zero
+from eligible published zero inputs, or from call/put cancellation, remains a
+valid result. `as_of` is nullable and never promotes an offsetless provider
+timestamp or collection time into an economic market timestamp.
+
+The sign convention is an explicit analytical assumption, not an observed
+market fact: calls are positive and puts are negative. The response includes
+call, put and net totals, strike and expiration aggregations, snapshot origin,
+methodology, and bounded structured exclusion diagnostics.
+
+`current_exposure` keeps the calculation above using the gamma published in the
+snapshot at its observed spot. `modeled_profile` is a `DataState`: it is
+`unavailable` rather than a fabricated zero curve when IV, rates, forward/carry,
+or eligible contracts are unavailable. When available, Black–Scholes gamma is
+recalculated at every deterministic grid spot with each contract's snapshot IV
+held constant by strike (the explicit sticky-strike model assumption). Treasury
+rates are interpolated per expiration; forward comes from the existing paired
+call/put parity calculation and dividend carry is derived from that factual
+forward, never assumed to be zero. Calls remain positive and puts negative.
+
+The profile includes every linearly interpolated adjacent zero crossing and the
+one nearest the observed spot. Its center is the observed spot exactly. The
+modeled center need not equal `current_exposure`: the former recomputes
+Black–Scholes gamma under the stated inputs, while the latter uses provider
+gamma. Intraday `valuation_time` is the explicit evaluation instant. EOD uses
+the official calendar close for the factual persisted session date, including
+early closes; collection time is never used as an economic timestamp.
+
 This is the mechanical inventory captured before normalization. `domain` means
 the old modern handler accepted or serialized a hexagon type directly. The
 known consumer is based on the adapter's existing compatibility contract and

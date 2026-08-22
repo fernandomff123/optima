@@ -150,10 +150,13 @@ fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
     let application =
         fs::read_to_string(root.join("src/hexagon/application/synchronization/mod.rs"))
             .expect("synchronization application must be readable");
+    let enrichment =
+        fs::read_to_string(root.join("src/hexagon/application/option_snapshot_enrichment.rs"))
+            .expect("option snapshot enrichment must be readable");
     for forbidden in ["cboe", "duckdb", "sql", "axum", "http"] {
         assert!(!application.to_ascii_lowercase().contains(forbidden));
     }
-    assert!(application.contains("resolve_option_contract_specifications(&identities)"));
+    assert!(enrichment.contains("resolve_option_contract_specifications(&identities)"));
     assert!(!application.contains("resolve_option_contract_specification("));
 
     let port = fs::read_to_string(
@@ -175,10 +178,12 @@ fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
         .expect("composition root must be readable");
     assert_eq!(
         configurator
-            .matches("OptionSnapshotEnrichment::new(CboeOptionContractSpecificationsAdapter)")
+            .matches("Arc::new(CboeOptionContractSpecificationsAdapter)")
             .count(),
         1
     );
+    assert!(configurator.contains("contract_specifications.clone()"));
+    assert!(configurator.contains("OptionSnapshotEnrichment::new(contract_specifications)"));
 }
 
 #[test]
@@ -191,6 +196,42 @@ fn nullable_option_market_facts_do_not_introduce_gex_policy_in_adapters() {
         let source = fs::read_to_string(root.join(relative)).expect("adapter must be readable");
         assert!(!source.to_ascii_lowercase().contains("gex"));
         assert!(!source.to_ascii_lowercase().contains("gamma exposure"));
+    }
+}
+
+#[test]
+fn gamma_exposure_policy_stays_in_domain_and_application() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let domain = fs::read_to_string(root.join("src/hexagon/domain/gamma_exposure.rs"))
+        .expect("GEX domain must be readable");
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/gamma_exposure/mod.rs"))
+            .expect("GEX application must be readable");
+    let http = fs::read_to_string(root.join("src/driving_adapters/http/mod.rs"))
+        .expect("HTTP adapter must be readable");
+    let storage = fs::read_to_string(root.join("src/driven_adapters/duckdb/option_chains.rs"))
+        .expect("option storage adapter must be readable");
+    let provider = fs::read_to_string(root.join("src/driven_adapters/cboe/mod.rs"))
+        .expect("option provider adapter must be readable");
+
+    assert!(domain.contains("pub fn calculate("));
+    assert!(domain.contains("checked_gex("));
+    assert!(domain.contains("0.01"));
+    assert!(application.contains("is_regular_session(request.valuation_time)"));
+    assert!(application.contains("session_close(stored.session_date)"));
+    assert!(application.contains("obtain_option_chain(&ticker)"));
+    assert!(application.contains("load_option_chain(&ticker)"));
+    assert!(application.contains("intraday_enrichment.enrich(&mut snapshot)"));
+    assert!(application.contains("calculate_forward("));
+    assert!(domain.contains("black_scholes_gamma("));
+    assert!(domain.contains("pub fn modeled_profile("));
+    assert!(!application.contains("ForStoringOptionChains"));
+    assert!(!http.contains("open_interest *"));
+    assert!(!http.contains("powi(2)"));
+    assert!(!http.contains("black_scholes_gamma"));
+    for adapter in [&storage, &provider] {
+        assert!(!adapter.to_ascii_lowercase().contains("gamma exposure"));
+        assert!(!adapter.contains("* 0.01"));
     }
 }
 

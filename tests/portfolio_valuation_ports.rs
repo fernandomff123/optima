@@ -6,7 +6,7 @@ use hexagonal_backend::hexagon::{
     domain::{
         live_price::LivePrice,
         market_history::MarketHistory,
-        options::{ContratoOpcao, Snapshot},
+        options::{ContratoOpcao, Snapshot, StoredOptionChainSnapshot},
         portfolio::{
             Currency, Instrument, Money, Portfolio, PortfolioEvent, Trade, TradeSide, decimal,
         },
@@ -106,7 +106,10 @@ impl ForObtainingOptionChains for LiveOptionsMock {
 struct UnusedStoredOptions;
 #[async_trait]
 impl ForLoadingOptionChains for UnusedStoredOptions {
-    async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
+    async fn load_option_chain(
+        &self,
+        _ticker: &str,
+    ) -> PortResult<Option<StoredOptionChainSnapshot>> {
         Ok(None)
     }
 }

@@ -57,6 +57,7 @@ where
         self.option_chains
             .load_option_chain(&ticker)
             .await?
+            .map(|stored| stored.snapshot)
             .ok_or_else(|| {
                 PortError::NotFound(format!("option chain for '{ticker}' was not found"))
             })
@@ -177,7 +178,8 @@ where
     let snapshot = option_chains
         .load_option_chain(&ticker)
         .await?
-        .ok_or_else(|| PortError::NotFound(format!("option chain for '{ticker}' was not found")))?;
+        .ok_or_else(|| PortError::NotFound(format!("option chain for '{ticker}' was not found")))?
+        .snapshot;
     let curve = yield_curves
         .load_yield_curve(snapshot.timestamp_utc.date_naive())
         .await?
