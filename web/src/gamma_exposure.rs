@@ -18,6 +18,8 @@ use std::{
 
 use crate::plotly_chart::PlotlyChart;
 
+pub(crate) const GEX_PLOT_ID: &str = "gex-profile-plot";
+
 const DEFAULT_TICKER: &str = "SPX";
 const DEFAULT_RANGE_PERCENT: f64 = 20.0;
 const DEFAULT_POINTS: usize = 81;
@@ -290,8 +292,30 @@ impl fmt::Display for GammaLoadError {
 enum GammaLoadState {
     Idle,
     Loading,
-    Success(Box<GammaExposurePresentation>),
+    Success,
     Error(GammaLoadError),
+}
+
+fn query_status(
+    state: &GammaLoadState,
+    validation_error: Option<&str>,
+    parameters: Option<&GammaExposureParameters>,
+) -> String {
+    if let Some(error) = validation_error {
+        return error.to_string();
+    }
+    match state {
+        GammaLoadState::Idle => "Ainda não foi efetuado um cálculo.".to_string(),
+        GammaLoadState::Loading => "A calcular novo perfil…".to_string(),
+        GammaLoadState::Error(error) => error.to_string(),
+        GammaLoadState::Success => match parameters {
+            Some(parameters) => format!(
+                "Resultado apresentado: {} · intervalo {}% · {} pontos",
+                parameters.ticker, parameters.range_percent, parameters.points
+            ),
+            None => "Resultado apresentado.".to_string(),
+        },
+    }
 }
 
 #[derive(Clone, Default)]
@@ -339,6 +363,8 @@ pub fn GammaExposureView() -> impl IntoView {
     let (points, set_points) = signal(DEFAULT_POINTS.to_string());
     let (validation_error, set_validation_error) = signal::<Option<String>>(None);
     let (state, set_state) = signal(GammaLoadState::Idle);
+    let (presentation, set_presentation) = signal::<Option<GammaExposurePresentation>>(None);
+    let (last_parameters, set_last_parameters) = signal::<Option<GammaExposureParameters>>(None);
     let (plot, set_plot) = signal(SendWrapper::new(None::<Plot>));
     let (plot_error, set_plot_error) = signal::<Option<String>>(None);
     let generation = Arc::new(Mutex::new(RequestGeneration::default()));
@@ -396,12 +422,11 @@ pub fn GammaExposureView() -> impl IntoView {
                                     set_plot.set(SendWrapper::new(
                                         presentation.profile.as_ref().map(build_plot),
                                     ));
-                                    GammaLoadState::Success(Box::new(presentation))
+                                    set_presentation.set(Some(presentation));
+                                    set_last_parameters.set(Some(parameters));
+                                    GammaLoadState::Success
                                 }
-                                Err(error) => {
-                                    set_plot.set(SendWrapper::new(None));
-                                    GammaLoadState::Error(error)
-                                }
+                                Err(error) => GammaLoadState::Error(error),
                             });
                         }
                         lock_unpoisoned(&task_abort).take();
@@ -415,72 +440,89 @@ pub fn GammaExposureView() -> impl IntoView {
                     {move || if matches!(state.get(), GammaLoadState::Loading) { "A calcular…" } else { "Calcular" }}
                 </button>
             </form>
-            {move || validation_error.get().map(|error| view! { <div class="gex-feedback error" role="alert">{error}</div> })}
-            {move || match state.get() {
-                GammaLoadState::Idle => view! { <div class="gex-feedback">"Define os parâmetros e seleciona Calcular."</div> }.into_any(),
-                GammaLoadState::Loading => view! { <div class="gex-feedback" role="status">"A calcular Gamma Exposure…"</div> }.into_any(),
-                GammaLoadState::Error(error) => view! { <div class="gex-feedback error" role="alert">{error.to_string()}</div> }.into_any(),
-                GammaLoadState::Success(presentation) => view! { <GammaExposureSuccess presentation=*presentation /> }.into_any(),
-            }}
+            <div
+                class:gex-feedback=true
+                class:error=move || validation_error.get().is_some() || matches!(state.get(), GammaLoadState::Error(_))
+                role="status"
+            >
+                {move || query_status(
+                    &state.get(),
+                    validation_error.get().as_deref(),
+                    last_parameters.get().as_ref(),
+                )}
+            </div>
             {move || plot_error.get().map(|message| view! {
                 <div class="gex-feedback error" role="alert">{format!("Não foi possível apresentar o gráfico. {message}")}</div>
             })}
-            <div class:hidden=move || plot.with(|plot| plot.is_none()) class="card gex-chart-card">
-                <PlotlyChart plot error=set_plot_error aria_label="Perfil modelado de Gamma Exposure" />
+            <GammaExposureResults presentation />
+            <div class="card gex-chart-card">
+                <div class="gex-plot-stage">
+                    <PlotlyChart id=GEX_PLOT_ID plot error=set_plot_error aria_label="Perfil modelado de Gamma Exposure" />
+                    {move || plot.with(|plot| plot.is_none()).then(|| view! {
+                        <div class="gex-plot-placeholder" role="status">
+                            {move || if matches!(state.get(), GammaLoadState::Loading) {
+                                "A calcular o perfil…"
+                            } else {
+                                "Calcule o perfil para apresentar o gráfico."
+                            }}
+                        </div>
+                    })}
+                </div>
             </div>
         </section>
     }
 }
 
 #[component]
-fn GammaExposureSuccess(presentation: GammaExposurePresentation) -> impl IntoView {
-    let current = presentation.current;
-    let profile = presentation.profile;
-    let currency = current
-        .currency
-        .clone()
-        .unwrap_or_else(|| "moeda indisponível".to_string());
+fn GammaExposureResults(
+    presentation: ReadSignal<Option<GammaExposurePresentation>>,
+) -> impl IntoView {
+    let fact = move |label: &'static str,
+                     value: fn(&GammaExposurePresentation) -> String,
+                     title: Option<fn(&GammaExposurePresentation) -> String>| {
+        view! {
+            <div><dt>{label}</dt><dd title=move || presentation.get().as_ref().and_then(|presentation| title.map(|title| title(presentation)))>{move || presentation.get().as_ref().map(value).unwrap_or_else(|| "—".to_string())}</dd></div>
+        }
+    };
+    let methodology =
+        move |label: &'static str, value: fn(&GammaExposurePresentation) -> Option<String>| {
+            view! {
+                <><strong>{label}</strong><p>{move || presentation.get().as_ref().and_then(value).unwrap_or_else(|| "Disponível após o primeiro cálculo.".to_string())}</p></>
+            }
+        };
     view! {
         <div class="gex-results">
             <dl class="gex-facts">
-                <Fact label="Ticker" value=current.ticker />
-                <Fact label="Spot" value=current.spot.map(format_exposure).unwrap_or_else(|| "Indisponível".to_string()) />
-                <Fact label="Moeda" value=current.currency.unwrap_or_else(|| "Indisponível".to_string()) />
-                <Fact label="Origem" value=current.origin.to_string() />
-                {current.as_of.map(|value| view! { <Fact label="As of" value /> })}
-                <Fact label="GEX calls (+)" value=format_compact_gex(current.calls_gex, &currency) title=format_full_gex(current.calls_gex, &currency) />
-                <Fact label="GEX puts (−)" value=format_compact_gex(current.puts_gex, &currency) title=format_full_gex(current.puts_gex, &currency) />
-                <Fact label="GEX líquido" value=format_compact_gex(current.net_gex, &currency) title=format_full_gex(current.net_gex, &currency) />
-                <Fact label="Contratos incluídos" value=current.included_contracts.to_string() />
-                <Fact label="Contratos excluídos" value=current.excluded_contracts.to_string() />
-                {profile.as_ref().and_then(|value| value.nearest_zero_crossing).map(|value| view! { <Fact label="Zero crossing mais próximo" value=format_exposure(value) /> })}
+                {fact("Ticker", |value| value.current.ticker.clone(), None)}
+                {fact("Spot", |value| value.current.spot.map(format_exposure).unwrap_or_else(|| "Indisponível".to_string()), None)}
+                {fact("Moeda", |value| value.current.currency.clone().unwrap_or_else(|| "Indisponível".to_string()), None)}
+                {fact("Origem", |value| value.current.origin.to_string(), None)}
+                {fact("GEX calls", |value| format_compact_gex(value.current.calls_gex, value.current.currency.as_deref().unwrap_or("moeda indisponível")), Some(|value| format_full_gex(value.current.calls_gex, value.current.currency.as_deref().unwrap_or("moeda indisponível"))))}
+                {fact("GEX puts", |value| format_compact_gex(value.current.puts_gex, value.current.currency.as_deref().unwrap_or("moeda indisponível")), Some(|value| format_full_gex(value.current.puts_gex, value.current.currency.as_deref().unwrap_or("moeda indisponível"))))}
+                {fact("GEX líquido", |value| format_compact_gex(value.current.net_gex, value.current.currency.as_deref().unwrap_or("moeda indisponível")), Some(|value| format_full_gex(value.current.net_gex, value.current.currency.as_deref().unwrap_or("moeda indisponível"))))}
+                {fact("Contratos incluídos", |value| value.current.included_contracts.to_string(), None)}
+                {fact("Contratos excluídos", |value| value.current.excluded_contracts.to_string(), None)}
+                {fact("Zero crossing mais próximo", |value| value.profile.as_ref().and_then(|profile| profile.nearest_zero_crossing).map(format_exposure).unwrap_or_else(|| "Indisponível".to_string()), None)}
             </dl>
             <div class="gex-methodology">
-                <strong>"Convenção analítica"</strong><p>{current.sign_convention}</p>
-                <strong>"Metodologia atual"</strong><p>{current.methodology}</p>
-                {profile.as_ref().map(|value| view! { <><strong>"Metodologia do perfil"</strong><p>{value.methodology.clone()}</p></> })}
+                {methodology("Convenção analítica", |value| Some(value.current.sign_convention.clone()))}
+                {methodology("Metodologia atual", |value| Some(value.current.methodology.clone()))}
+                {methodology("Metodologia do perfil", |value| value.profile.as_ref().map(|profile| profile.methodology.clone()))}
             </div>
-            {match profile {
-                Some(profile) => view! {
+            <div class="gex-profile-detail">
+                {move || presentation.get().map(|presentation| match presentation.profile {
+                    Some(profile) => view! {
                     <div class="gex-chart-key">
                         <span>"Linha âmbar: spot observado"</span>
                         <span>"Violeta: nearest zero crossing"</span>
                         <span>{format!("Zero crossings: {}", profile.zero_crossings.iter().map(|value| format_exposure(*value)).collect::<Vec<_>>().join(", "))}</span>
                     </div>
-                }.into_any(),
-                _ => view! { <div class="gex-unavailable" role="status">"O perfil modelado está indisponível. A exposição atual acima permanece factual e não foi substituída por uma curva artificial."</div> }.into_any(),
-            }}
+                    }.into_any(),
+                    None => view! { <div class="gex-unavailable" role="status">"O perfil modelado está indisponível. A exposição atual acima permanece factual e não foi substituída por uma curva artificial."</div> }.into_any(),
+                })}
+            </div>
         </div>
     }
-}
-
-#[component]
-fn Fact(
-    label: &'static str,
-    value: String,
-    #[prop(optional)] title: Option<String>,
-) -> impl IntoView {
-    view! { <div><dt>{label}</dt><dd title=title>{value}</dd></div> }
 }
 
 fn format_exposure(value: f64) -> String {
@@ -669,8 +711,95 @@ mod tests {
         assert_eq!(value["layout"]["yaxis"]["title"]["text"], "GEX por 1%");
         assert_eq!(value["layout"]["yaxis"]["tickformat"], "~s");
         assert_eq!(value["layout"]["legend"]["orientation"], "h");
+        assert_eq!(value["layout"]["autosize"], true);
+        assert!(value["layout"].get("width").is_none());
+        let configuration = serde_json::to_value(plot.configuration()).unwrap();
+        assert_eq!(configuration["responsive"], true);
         assert!(!json.contains("NaN"));
         assert!(!json.contains("Infinity"));
+    }
+
+    #[test]
+    fn initial_structure_has_all_placeholders_and_one_permanent_plot_target() {
+        let source = include_str!("gamma_exposure.rs");
+        let runtime = source.split("#[cfg(test)]").next().unwrap();
+        for label in [
+            "Ticker",
+            "Spot",
+            "Moeda",
+            "Origem",
+            "GEX calls",
+            "GEX puts",
+            "GEX líquido",
+            "Contratos incluídos",
+            "Contratos excluídos",
+            "Zero crossing mais próximo",
+            "Convenção analítica",
+            "Metodologia atual",
+            "Metodologia do perfil",
+        ] {
+            assert!(runtime.contains(label));
+        }
+        assert!(runtime.contains("unwrap_or_else(|| \"—\".to_string())"));
+        assert!(runtime.contains("Disponível após o primeiro cálculo."));
+        assert_eq!(runtime.matches("<PlotlyChart id=GEX_PLOT_ID").count(), 1);
+        assert!(!runtime.contains("class:hidden=move || plot"));
+        assert!(runtime.contains("Calcule o perfil para apresentar o gráfico."));
+        assert!(runtime.contains("A calcular o perfil…"));
+    }
+
+    #[test]
+    fn query_state_copy_is_factual_and_stable() {
+        let parameters = GammaExposureParameters {
+            ticker: "SPX".to_string(),
+            range_percent: 20.0,
+            points: 81,
+        };
+        assert_eq!(
+            query_status(&GammaLoadState::Idle, None, None),
+            "Ainda não foi efetuado um cálculo."
+        );
+        assert_eq!(
+            query_status(&GammaLoadState::Loading, None, None),
+            "A calcular novo perfil…"
+        );
+        assert_eq!(
+            query_status(&GammaLoadState::Success, None, Some(&parameters)),
+            "Resultado apresentado: SPX · intervalo 20% · 81 pontos"
+        );
+    }
+
+    #[test]
+    fn loading_and_error_do_not_clear_a_previous_result_or_plot() {
+        let previous = map_response(&response(true)).unwrap();
+        let previous_plot = build_plot(previous.profile.as_ref().unwrap()).to_json();
+        let presentation = Some(previous.clone());
+        let plot = Some(previous_plot.clone());
+
+        for state in [
+            GammaLoadState::Loading,
+            GammaLoadState::Error(GammaLoadError::Network),
+        ] {
+            assert!(matches!(
+                state,
+                GammaLoadState::Loading | GammaLoadState::Error(_)
+            ));
+            assert_eq!(presentation, Some(previous.clone()));
+            assert_eq!(plot, Some(previous_plot.clone()));
+        }
+    }
+
+    #[test]
+    fn all_query_states_keep_the_same_four_structural_blocks() {
+        const BLOCKS: [&str; 4] = ["query-status", "summary", "methodology", "chart"];
+        for _state in [
+            GammaLoadState::Idle,
+            GammaLoadState::Loading,
+            GammaLoadState::Success,
+            GammaLoadState::Error(GammaLoadError::Http(503)),
+        ] {
+            assert_eq!(BLOCKS, ["query-status", "summary", "methodology", "chart"]);
+        }
     }
 
     #[test]

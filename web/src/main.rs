@@ -13,6 +13,11 @@ use gloo_net::{http::Request, websocket::futures::WebSocket};
 use gloo_timers::future::TimeoutFuture;
 use leptos::leptos_dom::helpers::window_event_listener;
 use leptos::prelude::*;
+use plotly::{
+    Configuration, Layout, Plot, Scatter,
+    common::{Line, Mode, Title},
+    layout::{Axis, Margin},
+};
 use send_wrapper::SendWrapper;
 use std::{
     collections::BTreeSet,
@@ -29,11 +34,13 @@ mod gamma_exposure;
 mod plotly_chart;
 
 use gamma_exposure::GammaExposureView;
+use plotly_chart::PlotlyChart;
 
 const API_BASE_PATH: &str = "/api";
 const DATA_REFRESH_POLL_INTERVAL_MS: u32 = 5_000;
 const DATA_REFRESH_SCHEDULER_TOLERANCE_MS: i64 = 1_500;
 const DATA_REFRESH_PAST_ATTEMPT_RECHECK_MS: u32 = 60_000;
+const SPX_HISTORY_PLOT_ID: &str = "spx-history-plot";
 
 #[derive(Clone)]
 enum DataRefreshLoadState {
@@ -1714,60 +1721,69 @@ fn HistorySuccess(history: PriceHistoryOverview, stale: bool) -> AnyView {
 
 #[component]
 fn SpxChart(points: Vec<PriceHistoryPoint>) -> impl IntoView {
-    const WIDTH: f64 = 900.0;
-    const HEIGHT: f64 = 210.0;
-    const PAD_X: f64 = 22.0;
-    const PAD_TOP: f64 = 22.0;
-    const PAD_BOTTOM: f64 = 50.0;
-
-    let min = points
-        .iter()
-        .map(|point| point.close)
-        .fold(f64::INFINITY, f64::min);
-    let max = points
-        .iter()
-        .map(|point| point.close)
-        .fold(f64::NEG_INFINITY, f64::max);
-    let range = (max - min).max(1.0);
-    let denominator = points.len().saturating_sub(1).max(1) as f64;
-    let polyline = points
-        .iter()
-        .enumerate()
-        .map(|(index, point)| {
-            let x = PAD_X + index as f64 / denominator * (WIDTH - PAD_X * 2.0);
-            let y = PAD_TOP + (max - point.close) / range * (HEIGHT - PAD_TOP - PAD_BOTTOM);
-            format!("{x:.2},{y:.2}")
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let first = points.first().map(|point| point.date);
-    let last = points.last().map(|point| point.date);
-    let first_label = first.map(|date| date.to_string()).unwrap_or_default();
-    let last_label = last.map(|date| date.to_string()).unwrap_or_default();
-    let description = format!(
-        "{} sessões, de {first_label} a {last_label}, entre {min:.2} e {max:.2} pontos",
-        points.len()
-    );
+    let (plot_error, set_plot_error) = signal::<Option<String>>(None);
+    let plot = match build_spx_plot(&points) {
+        Ok(plot) => Some(plot),
+        Err(error) => {
+            set_plot_error.set(Some(error));
+            None
+        }
+    };
+    let (plot, _) = signal(SendWrapper::new(plot));
 
     view! {
         <figure class="spx-chart">
-            <svg viewBox=format!("0 0 {WIDTH} {HEIGHT}") role="img" aria-labelledby="spx-chart-title spx-chart-desc">
-                <title id="spx-chart-title">"Histórico de fechos do S&P 500"</title>
-                <desc id="spx-chart-desc">{description}</desc>
-                <g class="chart-grid" aria-hidden="true">
-                    <line x1="22" y1="22" x2="878" y2="22" />
-                    <line x1="22" y1="91" x2="878" y2="91" />
-                    <line x1="22" y1="160" x2="878" y2="160" />
-                </g>
-                <polyline class="spx-line" points=polyline />
-                <text x="22" y="16" class="chart-value">{format_number(max)}</text>
-                <text x="22" y="174" class="chart-value">{format_number(min)}</text>
-                <text x="22" y="200" class="chart-date">{first_label.clone()}</text>
-                <text x="878" y="200" text-anchor="end" class="chart-date">{last_label.clone()}</text>
-                <text x="450" y="200" text-anchor="middle" class="chart-session-count">{format!("{} sessões", points.len())}</text>
-            </svg>
+            <PlotlyChart id=SPX_HISTORY_PLOT_ID plot error=set_plot_error aria_label="Histórico de fechos do S&P 500" />
+            {move || plot_error.get().map(|error| view! { <DataStatus kind="error" message=error /> })}
         </figure>
     }
+}
+
+fn build_spx_plot(points: &[PriceHistoryPoint]) -> Result<Plot, String> {
+    if points.is_empty() {
+        return Err("O histórico do SPX não contém sessões completas.".to_string());
+    }
+    let mut dates = Vec::with_capacity(points.len());
+    let mut closes = Vec::with_capacity(points.len());
+    for point in points {
+        if !point.close.is_finite() {
+            return Err("O histórico do SPX contém um valor não finito.".to_string());
+        }
+        dates.push(point.date.to_string());
+        closes.push(point.close);
+    }
+
+    let mut plot = Plot::new();
+    plot.add_trace(
+        Scatter::new(dates, closes)
+            .name("S&P 500")
+            .mode(Mode::Lines)
+            .opacity(1.0)
+            .line(Line::new().color("#4da3ff").width(3.0))
+            .hover_template("Sessão: %{x|%x}<br>Fecho: %{y:,.2f}<extra></extra>"),
+    );
+    plot.set_layout(
+        Layout::new()
+            .auto_size(true)
+            .show_legend(false)
+            .margin(Margin::new().left(58).right(14).top(18).bottom(48))
+            .paper_background_color("#19263c")
+            .plot_background_color("#111b2e")
+            .font(plotly::common::Font::new().color("#dce4f2"))
+            .x_axis(Axis::new().title(Title::with_text("Sessão")))
+            .y_axis(
+                Axis::new()
+                    .title(Title::with_text("Índice"))
+                    .tick_format(",.2f"),
+            ),
+    );
+    plot.set_configuration(
+        Configuration::new()
+            .responsive(true)
+            .display_logo(false)
+            .scroll_zoom(false),
+    );
+    Ok(plot)
 }
 
 #[component]
@@ -1799,6 +1815,122 @@ fn format_number(value: f64) -> String {
         .rev()
         .collect::<String>();
     format!("{grouped},{decimals}")
+}
+
+#[cfg(test)]
+mod spx_plot_tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn point(year: i32, month: u32, day: u32, close: f64) -> PriceHistoryPoint {
+        PriceHistoryPoint {
+            date: NaiveDate::from_ymd_opt(year, month, day).unwrap(),
+            open: close - 10.0,
+            high: close + 10.0,
+            low: close - 20.0,
+            close,
+        }
+    }
+
+    fn plot_json(points: &[PriceHistoryPoint]) -> serde_json::Value {
+        serde_json::from_str(&build_spx_plot(points).unwrap().to_json()).unwrap()
+    }
+
+    #[test]
+    fn maps_factual_sessions_to_xy_in_received_chronological_order() {
+        let value = plot_json(&[
+            point(2026, 8, 19, 6_395.78),
+            point(2026, 8, 20, 6_410.12),
+            point(2026, 8, 21, 6_376.44),
+        ]);
+        assert_eq!(
+            value["data"][0]["x"],
+            serde_json::json!(["2026-08-19", "2026-08-20", "2026-08-21"])
+        );
+        assert_eq!(
+            value["data"][0]["y"],
+            serde_json::json!([6395.78, 6410.12, 6376.44])
+        );
+    }
+
+    #[test]
+    fn historical_plot_is_pure_and_repeatable() {
+        let points = [
+            point(2026, 8, 19, 6_395.78),
+            point(2026, 8, 20, 6_410.12),
+            point(2026, 8, 21, 6_376.44),
+        ];
+        let first = build_spx_plot(&points).unwrap().to_json();
+        let second = build_spx_plot(&points).unwrap().to_json();
+        assert_eq!(first, second);
+        let value: serde_json::Value = serde_json::from_str(&first).unwrap();
+        assert_eq!(value["data"].as_array().unwrap().len(), 1);
+        assert_eq!(value["data"][0]["x"].as_array().unwrap().len(), 3);
+        assert_eq!(value["data"][0]["y"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn rejects_empty_and_non_finite_series() {
+        assert!(build_spx_plot(&[]).is_err());
+        for close in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(build_spx_plot(&[point(2026, 8, 21, close)]).is_err());
+        }
+    }
+
+    #[test]
+    fn configures_single_responsive_line_with_date_tooltip_and_no_legend() {
+        let plot = build_spx_plot(&[point(2026, 8, 21, 6_376.44)]).unwrap();
+        let json = plot.to_json();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let configuration = serde_json::to_value(plot.configuration()).unwrap();
+        assert_eq!(value["data"].as_array().unwrap().len(), 1);
+        assert_eq!(value["data"][0]["mode"], "lines");
+        assert_eq!(value["data"][0]["type"], "scatter");
+        assert_eq!(value["data"][0]["opacity"], 1.0);
+        assert_eq!(value["data"][0]["line"]["color"], "#4da3ff");
+        assert_eq!(value["data"][0]["line"]["width"], 3.0);
+        assert_eq!(value["layout"]["showlegend"], false);
+        assert_eq!(value["layout"]["autosize"], true);
+        assert!(value["layout"].get("width").is_none());
+        assert!(value["layout"]["xaxis"].get("domain").is_none());
+        assert!(value["layout"]["yaxis"].get("domain").is_none());
+        assert_eq!(value["layout"]["xaxis"]["title"]["text"], "Sessão");
+        assert_eq!(value["layout"]["yaxis"]["title"]["text"], "Índice");
+        assert_eq!(value["layout"]["yaxis"]["tickformat"], ",.2f");
+        assert_eq!(configuration["responsive"], true);
+        assert_eq!(configuration["displaylogo"], false);
+        assert_eq!(configuration["scrollZoom"], false);
+        assert_eq!(
+            value["data"][0]["hovertemplate"],
+            "Sessão: %{x|%x}<br>Fecho: %{y:,.2f}<extra></extra>"
+        );
+        assert!(!json.contains("rangeslider"));
+    }
+
+    #[test]
+    fn historical_target_and_ancestors_fill_the_card_without_width_caps() {
+        let css = include_str!("../styles.css");
+        assert!(css.contains(
+            ".market-history-grid, .market-history-grid .chart-card, .history-content, .spx-chart, .spx-chart .plotly-chart { width: 100%; min-width: 0; }"
+        ));
+        for forbidden in [
+            ".spx-chart { max-width",
+            ".spx-chart .plotly-chart { max-width",
+            ".spx-chart { flex-basis",
+            ".spx-chart .plotly-chart { flex-basis",
+            ".spx-chart { aspect-ratio",
+        ] {
+            assert!(!css.contains(forbidden));
+        }
+        assert!(css.contains("* { box-sizing: border-box; }"));
+    }
+
+    #[test]
+    fn history_and_gex_have_distinct_stable_ids() {
+        assert_eq!(SPX_HISTORY_PLOT_ID, "spx-history-plot");
+        assert_eq!(gamma_exposure::GEX_PLOT_ID, "gex-profile-plot");
+        assert_ne!(SPX_HISTORY_PLOT_ID, gamma_exposure::GEX_PLOT_ID);
+    }
 }
 
 #[component]
