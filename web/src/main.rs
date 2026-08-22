@@ -25,6 +25,11 @@ use std::{
 };
 use wasm_bindgen::{JsCast, closure::Closure};
 
+mod gamma_exposure;
+mod plotly_chart;
+
+use gamma_exposure::GammaExposureView;
+
 const API_BASE_PATH: &str = "/api";
 const DATA_REFRESH_POLL_INTERVAL_MS: u32 = 5_000;
 const DATA_REFRESH_SCHEDULER_TOLERANCE_MS: i64 = 1_500;
@@ -1540,6 +1545,7 @@ fn MarketAnalysisPage() -> impl IntoView {
                     </Suspense>
                 </article>
             </div>
+            <GammaExposureView />
         </section>
     }
 }
