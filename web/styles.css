@@ -247,6 +247,27 @@ button:disabled { cursor: not-allowed; opacity: .75; }
 .refresh-empty { min-height: 120px; display: grid; place-items: center; color: var(--muted); font-size: 11px; text-align: center; }
 .risk-positions-panel { grid-column: 1 / -1; padding: 0; overflow: hidden; }.risk-positions-panel .dashboard-panel-title { padding: 22px 22px 0; }.risk-method { display: flex; gap: 10px; padding: 0 22px 16px; color: var(--muted); font-size: 9px; }.risk-method span { margin-right: 4px; text-transform: uppercase; letter-spacing: .07em; }.risk-method b { color: #aeb9cb; }.risk-table { width: 100%; white-space: nowrap; }.risk-table th { background: #0b11204d; }.risk-table th, .risk-table td { padding: 13px 16px; }.risk-table td { font-size: 12px; }.ticker { color: #77a8ff; }.strategy-pill, .risk-level { display: inline-flex; padding: 5px 8px; border-radius: 999px; background: #0b112077; font-size: 9px; font-weight: 800; }.risk-level.red { color: #ff8e99; background: #ff667419; }.risk-level.amber { color: #f6c46f; background: #f3ad3d19; }.risk-level.blue { color: #8bb4ff; background: #4f8cff19; }.risk-level.green { color: #6fe3c1; background: #27d3a219; }.risk-cards-mobile { display: none; }
 .market-metrics { grid-template-columns: minmax(250px, 420px); }.market-history-grid { grid-template-columns: 1fr; }
+.gex-section { margin-top: 28px; }
+.gex-heading h2 { margin: 0; font-size: 22px; }.gex-heading p { margin: 7px 0 0; color: var(--muted); font-size: 12px; }
+.gex-form { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(2, minmax(120px, .55fr)) auto; align-items: end; gap: 12px; margin-top: 18px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.gex-form label span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; }
+.gex-form input { width: 100%; min-height: 42px; padding: 9px 11px; border: 1px solid #36506e; border-radius: 8px; background: #0d192a; color: var(--text); }
+.gex-feedback, .gex-unavailable { margin-top: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: #111b2e; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.gex-feedback.error { border-color: #70404b; color: #f08b99; }.gex-unavailable { border-color: #66582d; color: #ddc66f; }
+.gex-results { display: grid; gap: 15px; margin-top: 15px; }
+.gex-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--border-soft); }
+.gex-facts div { min-width: 0; padding: 14px; background: var(--surface); }.gex-facts dt { color: var(--subtle); font-size: 8px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }.gex-facts dd { margin: 7px 0 0; color: #e2e9f5; font-size: 12px; overflow-wrap: anywhere; }
+.gex-methodology { padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }.gex-methodology strong { color: #a9c5ff; font-size: 10px; }.gex-methodology p { margin: 5px 0 13px; color: var(--muted); font-size: 11px; line-height: 1.55; }.gex-methodology p:last-child { margin-bottom: 0; }
+.gex-chart-card { padding: 6px; overflow: hidden; }.gex-chart-key { display: flex; flex-wrap: wrap; gap: 7px 16px; padding: 5px 8px 10px; color: var(--muted); font-size: 9px; }
+.plotly-chart { width: 100%; min-height: 440px; }
+.gex-chart-card.hidden { display: none; }
+
+@media (max-width: 700px) {
+  .gex-form { grid-template-columns: 1fr 1fr; }.gex-form label:first-child, .gex-form button { grid-column: 1 / -1; }
+  .gex-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gex-chart-card { padding: 0; }
+  .plotly-chart { min-height: 380px; }
+}
 
 /* Sectors uses an isolated, local demonstration model; it never represents API data. */
 .sectors-page { max-width: 1720px; }
