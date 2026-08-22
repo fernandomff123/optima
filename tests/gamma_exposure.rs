@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -240,6 +240,7 @@ fn modeled_profile_reuses_black_scholes_on_a_centered_bounded_grid() {
             20.0,
             points,
             &modeled_inputs(),
+            &BTreeSet::new(),
         )
         .unwrap()
         .unwrap();
@@ -261,7 +262,8 @@ fn modeled_profile_reuses_black_scholes_on_a_centered_bounded_grid() {
                 valuation,
                 range,
                 points,
-                &modeled_inputs()
+                &modeled_inputs(),
+                &BTreeSet::new(),
             )
             .is_err()
         );
@@ -296,6 +298,7 @@ fn modeled_profile_uses_factual_settlement_time_for_same_day_and_prior_expiratio
         20.0,
         21,
         &BTreeMap::from([(("SPXW".into(), same_day), input)]),
+        &BTreeSet::new(),
     )
     .unwrap()
     .unwrap();
@@ -312,6 +315,7 @@ fn modeled_profile_uses_factual_settlement_time_for_same_day_and_prior_expiratio
             20.0,
             21,
             &BTreeMap::from([(("SPXW".into(), future), input)]),
+            &BTreeSet::from([("SPXW".into(), expiration)]),
         )
         .unwrap()
         .unwrap();
@@ -321,6 +325,42 @@ fn modeled_profile_uses_factual_settlement_time_for_same_day_and_prior_expiratio
             1
         );
     }
+}
+
+#[test]
+fn zero_dte_without_forward_before_settlement_is_missing_carry_not_expired() {
+    let valuation = Utc.with_ymd_and_hms(2026, 9, 18, 15, 0, 0).unwrap();
+    let same_day = valuation.date_naive();
+    let future = NaiveDate::from_ymd_opt(2026, 9, 21).unwrap();
+    let zero_dte = contract("ZERO-DTE", OptionType::Call, 100.0, same_day);
+    let calculable = contract("CALCULABLE", OptionType::Call, 105.0, future);
+    let mut value = snapshot(vec![zero_dte.clone(), calculable.clone()]);
+    value.chains = vec![OptionChain {
+        root: "SPXW".into(),
+        contratos: vec![zero_dte, calculable],
+    }];
+    let inputs = BTreeMap::from([(
+        ("SPXW".into(), future),
+        ModeledExpirationInput {
+            time_to_expiration: 3.0 / 365.0,
+            interest_rate: 0.04,
+            dividend_yield: 0.02,
+        },
+    )]);
+
+    let result = modeled_profile(&value, valuation, 20.0, 21, &inputs, &BTreeSet::new())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.included_contracts, 1);
+    assert_eq!(
+        result.excluded_by_reason[&ExclusionReason::MissingForwardCarry],
+        1
+    );
+    assert!(
+        !result
+            .excluded_by_reason
+            .contains_key(&ExclusionReason::ExpiredContract)
+    );
 }
 
 #[test]
@@ -351,9 +391,16 @@ fn modeled_profile_diagnostics_distinguish_missing_and_invalid_inputs() {
     invalid_iv.implied_volatility = Some(f64::INFINITY);
     contracts.push(invalid_iv);
 
-    let result = modeled_profile(&snapshot(contracts), valuation, 20.0, 21, &modeled_inputs())
-        .unwrap()
-        .unwrap();
+    let result = modeled_profile(
+        &snapshot(contracts),
+        valuation,
+        20.0,
+        21,
+        &modeled_inputs(),
+        &BTreeSet::new(),
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(result.included_contracts, 1);
     for reason in [
         ExclusionReason::MissingOpenInterest,
@@ -374,15 +421,29 @@ fn modeled_center_is_independent_from_provider_gamma_and_exclusions_are_partial(
     value.contratos[0].gamma = Some(0.000_001);
     value.chains[0].contratos[0].gamma = Some(0.000_001);
     let current = calculate(&value, SnapshotOrigin::Intraday);
-    let modeled = modeled_profile(&value, valuation, 20.0, 81, &modeled_inputs())
-        .unwrap()
-        .unwrap();
+    let modeled = modeled_profile(
+        &value,
+        valuation,
+        20.0,
+        81,
+        &modeled_inputs(),
+        &BTreeSet::new(),
+    )
+    .unwrap()
+    .unwrap();
     assert_ne!(current.net_gex, modeled.profile[40].net_gex);
 
     value.chains[0].contratos[1].implied_volatility = None;
-    let partial = modeled_profile(&value, valuation, 20.0, 81, &modeled_inputs())
-        .unwrap()
-        .unwrap();
+    let partial = modeled_profile(
+        &value,
+        valuation,
+        20.0,
+        81,
+        &modeled_inputs(),
+        &BTreeSet::new(),
+    )
+    .unwrap()
+    .unwrap();
     assert_eq!(partial.included_contracts, 1);
     assert_eq!(partial.excluded_contracts, 1);
     assert_eq!(
@@ -395,18 +456,32 @@ fn modeled_center_is_independent_from_provider_gamma_and_exclusions_are_partial(
 fn modeled_profile_rejects_missing_carry_and_numeric_overflow_without_non_finite_output() {
     let valuation = Utc.with_ymd_and_hms(2026, 8, 21, 15, 0, 0).unwrap();
     assert!(
-        modeled_profile(&modeled_snapshot(), valuation, 20.0, 81, &BTreeMap::new())
-            .unwrap()
-            .is_none()
+        modeled_profile(
+            &modeled_snapshot(),
+            valuation,
+            20.0,
+            81,
+            &BTreeMap::new(),
+            &BTreeSet::new(),
+        )
+        .unwrap()
+        .is_none()
     );
     let mut extreme = modeled_snapshot();
     for contract in &mut extreme.chains[0].contratos {
         contract.open_interest = Some(f64::MAX);
     }
     assert!(
-        modeled_profile(&extreme, valuation, 20.0, 81, &modeled_inputs())
-            .unwrap()
-            .is_none()
+        modeled_profile(
+            &extreme,
+            valuation,
+            20.0,
+            81,
+            &modeled_inputs(),
+            &BTreeSet::new(),
+        )
+        .unwrap()
+        .is_none()
     );
 }
 

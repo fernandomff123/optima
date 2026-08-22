@@ -1,6 +1,6 @@
 //! Pure gamma-exposure calculation over a factual option-chain snapshot.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, NaiveDate, Utc};
 
@@ -133,6 +133,7 @@ pub fn modeled_profile(
     range_percent: f64,
     points: usize,
     expiration_inputs: &BTreeMap<(String, NaiveDate), ModeledExpirationInput>,
+    expired_expirations: &BTreeSet<(String, NaiveDate)>,
 ) -> Result<Option<ModeledGammaExposureProfile>, &'static str> {
     if !range_percent.is_finite() || !(5.0..=50.0).contains(&range_percent) {
         return Err("range_percent must be between 5 and 50");
@@ -167,13 +168,9 @@ pub fn modeled_profile(
     let mut eligible = Vec::new();
     for chain in &snapshot.chains {
         for contract in &chain.contratos {
-            let model = expiration_inputs.get(&(chain.root.clone(), contract.expiration));
-            let reason = if contract.expiration < valuation_time.date_naive()
-                || model.is_some_and(|value| {
-                    !value.time_to_expiration.is_finite() || value.time_to_expiration <= 0.0
-                })
-                || (contract.expiration == valuation_time.date_naive() && model.is_none())
-            {
+            let expiration_identity = (chain.root.clone(), contract.expiration);
+            let model = expiration_inputs.get(&expiration_identity);
+            let reason = if expired_expirations.contains(&expiration_identity) {
                 Some(ExclusionReason::ExpiredContract)
             } else if contract.implied_volatility.is_none() {
                 Some(ExclusionReason::MissingImpliedVolatility)

@@ -1,7 +1,7 @@
 //! Gamma-exposure use case and snapshot-source selection.
 
 use async_trait::async_trait;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::{DateTime, NaiveDate, Utc};
 
@@ -117,12 +117,13 @@ where
             .modeled_expiration_inputs(&snapshot, valuation_time)
             .await
         {
-            Ok(expiration_inputs) => modeled_profile(
+            Ok((expiration_inputs, expired_expirations)) => modeled_profile(
                 &snapshot,
                 valuation_time,
                 request.range_percent,
                 request.points,
                 &expiration_inputs,
+                &expired_expirations,
             )
             .unwrap_or(None),
             Err(_) => None,
@@ -144,7 +145,10 @@ where
         &self,
         snapshot: &Snapshot,
         valuation_time: DateTime<Utc>,
-    ) -> PortResult<BTreeMap<(String, NaiveDate), ModeledExpirationInput>> {
+    ) -> PortResult<(
+        BTreeMap<(String, NaiveDate), ModeledExpirationInput>,
+        BTreeSet<(String, NaiveDate)>,
+    )> {
         let curve = self
             .yield_curves
             .load_yield_curve(valuation_time.date_naive())
@@ -159,6 +163,7 @@ where
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| PortError::Unavailable("spot is unavailable".into()))?;
         let mut inputs = BTreeMap::new();
+        let mut expired_expirations = BTreeSet::new();
         for chain in &snapshot.chains {
             let mut expirations = chain
                 .contratos
@@ -176,13 +181,14 @@ where
                 let Ok(expiration_time) = expiration_time else {
                     continue;
                 };
+                if expiration_time <= valuation_time {
+                    expired_expirations.insert((chain.root.clone(), expiration));
+                    continue;
+                }
                 let minutes = expiration_time
                     .signed_duration_since(valuation_time)
                     .num_minutes();
                 let time_to_expiration = minutes as f64 / 525_600.0;
-                if time_to_expiration <= 0.0 {
-                    continue;
-                }
                 let rate_days = expiration.signed_duration_since(curve.date).num_days() as f64;
                 let Ok(interest_rate) = spline.continuously_compounded_rate(rate_days) else {
                     continue;
@@ -209,7 +215,7 @@ where
                 );
             }
         }
-        Ok(inputs)
+        Ok((inputs, expired_expirations))
     }
 }
 
