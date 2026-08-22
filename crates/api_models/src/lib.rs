@@ -1032,6 +1032,7 @@ pub struct AssetHistoricalVolatilityResponse {
     pub ticker: String,
     pub as_of: Option<NaiveDate>,
     pub historical_volatility: DataState<HistoricalVolatilityOverview>,
+    pub analysis: HistoricalVolatilityAnalysis,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1073,6 +1074,48 @@ pub struct HistoricalVolatilityPoint {
 pub struct HistoricalVolatilitySeriesPoint {
     pub date: NaiveDate,
     pub window_sessions: usize,
+    pub annualized_volatility_percent: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoricalVolatilityAnalysis {
+    pub methodology: String,
+    pub annualization_sessions: usize,
+    pub unit: String,
+    pub price_basis: String,
+    pub valid_prices: usize,
+    pub first_valid_observation: Option<NaiveDate>,
+    pub last_valid_observation: Option<NaiveDate>,
+    pub ignored_observations: usize,
+    pub diagnostics: Vec<String>,
+    pub horizons: Vec<HistoricalVolatilityHorizon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoricalVolatilityHorizon {
+    pub window_sessions: usize,
+    pub required_prices: usize,
+    pub status: HistoricalVolatilityStatus,
+    pub latest: Option<HistoricalVolatilityLatest>,
+    pub series: Vec<HistoricalVolatilitySeriesPoint>,
+    pub series_truncated: bool,
+    pub diagnostics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoricalVolatilityStatus {
+    Available,
+    InsufficientHistory,
+    NoValidPrices,
+    InvalidData,
+    NumericFailure,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HistoricalVolatilityLatest {
+    pub date: NaiveDate,
+    pub observations: usize,
     pub annualized_volatility_percent: f64,
 }
 

@@ -27,6 +27,7 @@ use axum::{
         ws::{Message as WebSocketMessage, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
+    middleware,
     response::Response,
     routing::get,
 };
@@ -61,6 +62,13 @@ struct LivePriceQuery {
 #[derive(serde::Deserialize)]
 struct LivePriceSubscription {
     ticker: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoricalVolatilityQuery {
+    horizons: Option<String>,
+    limit: Option<String>,
 }
 
 pub fn router(
@@ -113,7 +121,8 @@ pub fn router(
         )
         .route(
             "/api/assets/{ticker}/historical-volatility",
-            get(asset_historical_volatility),
+            get(asset_historical_volatility)
+                .layer(middleware::from_fn(super::canonical_error_boundary)),
         )
         .route(
             "/api/assets/{ticker}/implied-volatility",
@@ -1015,14 +1024,53 @@ fn legacy_asset_price_history(
 async fn asset_historical_volatility(
     State(state): State<LegacyHttpPorts>,
     axum::extract::Path(ticker): axum::extract::Path<String>,
-) -> Result<Json<api_models::AssetHistoricalVolatilityResponse>, StatusCode> {
+    Query(query): Query<HistoricalVolatilityQuery>,
+) -> Result<Json<api_models::AssetHistoricalVolatilityResponse>, super::HttpError> {
+    let request = historical_volatility_request(ticker, query).map_err(super::HttpError)?;
     state
         .market_volatility
-        .historical_volatility(&ticker)
+        .historical_volatility(request)
         .await
         .map(crate::driving_adapters::http::legacy_asset_views::historical_volatility)
         .map(Json)
-        .map_err(port_status)
+        .map_err(super::HttpError)
+}
+
+fn historical_volatility_request(
+    ticker: String,
+    query: HistoricalVolatilityQuery,
+) -> Result<
+    crate::hexagon::driving_ports::for_viewing_volatility::HistoricalVolatilityRequest,
+    PortError,
+> {
+    use crate::hexagon::driving_ports::for_viewing_volatility::HistoricalVolatilityRequest;
+
+    let mut request = HistoricalVolatilityRequest::with_defaults(ticker);
+    if let Some(horizons) = query.horizons {
+        if horizons.trim().is_empty() {
+            return Err(PortError::InvalidRequest(
+                "horizons must not be empty".to_string(),
+            ));
+        }
+        request.horizons_sessions = horizons
+            .split(',')
+            .map(str::trim)
+            .map(|item| {
+                item.parse::<usize>().map_err(|_| {
+                    PortError::InvalidRequest(
+                        "horizons must be comma-separated integers".to_string(),
+                    )
+                })
+            })
+            .collect::<Result<_, _>>()?;
+    }
+    if let Some(limit) = query.limit {
+        request.series_limit = limit
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| PortError::InvalidRequest("limit must be an integer".to_string()))?;
+    }
+    Ok(request)
 }
 
 async fn asset_implied_volatility(
@@ -1383,5 +1431,50 @@ mod tests {
             panic!("price must be available");
         };
         assert!((price.daily_change_pct.expect("change must exist") - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn historical_volatility_query_maps_defaults_and_explicit_values() {
+        let defaults = historical_volatility_request(
+            "SPY".to_string(),
+            HistoricalVolatilityQuery {
+                horizons: None,
+                limit: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(defaults.horizons_sessions, vec![10, 20, 60]);
+        assert_eq!(defaults.series_limit, 252);
+
+        let explicit = historical_volatility_request(
+            "SPY".to_string(),
+            HistoricalVolatilityQuery {
+                horizons: Some("60, 2,20".to_string()),
+                limit: Some(" 1260 ".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(explicit.horizons_sessions, vec![60, 2, 20]);
+        assert_eq!(explicit.series_limit, 1260);
+    }
+
+    #[test]
+    fn historical_volatility_query_rejects_malformed_unknown_and_duplicate_parameters() {
+        for query in [
+            HistoricalVolatilityQuery {
+                horizons: Some(String::new()),
+                limit: None,
+            },
+            HistoricalVolatilityQuery {
+                horizons: Some("10,nope".to_string()),
+                limit: None,
+            },
+            HistoricalVolatilityQuery {
+                horizons: None,
+                limit: Some("nope".to_string()),
+            },
+        ] {
+            assert!(historical_volatility_request("SPY".to_string(), query).is_err());
+        }
     }
 }

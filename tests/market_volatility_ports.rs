@@ -1,4 +1,10 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
@@ -14,7 +20,7 @@ use hexagonal_backend::hexagon::{
         for_loading_market_history::ForLoadingMarketHistory,
         for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
     },
-    driving_ports::for_viewing_volatility::ForViewingVolatility,
+    driving_ports::for_viewing_volatility::{ForViewingVolatility, HistoricalVolatilityRequest},
 };
 
 struct IndexHistoryMock(HashMap<String, IndexHistory>);
@@ -31,7 +37,10 @@ impl ForLoadingIndexHistory for IndexHistoryMock {
 
 struct OptionDataMock(TermStructure);
 
-struct MarketHistoryMock;
+struct MarketHistoryMock {
+    loads: Arc<AtomicUsize>,
+    history: hexagonal_backend::hexagon::domain::market_history::MarketHistory,
+}
 
 #[async_trait]
 impl ForLoadingMarketHistory for MarketHistoryMock {
@@ -39,16 +48,10 @@ impl ForLoadingMarketHistory for MarketHistoryMock {
         &self,
         ticker: &str,
     ) -> PortResult<hexagonal_backend::hexagon::domain::market_history::MarketHistory> {
-        Ok(
-            hexagonal_backend::hexagon::domain::market_history::MarketHistory {
-                ticker: ticker.to_string(),
-                currency: None,
-                exchange_timezone: None,
-                daily_quotes: Vec::new(),
-                dividends: Vec::new(),
-                splits: Vec::new(),
-            },
-        )
+        self.loads.fetch_add(1, Ordering::SeqCst);
+        let mut history = self.history.clone();
+        history.ticker = ticker.to_string();
+        Ok(history)
     }
 }
 
@@ -126,7 +129,10 @@ async fn composes_index_and_option_data_through_mocked_driven_ports() {
     let application = MarketVolatilityApplication::new(
         IndexHistoryMock(histories),
         OptionDataMock(term),
-        MarketHistoryMock,
+        MarketHistoryMock {
+            loads: Arc::new(AtomicUsize::new(0)),
+            history: empty_history("SPY"),
+        },
     );
 
     let overview = application.volatility_overview().await.expect("overview");
@@ -143,11 +149,117 @@ async fn composes_index_and_option_data_through_mocked_driven_ports() {
     );
     assert_eq!(overview.term_structure.len(), 1);
 
-    let historical = application.historical_volatility(" spy ").await.unwrap();
+    let historical = application
+        .historical_volatility(HistoricalVolatilityRequest::with_defaults(" spy "))
+        .await
+        .unwrap();
     assert_eq!(historical.ticker, "SPY");
     assert!(historical.points.is_empty());
 
     let implied = application.implied_volatility(" spx ").await.unwrap();
     assert_eq!(implied.reference_ticker.as_deref(), Some("VIX"));
     assert_eq!(implied.points.last().unwrap().volatility_percent, 20.0);
+}
+
+fn empty_history(
+    ticker: &str,
+) -> hexagonal_backend::hexagon::domain::market_history::MarketHistory {
+    hexagonal_backend::hexagon::domain::market_history::MarketHistory {
+        ticker: ticker.to_string(),
+        currency: None,
+        exchange_timezone: None,
+        daily_quotes: Vec::new(),
+        dividends: Vec::new(),
+        splits: Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn historical_volatility_validates_requests_orders_results_and_loads_once() {
+    use chrono::{Duration, TimeZone};
+    use hexagonal_backend::hexagon::{PortError, domain::market_history::DailyQuote};
+
+    let loads = Arc::new(AtomicUsize::new(0));
+    let mut history = empty_history("SPY");
+    history.daily_quotes = (0..22)
+        .map(|day| DailyQuote {
+            timestamp: Utc.with_ymd_and_hms(2026, 1, 1, 21, 0, 0).unwrap() + Duration::days(day),
+            open: None,
+            high: None,
+            low: None,
+            close: Some(100.0 + day as f64),
+            adjusted_close: None,
+            volume: None,
+        })
+        .collect();
+    let application = MarketVolatilityApplication::new(
+        IndexHistoryMock(HashMap::new()),
+        OptionDataMock(TermStructure {
+            ticker: "SPX".into(),
+            snapshot_timestamp: Utc::now(),
+            treasury_date: Utc::now().date_naive(),
+            points: Vec::new(),
+        }),
+        MarketHistoryMock {
+            loads: loads.clone(),
+            history,
+        },
+    );
+    let result = application
+        .historical_volatility(HistoricalVolatilityRequest {
+            ticker: "spy".into(),
+            horizons_sessions: vec![20, 2, 10],
+            series_limit: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(loads.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        result
+            .horizons
+            .iter()
+            .map(|value| value.window_sessions)
+            .collect::<Vec<_>>(),
+        vec![2, 10, 20]
+    );
+    assert!(
+        result
+            .horizons
+            .iter()
+            .all(|value| value.series.len() == 1 && value.series_truncated)
+    );
+    assert_eq!(result.as_of, result.last_valid_observation);
+
+    for request in [
+        HistoricalVolatilityRequest {
+            ticker: "SPY".into(),
+            horizons_sessions: vec![2, 2],
+            series_limit: 1,
+        },
+        HistoricalVolatilityRequest {
+            ticker: "SPY".into(),
+            horizons_sessions: vec![1],
+            series_limit: 1,
+        },
+        HistoricalVolatilityRequest {
+            ticker: "SPY".into(),
+            horizons_sessions: vec![2, 3, 4, 5, 6, 7, 8],
+            series_limit: 1,
+        },
+        HistoricalVolatilityRequest {
+            ticker: "SPY".into(),
+            horizons_sessions: vec![252],
+            series_limit: 1261,
+        },
+    ] {
+        assert!(matches!(
+            application.historical_volatility(request).await,
+            Err(PortError::InvalidRequest(_))
+        ));
+    }
+    assert_eq!(
+        loads.load(Ordering::SeqCst),
+        1,
+        "invalid requests must not load history"
+    );
 }

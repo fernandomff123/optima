@@ -99,6 +99,16 @@ ports. They are actors or adapters, not part of the application.
 The Axum adapter in `driving_adapters/http` depends only on driving ports. Its
 contract tests replace the application with mocks and verify HTTP translation.
 
+Historical volatility remains the `ForViewingVolatility` conversation handled
+by `MarketVolatilityApplication`. The provider-neutral request carries ticker,
+daily-return horizons, and rolling-series limit. The application validates and
+normalizes that request, loads `ForLoadingMarketHistory` exactly once, and
+delegates all price selection, ordering, integrity diagnostics, and numerical
+work to `domain::historical_volatility`. The HTTP adapter only parses query
+parameters and maps the domain result; no calculated volatility is persisted.
+Stored timestamps provide UTC calendar dates only, so this flow does not label
+them as official exchange sessions or invent exchange-timezone conversion.
+
 ## Driven actors and ports
 
 | Application need | Driven port | Production adapter |

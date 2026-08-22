@@ -129,6 +129,40 @@ These existing `/api` contracts were already canonical and remain unchanged:
 | POST×2 | `/api/portfolio/option-trades`, `/api/portfolio/currency-exchanges` | portfolio commands | `api_models` | frontend |
 | GET×8 | `/api/assets/{ticker}/{price,price-history,historical-volatility,implied-volatility,options/snapshot,options/term-structure,options/volatility-surface,options/intraday}` | asset/option views | `api_models` | frontend |
 
+### Historical volatility
+
+`GET /api/assets/{ticker}/historical-volatility` accepts the optional query
+`horizons=10,20,60&limit=252`. Missing query parameters retain those defaults.
+Horizons contain 2–252 daily-return intervals (at most six, without duplicates);
+`limit` is the maximum rolling points returned per horizon and is bounded at
+1260. Malformed queries return HTTP 400 with the `ApiError` JSON envelope.
+There is no corresponding compatibility alias without `/api`.
+
+The legacy `ticker`, `as_of`, `historical_volatility.points`, and
+`historical_volatility.series` fields are preserved. The additive `analysis`
+field records methodology, annualized-percent unit, price basis, data-quality
+facts, and every requested horizon with an individual state. An unavailable
+horizon is not omitted. Partial results return HTTP 200 and storage
+unavailability returns HTTP 503.
+
+Errors on this canonical endpoint are deliberately normalized from the former
+empty-body responses to `Content-Type: application/json` with the single public
+`ApiError` shape: invalid requests return 400, missing resources return 404,
+conflicts return 409, unavailable dependencies return 503, and unclassified
+internal errors return 500. In particular, dependency unavailability
+deliberately changes from the previous 500 to 503. Internal storage paths, SQL,
+and provider details are not exposed.
+
+The calculation uses finite positive `adjusted_close`, falling back per
+observation to finite positive `close`; N log returns require N+1 valid prices.
+It uses sample variance and annualizes its standard deviation by `sqrt(252)`,
+then expresses the result as a percentage. There is no partial warm-up, zero
+fallback, interpolation, or persisted calculated result. Rolling horizons use
+returns between the available valid daily observations. No continuity of
+exchange sessions is inferred without a trading calendar. Dates are the UTC
+dates derivable from stored observations, not proven exchange-session dates.
+`as_of` is the last valid observation actually used by an available calculation.
+
 ## After normalization
 
 The 57 route declarations that existed before this work remain registered (some
