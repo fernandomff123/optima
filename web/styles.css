@@ -90,14 +90,10 @@ button:disabled { cursor: not-allowed; opacity: .75; }
 .chart-placeholder span, .payoff-placeholder span { z-index: 1; padding: 7px 10px; border-radius: 6px; background: #10182a; }
 .history-content { min-height: 230px; }
 .stale-notice { margin-bottom: 12px; padding: 9px 11px; border: 1px solid #66582a; border-radius: 7px; background: #2c2718; color: #dec66b; font-size: 11px; }
+.market-history-grid, .market-history-grid .chart-card, .history-content, .spx-chart, .spx-chart .plotly-chart { width: 100%; min-width: 0; }
 .spx-chart { margin: 0; }
-.spx-chart svg { width: 100%; height: auto; max-height: 250px; display: block; overflow: visible; border: 1px solid #2d3954; border-radius: 9px; background: linear-gradient(180deg, #18213a55, #0c1324); }
-.chart-grid line { stroke: #34415d55; stroke-width: 1; }
-.spx-line { fill: none; stroke: #7891ff; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
-.chart-value { fill: #8490a8; font-size: 10px; }
-.chart-date { fill: #9aa5ba; font-size: 11px; }
-.chart-session-count { fill: #68748e; font-size: 10px; }
-.spx-chart figcaption, .chart-meta { display: flex; justify-content: space-between; gap: 12px; color: #65718a; font-size: 10px; }
+.spx-chart .plotly-chart { min-height: 250px; }
+.chart-meta { display: flex; justify-content: space-between; gap: 12px; color: #65718a; font-size: 10px; }
 .chart-meta { padding-top: 13px; border-top: 1px solid #273149; margin-top: 10px; }
 .data-status { min-height: 230px; display: flex; align-items: center; justify-content: center; gap: 10px; border: 1px dashed #35415c; border-radius: 9px; color: #8490a8; font-size: 12px; text-align: center; }
 .data-status.error { border-color: #643646; color: #f08b99; background: #2c162055; }
@@ -258,15 +254,14 @@ button:disabled { cursor: not-allowed; opacity: .75; }
 .gex-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--border-soft); }
 .gex-facts div { min-width: 0; padding: 14px; background: var(--surface); }.gex-facts dt { color: var(--subtle); font-size: 8px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }.gex-facts dd { margin: 7px 0 0; color: #e2e9f5; font-size: 12px; overflow-wrap: anywhere; }
 .gex-methodology { padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }.gex-methodology strong { color: #a9c5ff; font-size: 10px; }.gex-methodology p { margin: 5px 0 13px; color: var(--muted); font-size: 11px; line-height: 1.55; }.gex-methodology p:last-child { margin-bottom: 0; }
-.gex-chart-card { padding: 6px; overflow: hidden; }.gex-chart-key { display: flex; flex-wrap: wrap; gap: 7px 16px; padding: 5px 8px 10px; color: var(--muted); font-size: 9px; }
+.gex-chart-card { padding: 6px; overflow: hidden; }.gex-plot-stage { min-width: 0; display: grid; }.gex-plot-stage > * { grid-area: 1 / 1; }.gex-plot-placeholder { z-index: 1; min-height: 440px; display: grid; place-items: center; padding: 20px; color: var(--muted); text-align: center; pointer-events: none; }.gex-chart-key { display: flex; flex-wrap: wrap; gap: 7px 16px; padding: 5px 8px 10px; color: var(--muted); font-size: 9px; }
 .plotly-chart { width: 100%; min-height: 440px; }
-.gex-chart-card.hidden { display: none; }
 
 @media (max-width: 700px) {
   .gex-form { grid-template-columns: 1fr 1fr; }.gex-form label:first-child, .gex-form button { grid-column: 1 / -1; }
   .gex-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .gex-chart-card { padding: 0; }
-  .plotly-chart { min-height: 380px; }
+  .plotly-chart, .gex-plot-placeholder { min-height: 380px; }
 }
 
 /* Sectors uses an isolated, local demonstration model; it never represents API data. */
@@ -335,7 +330,7 @@ button:disabled { cursor: not-allowed; opacity: .75; }
   body[data-mobile-menu-open] .menu-backdrop { display: block; opacity: 1; pointer-events: auto; }
   main { padding: 0 16px 28px; }.topbar { display: none; }.page { margin-top: 27px; }
   .page-header { display: block; }.metric-grid, .metric-grid.three { grid-template-columns: 1fr; }.greeks-grid { grid-template-columns: repeat(2, 1fr); }
-  .chart-meta { align-items: flex-start; flex-direction: column; }.spx-chart svg { min-height: 150px; }
+  .chart-meta { align-items: flex-start; flex-direction: column; }
   .empty-page-state { min-height: 280px; padding-inline: 22px; }
   .sectors-header .period-filter { width: 100%; margin-top: 20px; }.period-filter button { min-width: 0; flex: 1; min-height: 44px; }.heatmap-card { padding: 14px; }.sector-heatmap { min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: minmax(92px, auto); gap: 6px; }.sector-tile, .sector-tile-xl, .sector-tile-lg, .sector-tile-md, .sector-tile-sm { grid-column: span 1; grid-row: span 1; }.sector-tile:first-child { grid-column: 1 / -1; min-height: 112px; }.sector-tile { padding: 13px; }.sector-tile span { font-size: 11px; }.sector-tile strong { font-size: 16px; }.sector-detail { padding: 20px; }.sector-comment { min-height: 0; }.sectors-layout { gap: 14px; }
   .dashboard-header .environment-switch { margin-top: 20px; }.environment-switch button { min-width: 0; flex: 1; }.dashboard-metrics { grid-template-columns: 1fr; }.dashboard-panel { padding: 18px; }.dashboard-panel-title { margin-bottom: 18px; }.demo-metric { min-height: 132px; padding: 18px; }.demo-metric > strong { font-size: 27px; }.demo-spark { right: 18px; bottom: 18px; width: 72px; }.pnl-summary { flex-wrap: wrap; gap: 8px 14px; }.pnl-summary > strong { width: 100%; margin-left: 0; }.risk-alert { align-items: flex-start; }.risk-alert em { display: none; }.risk-method { flex-wrap: wrap; padding-inline: 18px; }.risk-method span { width: 100%; }.risk-table-desktop { display: none; }.risk-cards-mobile { display: grid; gap: 10px; padding: 0 14px 14px; }.risk-position-card { padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: #0b112066; }.risk-position-card header { display: flex; align-items: center; justify-content: space-between; }.risk-position-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 15px; margin: 15px 0 0; }.risk-position-card dl div { min-width: 0; }.risk-position-card dt { color: var(--subtle); font-size: 8px; letter-spacing: .07em; text-transform: uppercase; }.risk-position-card dd { margin: 4px 0 0; color: #c5cedd; font-size: 11px; overflow-wrap: anywhere; }.risk-position-card .risk-reason { grid-column: 1 / -1; }.activity-row { align-items: flex-start; padding: 10px 0; }.activity-row > strong { margin-left: auto; }.ladder-column { min-width: 0; flex: 1; }.ladder-column i { width: min(22px, 70%); }
