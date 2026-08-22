@@ -255,12 +255,14 @@ button:disabled { cursor: not-allowed; opacity: .75; }
 .gex-facts div { min-width: 0; padding: 14px; background: var(--surface); }.gex-facts dt { color: var(--subtle); font-size: 8px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }.gex-facts dd { margin: 7px 0 0; color: #e2e9f5; font-size: 12px; overflow-wrap: anywhere; }
 .gex-methodology { padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }.gex-methodology strong { color: #a9c5ff; font-size: 10px; }.gex-methodology p { margin: 5px 0 13px; color: var(--muted); font-size: 11px; line-height: 1.55; }.gex-methodology p:last-child { margin-bottom: 0; }
 .gex-chart-card { padding: 6px; overflow: hidden; }.gex-plot-stage { min-width: 0; display: grid; }.gex-plot-stage > * { grid-area: 1 / 1; }.gex-plot-placeholder { z-index: 1; min-height: 440px; display: grid; place-items: center; padding: 20px; color: var(--muted); text-align: center; pointer-events: none; }.gex-chart-key { display: flex; flex-wrap: wrap; gap: 7px 16px; padding: 5px 8px 10px; color: var(--muted); font-size: 9px; }
+.gex-distribution-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; margin-top: 15px; }.gex-distribution-grid .gex-chart-card { width: 100%; min-width: 0; }.gex-distribution-grid h3 { margin: 12px 14px 4px; font-size: 14px; }.gex-distribution-note { margin: 0 14px; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .plotly-chart { width: 100%; min-height: 440px; }
 
 @media (max-width: 700px) {
   .gex-form { grid-template-columns: 1fr 1fr; }.gex-form label:first-child, .gex-form button { grid-column: 1 / -1; }
   .gex-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .gex-chart-card { padding: 0; }
+  .gex-distribution-grid { grid-template-columns: minmax(0, 1fr); }
   .plotly-chart, .gex-plot-placeholder { min-height: 380px; }
 }
 

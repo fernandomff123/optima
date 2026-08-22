@@ -1,13 +1,13 @@
 use api_models::{
-    CurrentGammaExposureResponse, DataState, GammaExposureResponse, GammaExposureSnapshotOrigin,
-    ModeledGammaExposureProfile,
+    CurrentGammaExposureResponse, DataState, GammaExposureExpiration, GammaExposureResponse,
+    GammaExposureSnapshotOrigin, GammaExposureStrike, ModeledGammaExposureProfile,
 };
 use futures_util::future::{AbortHandle, Abortable};
 use gloo_net::http::Request;
 use leptos::prelude::*;
 use plotly::{
-    Configuration, Layout, Plot, Scatter,
-    common::{Anchor, DashType, Line, Mode, Orientation, Title},
+    Bar, Configuration, Layout, Plot, Scatter,
+    common::{Anchor, DashType, Line, Marker, Mode, Orientation, Title},
     layout::{Axis, Legend, Margin, Shape, ShapeLine, ShapeType},
 };
 use send_wrapper::SendWrapper;
@@ -19,6 +19,8 @@ use std::{
 use crate::plotly_chart::PlotlyChart;
 
 pub(crate) const GEX_PLOT_ID: &str = "gex-profile-plot";
+pub(crate) const GEX_STRIKE_PLOT_ID: &str = "gex-strike-plot";
+pub(crate) const GEX_EXPIRATION_PLOT_ID: &str = "gex-expiration-plot";
 
 const DEFAULT_TICKER: &str = "SPX";
 const DEFAULT_RANGE_PERCENT: f64 = 20.0;
@@ -86,6 +88,24 @@ struct CurrentExposureView {
     excluded_contracts: u64,
     methodology: String,
     sign_convention: String,
+    by_strike: Vec<StrikeExposure>,
+    by_expiration: Vec<ExpirationExposure>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct StrikeExposure {
+    strike: f64,
+    calls: f64,
+    puts: f64,
+    net: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ExpirationExposure {
+    expiration: String,
+    calls: f64,
+    puts: f64,
+    net: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -114,6 +134,18 @@ fn finite(value: f64) -> Result<f64, String> {
 }
 
 fn map_current(current: &CurrentGammaExposureResponse) -> Result<CurrentExposureView, String> {
+    let mut by_strike = current
+        .by_strike
+        .iter()
+        .map(map_strike)
+        .collect::<Result<Vec<_>, _>>()?;
+    by_strike.sort_by(|left, right| left.strike.total_cmp(&right.strike));
+    let mut by_expiration = current
+        .by_expiration
+        .iter()
+        .map(map_expiration)
+        .collect::<Result<Vec<_>, _>>()?;
+    by_expiration.sort_by(|left, right| left.expiration.cmp(&right.expiration));
     Ok(CurrentExposureView {
         ticker: current.ticker.clone(),
         spot: current.spot.map(finite).transpose()?,
@@ -130,6 +162,26 @@ fn map_current(current: &CurrentGammaExposureResponse) -> Result<CurrentExposure
         excluded_contracts: current.diagnostics.excluded_contracts,
         methodology: current.methodology.clone(),
         sign_convention: current.sign_convention.clone(),
+        by_strike,
+        by_expiration,
+    })
+}
+
+fn map_strike(bucket: &GammaExposureStrike) -> Result<StrikeExposure, String> {
+    Ok(StrikeExposure {
+        strike: finite(bucket.strike)?,
+        calls: finite(bucket.calls_gex)?,
+        puts: finite(bucket.puts_gex)?,
+        net: finite(bucket.net_gex)?,
+    })
+}
+
+fn map_expiration(bucket: &GammaExposureExpiration) -> Result<ExpirationExposure, String> {
+    Ok(ExpirationExposure {
+        expiration: bucket.expiration.to_string(),
+        calls: finite(bucket.calls_gex)?,
+        puts: finite(bucket.puts_gex)?,
+        net: finite(bucket.net_gex)?,
     })
 }
 
@@ -255,6 +307,130 @@ fn build_plot(series: &ProfileSeries) -> Plot {
     plot
 }
 
+fn distribution_layout(x_title: &'static str, shapes: Vec<Shape>) -> Layout {
+    Layout::new()
+        .auto_size(true)
+        .show_legend(false)
+        .margin(Margin::new().left(58).right(12).top(28).bottom(58))
+        .paper_background_color("#19263c")
+        .plot_background_color("#111b2e")
+        .font(plotly::common::Font::new().color("#dce4f2"))
+        .x_axis(
+            Axis::new()
+                .title(Title::with_text(x_title))
+                .auto_margin(true),
+        )
+        .y_axis(
+            Axis::new()
+                .title(Title::with_text("GEX por movimento de 1%"))
+                .tick_format("~s"),
+        )
+        .shapes(shapes)
+}
+
+fn distribution_configuration() -> Configuration {
+    Configuration::new()
+        .responsive(true)
+        .display_logo(false)
+        .scroll_zoom(false)
+}
+
+fn net_colors(values: &[f64]) -> Vec<&'static str> {
+    values
+        .iter()
+        .map(|value| {
+            if *value < 0.0 {
+                "#f27b8c"
+            } else if *value > 0.0 {
+                "#2ed9ad"
+            } else {
+                "#8290aa"
+            }
+        })
+        .collect()
+}
+
+fn build_strike_plot(series: &[StrikeExposure], spot: Option<f64>) -> Option<Plot> {
+    if series.is_empty() {
+        return None;
+    }
+    let strikes = series
+        .iter()
+        .map(|bucket| bucket.strike)
+        .collect::<Vec<_>>();
+    let net = series.iter().map(|bucket| bucket.net).collect::<Vec<_>>();
+    let tooltips = series
+        .iter()
+        .map(|bucket| {
+            format!(
+                "Strike: {:.2}<br>Calls: {:.2}<br>Puts: {:.2}<br>Líquido: {:.2}<extra></extra>",
+                bucket.strike, bucket.calls, bucket.puts, bucket.net
+            )
+        })
+        .collect();
+    let mut shapes = vec![
+        Shape::new()
+            .shape_type(ShapeType::Line)
+            .x_ref("paper")
+            .x0(0.0)
+            .x1(1.0)
+            .y0(0.0)
+            .y1(0.0)
+            .line(ShapeLine::new().color("#8290aa").width(1.0)),
+    ];
+    if let Some(spot) = spot {
+        shapes.push(vertical_shape(spot, "#f3ad3d", DashType::Dash));
+    }
+    let mut plot = Plot::new();
+    plot.add_trace(
+        Bar::new(strikes, net.clone())
+            .name("GEX líquido")
+            .marker(Marker::new().color_array(net_colors(&net)))
+            .hover_template_array(tooltips),
+    );
+    plot.set_layout(distribution_layout("Strike", shapes));
+    plot.set_configuration(distribution_configuration());
+    Some(plot)
+}
+
+fn build_expiration_plot(series: &[ExpirationExposure]) -> Option<Plot> {
+    if series.is_empty() {
+        return None;
+    }
+    let expirations = series
+        .iter()
+        .map(|bucket| bucket.expiration.clone())
+        .collect::<Vec<_>>();
+    let net = series.iter().map(|bucket| bucket.net).collect::<Vec<_>>();
+    let tooltips = series
+        .iter()
+        .map(|bucket| {
+            format!(
+                "Vencimento: {}<br>Calls: {:.2}<br>Puts: {:.2}<br>Líquido: {:.2}<extra></extra>",
+                bucket.expiration, bucket.calls, bucket.puts, bucket.net
+            )
+        })
+        .collect();
+    let zero_line = Shape::new()
+        .shape_type(ShapeType::Line)
+        .x_ref("paper")
+        .x0(0.0)
+        .x1(1.0)
+        .y0(0.0)
+        .y1(0.0)
+        .line(ShapeLine::new().color("#8290aa").width(1.0));
+    let mut plot = Plot::new();
+    plot.add_trace(
+        Bar::new(expirations, net.clone())
+            .name("GEX líquido")
+            .marker(Marker::new().color_array(net_colors(&net)))
+            .hover_template_array(tooltips),
+    );
+    plot.set_layout(distribution_layout("Data de vencimento", vec![zero_line]));
+    plot.set_configuration(distribution_configuration());
+    Some(plot)
+}
+
 fn vertical_shape(value: f64, color: &'static str, dash: DashType) -> Shape {
     Shape::new()
         .shape_type(ShapeType::Line)
@@ -366,7 +542,11 @@ pub fn GammaExposureView() -> impl IntoView {
     let (presentation, set_presentation) = signal::<Option<GammaExposurePresentation>>(None);
     let (last_parameters, set_last_parameters) = signal::<Option<GammaExposureParameters>>(None);
     let (plot, set_plot) = signal(SendWrapper::new(None::<Plot>));
+    let (strike_plot, set_strike_plot) = signal(SendWrapper::new(None::<Plot>));
+    let (expiration_plot, set_expiration_plot) = signal(SendWrapper::new(None::<Plot>));
     let (plot_error, set_plot_error) = signal::<Option<String>>(None);
+    let (strike_plot_error, set_strike_plot_error) = signal::<Option<String>>(None);
+    let (expiration_plot_error, set_expiration_plot_error) = signal::<Option<String>>(None);
     let generation = Arc::new(Mutex::new(RequestGeneration::default()));
     let abort_handle = Arc::new(Mutex::new(None::<AbortHandle>));
 
@@ -422,6 +602,13 @@ pub fn GammaExposureView() -> impl IntoView {
                                     set_plot.set(SendWrapper::new(
                                         presentation.profile.as_ref().map(build_plot),
                                     ));
+                                    set_strike_plot.set(SendWrapper::new(build_strike_plot(
+                                        &presentation.current.by_strike,
+                                        presentation.current.spot,
+                                    )));
+                                    set_expiration_plot.set(SendWrapper::new(
+                                        build_expiration_plot(&presentation.current.by_expiration),
+                                    ));
                                     set_presentation.set(Some(presentation));
                                     set_last_parameters.set(Some(parameters));
                                     GammaLoadState::Success
@@ -454,6 +641,12 @@ pub fn GammaExposureView() -> impl IntoView {
             {move || plot_error.get().map(|message| view! {
                 <div class="gex-feedback error" role="alert">{format!("Não foi possível apresentar o gráfico. {message}")}</div>
             })}
+            {move || strike_plot_error.get().map(|message| view! {
+                <div class="gex-feedback error" role="alert">{format!("Não foi possível apresentar a distribuição por strike. {message}")}</div>
+            })}
+            {move || expiration_plot_error.get().map(|message| view! {
+                <div class="gex-feedback error" role="alert">{format!("Não foi possível apresentar a distribuição por vencimento. {message}")}</div>
+            })}
             <GammaExposureResults presentation />
             <div class="card gex-chart-card">
                 <div class="gex-plot-stage">
@@ -467,6 +660,28 @@ pub fn GammaExposureView() -> impl IntoView {
                             }}
                         </div>
                     })}
+                </div>
+            </div>
+            <div class="gex-distribution-grid">
+                <div class="card gex-chart-card">
+                    <h3>"GEX atual por strike"</h3>
+                    <p class="gex-distribution-note">"Concentrações potenciais de exposição; não representam suporte ou resistência observados."</p>
+                    <div class="gex-plot-stage">
+                        <PlotlyChart id=GEX_STRIKE_PLOT_ID plot=strike_plot error=set_strike_plot_error aria_label="Distribuição atual de Gamma Exposure por strike" />
+                        {move || strike_plot.with(|plot| plot.is_none()).then(|| view! {
+                            <div class="gex-plot-placeholder" role="status">"Distribuição por strike indisponível."</div>
+                        })}
+                    </div>
+                </div>
+                <div class="card gex-chart-card">
+                    <h3>"GEX atual por vencimento"</h3>
+                    <p class="gex-distribution-note">"Concentrações potenciais de exposição; não representam suporte ou resistência observados."</p>
+                    <div class="gex-plot-stage">
+                        <PlotlyChart id=GEX_EXPIRATION_PLOT_ID plot=expiration_plot error=set_expiration_plot_error aria_label="Distribuição atual de Gamma Exposure por vencimento" />
+                        {move || expiration_plot.with(|plot| plot.is_none()).then(|| view! {
+                            <div class="gex-plot-placeholder" role="status">"Distribuição por vencimento indisponível."</div>
+                        })}
+                    </div>
                 </div>
             </div>
         </section>
@@ -577,7 +792,7 @@ fn format_full_gex(value: f64, currency: &str) -> String {
 mod tests {
     use super::*;
     use api_models::{GammaExposureDiagnostics, ModeledGammaExposurePoint};
-    use chrono::{TimeZone, Utc};
+    use chrono::{NaiveDate, TimeZone, Utc};
 
     fn response(available: bool) -> GammaExposureResponse {
         let diagnostics = GammaExposureDiagnostics {
@@ -597,8 +812,46 @@ mod tests {
             calls_gex: 3.0,
             puts_gex: -2.0,
             net_gex: 1.0,
-            by_strike: vec![],
-            by_expiration: vec![],
+            by_strike: vec![
+                GammaExposureStrike {
+                    strike: 5100.0,
+                    calls_gex: 5.0,
+                    puts_gex: -1.0,
+                    net_gex: 4.0,
+                },
+                GammaExposureStrike {
+                    strike: 4900.0,
+                    calls_gex: 1.0,
+                    puts_gex: -3.0,
+                    net_gex: -2.0,
+                },
+                GammaExposureStrike {
+                    strike: 5000.0,
+                    calls_gex: 2.0,
+                    puts_gex: -2.0,
+                    net_gex: 0.0,
+                },
+            ],
+            by_expiration: vec![
+                GammaExposureExpiration {
+                    expiration: NaiveDate::from_ymd_opt(2026, 9, 18).unwrap(),
+                    calls_gex: 5.0,
+                    puts_gex: -1.0,
+                    net_gex: 4.0,
+                },
+                GammaExposureExpiration {
+                    expiration: NaiveDate::from_ymd_opt(2026, 8, 28).unwrap(),
+                    calls_gex: 1.0,
+                    puts_gex: -3.0,
+                    net_gex: -2.0,
+                },
+                GammaExposureExpiration {
+                    expiration: NaiveDate::from_ymd_opt(2026, 9, 4).unwrap(),
+                    calls_gex: 2.0,
+                    puts_gex: -2.0,
+                    net_gex: 0.0,
+                },
+            ],
             methodology: "current method".into(),
             sign_convention: "calls positive / puts negative".into(),
             diagnostics: diagnostics.clone(),
@@ -679,6 +932,107 @@ mod tests {
         assert_eq!(profile.observed_spot, Some(profile.spots[1]));
         assert_eq!(profile.zero_crossings, vec![4966.67, 5050.0]);
         assert_eq!(profile.nearest_zero_crossing, Some(4966.67));
+    }
+
+    #[test]
+    fn maps_api_buckets_exactly_and_sorts_them() {
+        let mapped = map_response(&response(true)).unwrap();
+        assert_eq!(
+            mapped.current.by_strike,
+            vec![
+                StrikeExposure {
+                    strike: 4900.0,
+                    calls: 1.0,
+                    puts: -3.0,
+                    net: -2.0
+                },
+                StrikeExposure {
+                    strike: 5000.0,
+                    calls: 2.0,
+                    puts: -2.0,
+                    net: 0.0
+                },
+                StrikeExposure {
+                    strike: 5100.0,
+                    calls: 5.0,
+                    puts: -1.0,
+                    net: 4.0
+                },
+            ]
+        );
+        assert_eq!(
+            mapped.current.by_expiration,
+            vec![
+                ExpirationExposure {
+                    expiration: "2026-08-28".into(),
+                    calls: 1.0,
+                    puts: -3.0,
+                    net: -2.0
+                },
+                ExpirationExposure {
+                    expiration: "2026-09-04".into(),
+                    calls: 2.0,
+                    puts: -2.0,
+                    net: 0.0
+                },
+                ExpirationExposure {
+                    expiration: "2026-09-18".into(),
+                    calls: 5.0,
+                    puts: -1.0,
+                    net: 4.0
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn distribution_plots_preserve_signs_and_include_factual_tooltips() {
+        let mapped = map_response(&response(true)).unwrap();
+        let strike = build_strike_plot(&mapped.current.by_strike, mapped.current.spot).unwrap();
+        let expiration = build_expiration_plot(&mapped.current.by_expiration).unwrap();
+        let strike_json: serde_json::Value = serde_json::from_str(&strike.to_json()).unwrap();
+        let expiration_json: serde_json::Value =
+            serde_json::from_str(&expiration.to_json()).unwrap();
+        assert_eq!(
+            strike_json["data"][0]["x"],
+            serde_json::json!([4900.0, 5000.0, 5100.0])
+        );
+        assert_eq!(
+            strike_json["data"][0]["y"],
+            serde_json::json!([-2.0, 0.0, 4.0])
+        );
+        assert_eq!(
+            strike_json["data"][0]["marker"]["color"],
+            serde_json::json!(["#f27b8c", "#8290aa", "#2ed9ad"])
+        );
+        assert_eq!(
+            expiration_json["data"][0]["x"],
+            serde_json::json!(["2026-08-28", "2026-09-04", "2026-09-18"])
+        );
+        assert_eq!(
+            expiration_json["data"][0]["y"],
+            serde_json::json!([-2.0, 0.0, 4.0])
+        );
+        for plot in [&strike_json, &expiration_json] {
+            let tooltip = plot["data"][0]["hovertemplate"].to_string();
+            assert!(tooltip.contains("Calls"));
+            assert!(tooltip.contains("Puts"));
+            assert!(tooltip.contains("Líquido"));
+            assert_eq!(plot["layout"]["autosize"], true);
+            assert!(plot["layout"].get("width").is_none());
+        }
+    }
+
+    #[test]
+    fn distributions_reject_non_finite_buckets_and_render_no_empty_trace() {
+        let mut invalid = response(false);
+        invalid.current_exposure.by_strike[0].calls_gex = f64::NAN;
+        assert!(map_response(&invalid).is_err());
+        let mut invalid = response(false);
+        invalid.current_exposure.by_expiration[0].net_gex = f64::INFINITY;
+        assert!(map_response(&invalid).is_err());
+        assert!(build_strike_plot(&[], Some(5000.0)).is_none());
+        assert!(build_expiration_plot(&[]).is_none());
     }
 
     #[test]

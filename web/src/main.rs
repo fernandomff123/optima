@@ -1929,7 +1929,20 @@ mod spx_plot_tests {
     fn history_and_gex_have_distinct_stable_ids() {
         assert_eq!(SPX_HISTORY_PLOT_ID, "spx-history-plot");
         assert_eq!(gamma_exposure::GEX_PLOT_ID, "gex-profile-plot");
-        assert_ne!(SPX_HISTORY_PLOT_ID, gamma_exposure::GEX_PLOT_ID);
+        assert_eq!(gamma_exposure::GEX_STRIKE_PLOT_ID, "gex-strike-plot");
+        assert_eq!(
+            gamma_exposure::GEX_EXPIRATION_PLOT_ID,
+            "gex-expiration-plot"
+        );
+        let ids = [
+            SPX_HISTORY_PLOT_ID,
+            gamma_exposure::GEX_PLOT_ID,
+            gamma_exposure::GEX_STRIKE_PLOT_ID,
+            gamma_exposure::GEX_EXPIRATION_PLOT_ID,
+        ];
+        for (index, id) in ids.iter().enumerate() {
+            assert!(!ids[..index].contains(id));
+        }
     }
 }
 
