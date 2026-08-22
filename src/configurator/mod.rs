@@ -10,6 +10,7 @@ use std::{
 
 use axum::Router;
 
+use crate::hexagon::driven_ports::for_resolving_option_contract_specifications::ForResolvingOptionContractSpecifications;
 use crate::hexagon::driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers;
 use crate::hexagon::driving_ports::for_refreshing_market_data::ForRefreshingMarketData;
 use crate::{
@@ -36,6 +37,7 @@ use crate::{
     },
     hexagon::application::{
         data_refresh::DataRefreshApplication,
+        gamma_exposure::GammaExposureApplication,
         interest_rates::InterestRatesApplication,
         intraday_simulation::IntradaySimulationApplication,
         market_data::MarketDataApplication,
@@ -116,6 +118,13 @@ pub type ConfiguredIntradaySimulation = IntradaySimulationApplication<
     YahooLivePricesAdapter,
     ExchangeTradingCalendarAdapter,
 >;
+pub type ConfiguredGammaExposure = GammaExposureApplication<
+    ExchangeTradingCalendarAdapter,
+    CboeOptionChainsAdapter,
+    DuckDbOptionChainsAdapter,
+    Arc<dyn ForResolvingOptionContractSpecifications>,
+    DuckDbYieldCurvesAdapter,
+>;
 pub type ConfiguredPortfolios =
     PortfolioApplication<DuckDbPortfolioAdapter, DuckDbPortfolioAdapter>;
 pub type ConfiguredPortfolioValuation = PortfolioValuationApplication<
@@ -151,7 +160,7 @@ pub type ConfiguredSynchronization = SynchronizationApplication<
     DuckDbOptionChainsAdapter,
     DuckDbYieldCurvesAdapter,
     ExchangeTradingCalendarAdapter,
-    CboeOptionContractSpecificationsAdapter,
+    Arc<dyn ForResolvingOptionContractSpecifications>,
 >;
 
 /// Fully wired single hexagon, ready to be handed to driving adapters.
@@ -163,6 +172,7 @@ pub struct ConfiguredApplication {
     pub interest_rates: ConfiguredInterestRates,
     pub market_volatility: ConfiguredMarketVolatility,
     pub intraday_simulation: ConfiguredIntradaySimulation,
+    pub gamma_exposure: ConfiguredGammaExposure,
     pub options: ConfiguredOptions,
     pub portfolios: ConfiguredPortfolios,
     pub portfolio_valuation: ConfiguredPortfolioValuation,
@@ -216,9 +226,12 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
     let portfolio_adapter = DuckDbPortfolioAdapter::new(path);
     let strategies_adapter = DuckDbSavedStrategiesAdapter::new(path);
     let tracked_tickers_adapter = DuckDbTrackedTickersAdapter::new(path);
+    let contract_specifications: Arc<dyn ForResolvingOptionContractSpecifications> =
+        Arc::new(CboeOptionContractSpecificationsAdapter);
     let synchronization = Arc::new(configure_synchronization(
         path,
         tracked_tickers_adapter.clone(),
+        contract_specifications.clone(),
     ));
     let refresh_runs = Arc::new(DuckDbDataRefreshRunsAdapter::new(path));
     let data_refresh_application = Arc::new(DataRefreshApplication::new(
@@ -249,6 +262,13 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
             CboeOptionChainsAdapter,
             YahooLivePricesAdapter,
             ExchangeTradingCalendarAdapter,
+        ),
+        gamma_exposure: GammaExposureApplication::new(
+            ExchangeTradingCalendarAdapter,
+            CboeOptionChainsAdapter,
+            DuckDbOptionChainsAdapter::new(path),
+            contract_specifications,
+            DuckDbYieldCurvesAdapter::new(path),
         ),
         options: OptionsApplication::new(
             DuckDbOptionChainsAdapter::new(path),
@@ -291,6 +311,7 @@ pub fn configure_with_config(config: &CompositionConfig) -> ConfiguredApplicatio
 fn configure_synchronization(
     path: &Path,
     tracked_tickers_adapter: DuckDbTrackedTickersAdapter,
+    contract_specifications: Arc<dyn ForResolvingOptionContractSpecifications>,
 ) -> ConfiguredSynchronization {
     SynchronizationApplication::new(
         SynchronizationSources::new(
@@ -312,7 +333,7 @@ fn configure_synchronization(
             DuckDbYieldCurvesAdapter::new(path),
             ExchangeTradingCalendarAdapter,
         ),
-        OptionSnapshotEnrichment::new(CboeOptionContractSpecificationsAdapter),
+        OptionSnapshotEnrichment::new(contract_specifications),
     )
 }
 
@@ -345,6 +366,7 @@ pub fn configure_server_http_application(
         interest_rates,
         market_volatility,
         intraday_simulation,
+        gamma_exposure,
         options,
         portfolios,
         portfolio_valuation,
@@ -363,12 +385,15 @@ pub fn configure_server_http_application(
     let portfolios = Arc::new(portfolios);
     let saved_strategies = Arc::new(saved_strategies);
     let tracked_tickers = Arc::new(tracked_tickers);
-    let modern = crate::driving_adapters::http::router_with_data_refresh(
+    let modern = crate::driving_adapters::http::router_with_data_refresh_and_gamma_exposure(
         crate::driving_adapters::http::MarketViewingPorts::new(
             market_data.clone(),
             Arc::new(sector_performance),
         ),
-        options.clone(),
+        crate::driving_adapters::http::OptionsViewingPorts::new(
+            options.clone(),
+            Arc::new(gamma_exposure),
+        ),
         simulation.clone(),
         portfolios.clone(),
         crate::driving_adapters::http::SynchronizationPorts::new(synchronization, data_refresh),
@@ -418,6 +443,18 @@ mod tests {
         assert!(Arc::ptr_eq(
             configured.data_refresh_application.synchronization_port(),
             &http_synchronization,
+        ));
+    }
+
+    #[test]
+    fn synchronization_and_gamma_exposure_share_contract_specification_resolver_arc() {
+        let configured = configure_with_config(&CompositionConfig::with_duckdb_path(
+            std::env::temp_dir().join("shared-contract-specifications.duckdb"),
+        ));
+
+        assert!(Arc::ptr_eq(
+            configured.synchronization.contract_specifications(),
+            configured.gamma_exposure.contract_specifications(),
         ));
     }
 }

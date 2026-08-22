@@ -1,10 +1,5 @@
 //! Market-data synchronization use cases.
 
-use async_trait::async_trait;
-use chrono::{DateTime, NaiveDate, Utc};
-use std::collections::BTreeSet;
-
-use crate::hexagon::domain::options::OptionIngestionWarning;
 use crate::hexagon::{
     PortError, PortResult,
     driven_ports::{
@@ -16,10 +11,7 @@ use crate::hexagon::{
         for_obtaining_option_chains::ForObtainingOptionChains,
         for_obtaining_volatility_indices::ForObtainingVolatilityIndices,
         for_obtaining_yield_curves::ForObtainingYieldCurves,
-        for_resolving_option_contract_specifications::{
-            ForResolvingOptionContractSpecifications, OptionContractIdentity,
-            OptionContractSpecificationResolution,
-        },
+        for_resolving_option_contract_specifications::ForResolvingOptionContractSpecifications,
         for_storing_index_history::ForStoringIndexHistory,
         for_storing_market_history::ForStoringMarketHistory,
         for_storing_option_chains::ForStoringOptionChains,
@@ -31,7 +23,12 @@ use crate::hexagon::{
         SynchronizeTrackedTickers, TrackedTickersSynchronizationReport,
     },
 };
+use async_trait::async_trait;
+use chrono::{DateTime, NaiveDate, Utc};
 
+pub use super::option_snapshot_enrichment::OptionSnapshotEnrichment;
+#[cfg(test)]
+use super::option_snapshot_enrichment::single_evidenced_currency;
 use super::options::build_term_structure;
 
 /// Collaborators needed specifically for derived option analytics.
@@ -39,18 +36,6 @@ pub struct OptionAnalysisCollaborators<OptionChains, YieldCurves, TradingCalenda
     option_chains: OptionChains,
     yield_curves: YieldCurves,
     trading_calendar: TradingCalendar,
-}
-
-pub struct OptionSnapshotEnrichment<ContractSpecifications> {
-    contract_specifications: ContractSpecifications,
-}
-
-impl<ContractSpecifications> OptionSnapshotEnrichment<ContractSpecifications> {
-    pub fn new(contract_specifications: ContractSpecifications) -> Self {
-        Self {
-            contract_specifications,
-        }
-    }
 }
 
 pub struct SynchronizationSources<History, Options, Indices, Curves> {
@@ -196,6 +181,11 @@ impl<
             option_snapshot_enrichment,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn contract_specifications(&self) -> &ContractSpecifications {
+        self.option_snapshot_enrichment.contract_specifications()
+    }
 }
 
 #[async_trait]
@@ -339,83 +329,9 @@ where
     ) -> PortResult<SynchronizationReport> {
         let ticker = normalized_ticker(ticker)?;
         let mut snapshot = self.sources.options.obtain_option_chain(&ticker).await?;
-        let identities: Vec<_> = snapshot
-            .chains
-            .iter()
-            .flat_map(|chain| {
-                chain
-                    .contratos
-                    .iter()
-                    .map(|contract| OptionContractIdentity {
-                        root: chain.root.clone(),
-                        occ_symbol: contract.occ_symbol.clone(),
-                    })
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let resolutions = self
-            .option_snapshot_enrichment
-            .contract_specifications
-            .resolve_option_contract_specifications(&identities)
+        self.option_snapshot_enrichment
+            .enrich(&mut snapshot)
             .await?;
-        let requested_identities: BTreeSet<_> = identities.iter().cloned().collect();
-        let resolved_identities: BTreeSet<_> = resolutions.keys().cloned().collect();
-        if resolved_identities != requested_identities {
-            return Err(PortError::Unavailable(
-                "contract specification resolver returned an incompatible identity set".to_string(),
-            ));
-        }
-        let mut unresolved_roots = BTreeSet::new();
-        for chain in &mut snapshot.chains {
-            for contract in &mut chain.contratos {
-                let identity = OptionContractIdentity {
-                    root: chain.root.clone(),
-                    occ_symbol: contract.occ_symbol.clone(),
-                };
-                match resolutions.get(&identity) {
-                    Some(OptionContractSpecificationResolution::Found(specification)) => {
-                        contract.contract_specification = Some(specification.clone());
-                    }
-                    Some(OptionContractSpecificationResolution::NotFound) => {
-                        unresolved_roots.insert(chain.root.clone());
-                        contract.contract_specification = None;
-                    }
-                    None => {
-                        return Err(PortError::Unavailable(
-                            "contract specification resolver returned an incompatible identity set"
-                                .to_string(),
-                        ));
-                    }
-                }
-            }
-        }
-        let evidenced_currency =
-            single_evidenced_currency(snapshot.chains.iter().flat_map(|chain| {
-                chain.contratos.iter().map(|contract| {
-                    contract
-                        .contract_specification
-                        .as_ref()
-                        .map(|specification| specification.currency.as_str())
-                })
-            }));
-        snapshot.contratos = snapshot
-            .chains
-            .iter()
-            .flat_map(|chain| chain.contratos.iter().cloned())
-            .collect();
-        if unresolved_roots.is_empty()
-            && let (Some(underlying), Some(currency)) =
-                (&mut snapshot.underlying_price, evidenced_currency)
-        {
-            underlying.currency = Some(currency);
-        }
-        for warning in unresolved_roots
-            .into_iter()
-            .map(|root| OptionIngestionWarning::ContractSpecificationUnavailable { root })
-        {
-            snapshot.ingestion_diagnostics.record_warning(warning);
-        }
         let items_obtained = snapshot.contratos.len();
         let items_stored = self
             .stores
@@ -478,20 +394,6 @@ where
             items_obtained,
             items_stored,
         })
-    }
-}
-
-fn single_evidenced_currency<'a>(
-    specifications: impl IntoIterator<Item = Option<&'a str>>,
-) -> Option<String> {
-    let mut currencies = BTreeSet::new();
-    for currency in specifications {
-        currencies.insert(currency?);
-    }
-    if currencies.len() == 1 {
-        currencies.into_iter().next().map(str::to_owned)
-    } else {
-        None
     }
 }
 

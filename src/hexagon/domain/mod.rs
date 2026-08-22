@@ -1,4 +1,5 @@
 pub mod data_refresh;
+pub mod gamma_exposure;
 pub mod historical_volatility;
 pub mod index_history;
 pub mod interest_rates;

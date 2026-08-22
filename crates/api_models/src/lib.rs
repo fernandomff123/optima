@@ -105,6 +105,121 @@ pub struct OptionSnapshot {
     pub chains: Vec<OptionChain>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GammaExposureSnapshotOrigin {
+    Intraday,
+    EndOfDay,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GammaExposureExclusionReason {
+    MissingSpot,
+    InvalidSpot,
+    MissingGamma,
+    InvalidGamma,
+    MissingOpenInterest,
+    InvalidOpenInterest,
+    MissingMultiplier,
+    InvalidMultiplier,
+    InvalidStrike,
+    ExpiredContract,
+    MissingImpliedVolatility,
+    MissingForwardCarry,
+    NumericOverflow,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GammaExposureStrike {
+    pub strike: f64,
+    pub calls_gex: f64,
+    pub puts_gex: f64,
+    pub net_gex: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GammaExposureExpiration {
+    pub expiration: NaiveDate,
+    pub calls_gex: f64,
+    pub puts_gex: f64,
+    pub net_gex: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GammaExposureExclusionCount {
+    pub reason: GammaExposureExclusionReason,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GammaExposureExclusionSample {
+    pub occ_symbol: String,
+    pub reasons: Vec<GammaExposureExclusionReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GammaExposureDiagnostics {
+    pub total_contracts: u64,
+    pub included_contracts: u64,
+    pub excluded_contracts: u64,
+    pub excluded_by_reason: Vec<GammaExposureExclusionCount>,
+    pub exclusion_samples: Vec<GammaExposureExclusionSample>,
+    pub exclusion_sample_limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CurrentGammaExposureResponse {
+    pub ticker: String,
+    pub spot: Option<f64>,
+    pub currency: Option<String>,
+    pub as_of: Option<DateTime<Utc>>,
+    pub snapshot_origin: GammaExposureSnapshotOrigin,
+    pub calls_gex: f64,
+    pub puts_gex: f64,
+    pub net_gex: f64,
+    pub by_strike: Vec<GammaExposureStrike>,
+    pub by_expiration: Vec<GammaExposureExpiration>,
+    pub methodology: String,
+    pub sign_convention: String,
+    pub diagnostics: GammaExposureDiagnostics,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModeledGammaExposurePoint {
+    pub spot: f64,
+    pub call_gex: f64,
+    pub put_gex: f64,
+    pub net_gex: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModeledGammaExposureProfile {
+    pub valuation_time: DateTime<Utc>,
+    pub range_percent: f64,
+    pub points: usize,
+    pub methodology: String,
+    pub sticky_strike_assumption: String,
+    pub included_contracts: u64,
+    pub excluded_contracts: u64,
+    pub diagnostics: GammaExposureDiagnostics,
+    pub profile: Vec<ModeledGammaExposurePoint>,
+    pub zero_crossings: Vec<f64>,
+    pub nearest_zero_crossing: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GammaExposureResponse {
+    pub current_exposure: CurrentGammaExposureResponse,
+    pub modeled_profile: DataState<ModeledGammaExposureProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct GammaExposureQuery {
+    pub range_percent: Option<f64>,
+    pub points: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TermStructure {
     pub ticker: String,

@@ -185,6 +185,7 @@ where
                             .stored_options
                             .load_option_chain(&ticker)
                             .await?
+                            .map(|stored| stored.snapshot)
                     };
                     let Some(snapshot) = snapshot else {
                         return Ok(None);

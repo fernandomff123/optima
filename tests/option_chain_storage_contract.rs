@@ -7,7 +7,7 @@ use hexagonal_backend::{
         domain::options::{
             ContratoOpcao, OptionChain, OptionContractSpecification, OptionIngestionDiagnostics,
             OptionType, ProviderTimestamp, ProviderTimestampTimezone, Snapshot,
-            UnderlyingPriceObservation,
+            StoredOptionChainSnapshot, UnderlyingPriceObservation,
         },
         driven_ports::{
             for_loading_option_chains::ForLoadingOptionChains,
@@ -17,6 +17,13 @@ use hexagonal_backend::{
 };
 
 static DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn stored(snapshot: Snapshot, market_close: chrono::DateTime<Utc>) -> StoredOptionChainSnapshot {
+    StoredOptionChainSnapshot {
+        snapshot,
+        session_date: market_close.date_naive(),
+    }
+}
 
 fn sample_snapshot() -> Snapshot {
     let expiration = NaiveDate::from_ymd_opt(2026, 9, 18).expect("valid expiration");
@@ -124,7 +131,7 @@ async fn assert_option_chain_contract(
             .load_option_chain(" spy ")
             .await
             .expect("stored snapshot must load"),
-        Some(snapshot)
+        Some(stored(snapshot, market_close))
     );
     assert_eq!(
         adapter
@@ -161,11 +168,11 @@ async fn assert_nullable_market_facts_round_trip(
         .await
         .expect("nullable market facts must load")
         .expect("snapshot must exist");
-    assert_eq!(loaded, snapshot);
-    assert_eq!(loaded.contratos[0].gamma, None);
-    assert_eq!(loaded.contratos[0].open_interest, None);
-    assert_eq!(loaded.contratos[1].gamma, Some(0.0));
-    assert_eq!(loaded.contratos[1].open_interest, Some(0.0));
+    assert_eq!(loaded, stored(snapshot.clone(), market_close));
+    assert_eq!(loaded.snapshot.contratos[0].gamma, None);
+    assert_eq!(loaded.snapshot.contratos[0].open_interest, None);
+    assert_eq!(loaded.snapshot.contratos[1].gamma, Some(0.0));
+    assert_eq!(loaded.snapshot.contratos[1].open_interest, Some(0.0));
 }
 
 #[tokio::test]
@@ -216,6 +223,60 @@ async fn duckdb_preserves_null_zero_and_present_gamma_and_open_interest() {
 }
 
 #[tokio::test]
+async fn latest_snapshot_keeps_snapshot_and_session_from_the_same_persisted_row() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-sessions-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    let first_close = Utc.with_ymd_and_hms(2026, 8, 6, 20, 0, 0).unwrap();
+    let latest_close = Utc.with_ymd_and_hms(2026, 8, 7, 20, 0, 0).unwrap();
+    let mut first = sample_snapshot();
+    first.timestamp_utc = Utc.with_ymd_and_hms(2026, 8, 6, 20, 1, 0).unwrap();
+    let mut latest = sample_snapshot();
+    latest.timestamp_utc = Utc.with_ymd_and_hms(2026, 8, 7, 20, 1, 0).unwrap();
+    latest.underlying_price.as_mut().unwrap().value = 501.25;
+    adapter
+        .store_option_chain(&first, first_close)
+        .await
+        .unwrap();
+    adapter
+        .store_option_chain(&latest, latest_close)
+        .await
+        .unwrap();
+
+    let loaded = adapter.load_option_chain("SPY").await.unwrap().unwrap();
+    assert_eq!(loaded.session_date, latest_close.date_naive());
+    assert_eq!(loaded.snapshot, latest);
+    assert_ne!(loaded.snapshot, first);
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
+async fn row_without_a_factual_session_date_is_rejected_instead_of_inferred() {
+    let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "hexagonal-option-null-session-{}-{sequence}.duckdb",
+        std::process::id()
+    ));
+    let adapter = DuckDbOptionChainsAdapter::new(&path);
+    let close = Utc.with_ymd_and_hms(2026, 8, 7, 20, 0, 0).unwrap();
+    adapter
+        .store_option_chain(&sample_snapshot(), close)
+        .await
+        .unwrap();
+    let connection = duckdb::Connection::open(&path).unwrap();
+    connection
+        .execute("UPDATE option_snapshots SET market_close = NULL", [])
+        .unwrap();
+    drop(connection);
+
+    assert!(adapter.load_option_chain("SPY").await.is_err());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[tokio::test]
 async fn duckdb_persists_a_snapshot_without_spot() {
     let sequence = DATABASE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
@@ -234,7 +295,10 @@ async fn duckdb_persists_a_snapshot_without_spot() {
         .expect("snapshot without spot remains persistible");
     assert_eq!(
         adapter.load_option_chain("SPY").await.unwrap(),
-        Some(snapshot)
+        Some(stored(
+            snapshot,
+            Utc.with_ymd_and_hms(2026, 8, 7, 20, 0, 0).unwrap()
+        ))
     );
     std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
 }
@@ -278,10 +342,16 @@ async fn cboe_spot_and_timestamp_survive_the_duckdb_round_trip() {
         .await
         .expect("parsed snapshot must store");
     let loaded = adapter.load_option_chain("SPX").await.unwrap().unwrap();
-    assert_eq!(loaded.underlying_price, expected.underlying_price);
-    assert_eq!(loaded.provider_timestamp, expected.provider_timestamp);
+    assert_eq!(loaded.snapshot.underlying_price, expected.underlying_price);
     assert_eq!(
-        loaded.collected_at.map(|value| value.timestamp_micros()),
+        loaded.snapshot.provider_timestamp,
+        expected.provider_timestamp
+    );
+    assert_eq!(
+        loaded
+            .snapshot
+            .collected_at
+            .map(|value| value.timestamp_micros()),
         expected.collected_at.map(|value| value.timestamp_micros())
     );
     std::fs::remove_file(path).expect("temporary DuckDB file must be removable");
@@ -331,9 +401,12 @@ async fn offsetless_timestamps_survive_duckdb_without_becoming_utc() {
         .await
         .unwrap();
     let loaded = adapter.load_option_chain("SPX").await.unwrap().unwrap();
-    assert_eq!(loaded.underlying_price, expected.underlying_price);
-    assert_eq!(loaded.provider_timestamp, expected.provider_timestamp);
-    assert_eq!(loaded.collected_at, Some(collected_at));
+    assert_eq!(loaded.snapshot.underlying_price, expected.underlying_price);
+    assert_eq!(
+        loaded.snapshot.provider_timestamp,
+        expected.provider_timestamp
+    );
+    assert_eq!(loaded.snapshot.collected_at, Some(collected_at));
     std::fs::remove_file(path).unwrap();
 }
 
@@ -391,7 +464,7 @@ async fn unique_market_close_preserves_original_snapshot_and_reports_no_insert()
     );
     assert_eq!(
         adapter.load_option_chain("SPY").await.unwrap(),
-        Some(incomplete)
+        Some(stored(incomplete, market_close))
     );
     std::fs::remove_file(path).unwrap();
 }

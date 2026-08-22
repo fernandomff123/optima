@@ -1,6 +1,7 @@
 //! Conversation required to resolve evidenced option product specifications.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -24,4 +25,19 @@ pub trait ForResolvingOptionContractSpecifications: Send + Sync {
         &self,
         contracts: &[OptionContractIdentity],
     ) -> PortResult<BTreeMap<OptionContractIdentity, OptionContractSpecificationResolution>>;
+}
+
+#[async_trait]
+impl<T> ForResolvingOptionContractSpecifications for Arc<T>
+where
+    T: ForResolvingOptionContractSpecifications + ?Sized,
+{
+    async fn resolve_option_contract_specifications(
+        &self,
+        contracts: &[OptionContractIdentity],
+    ) -> PortResult<BTreeMap<OptionContractIdentity, OptionContractSpecificationResolution>> {
+        self.as_ref()
+            .resolve_option_contract_specifications(contracts)
+            .await
+    }
 }

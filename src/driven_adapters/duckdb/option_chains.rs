@@ -10,7 +10,7 @@ use crate::hexagon::{
     domain::options::{
         ContratoOpcao, OptionChain, OptionContractSpecification, OptionIngestionDiagnostics,
         OptionIngestionWarning, OptionType, ProviderTimestamp, ProviderTimestampTimezone, Snapshot,
-        UnderlyingPriceObservation,
+        StoredOptionChainSnapshot, UnderlyingPriceObservation,
     },
     driven_ports::{
         for_loading_option_chains::ForLoadingOptionChains,
@@ -73,7 +73,10 @@ impl ForStoringOptionChains for DuckDbOptionChainsAdapter {
 
 #[async_trait::async_trait]
 impl ForLoadingOptionChains for DuckDbOptionChainsAdapter {
-    async fn load_option_chain(&self, ticker: &str) -> PortResult<Option<Snapshot>> {
+    async fn load_option_chain(
+        &self,
+        ticker: &str,
+    ) -> PortResult<Option<StoredOptionChainSnapshot>> {
         let path = self.database_path.clone();
         let ticker = ticker.trim().to_ascii_uppercase();
         run_blocking(move || load_latest_snapshot(&path, &ticker)).await
@@ -320,12 +323,12 @@ fn store_snapshot(
 fn load_latest_snapshot(
     path: &PathBuf,
     ticker: &str,
-) -> Result<Option<Snapshot>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<StoredOptionChainSnapshot>, Box<dyn std::error::Error + Send + Sync>> {
     let connection = Connection::open(path)?;
     initialize_schema(&connection)?;
     let metadata = connection
         .query_row(
-            "SELECT snapshot_id, ticker, observed_at, spot, spot_as_of,
+            "SELECT snapshot_id, ticker, observed_at, market_close, spot, spot_as_of,
                     collected_at, spot_currency, spot_source,
                     spot_as_of_raw, spot_as_of_timezone,
                     provider_timestamp_raw, provider_timestamp_timezone,
@@ -333,7 +336,7 @@ fn load_latest_snapshot(
                     ingestion_warning_count, ingestion_warnings
              FROM option_snapshots
              WHERE ticker = ?
-             ORDER BY observed_at DESC
+             ORDER BY market_close DESC
              LIMIT 1",
             [ticker],
             |row| {
@@ -341,19 +344,20 @@ fn load_latest_snapshot(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, DateTime<Utc>>(2)?,
-                    row.get::<_, Option<f64>>(3)?,
-                    row.get::<_, Option<DateTime<Utc>>>(4)?,
+                    row.get::<_, DateTime<Utc>>(3)?,
+                    row.get::<_, Option<f64>>(4)?,
                     row.get::<_, Option<DateTime<Utc>>>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<DateTime<Utc>>>(6)?,
                     row.get::<_, Option<String>>(7)?,
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<u64>>(12)?,
-                    row.get::<_, Option<String>>(13)?,
-                    row.get::<_, Option<u64>>(14)?,
-                    row.get::<_, Option<String>>(15)?,
+                    row.get::<_, Option<String>>(12)?,
+                    row.get::<_, Option<u64>>(13)?,
+                    row.get::<_, Option<String>>(14)?,
+                    row.get::<_, Option<u64>>(15)?,
+                    row.get::<_, Option<String>>(16)?,
                 ))
             },
         )
@@ -362,6 +366,7 @@ fn load_latest_snapshot(
         snapshot_id,
         ticker,
         timestamp_utc,
+        market_close,
         spot,
         spot_as_of,
         collected_at,
@@ -405,52 +410,55 @@ fn load_latest_snapshot(
         .iter()
         .flat_map(|chain| chain.contratos.iter().cloned())
         .collect();
-    Ok(Some(Snapshot {
-        ticker,
-        timestamp_utc,
-        contratos,
-        chains,
-        underlying_price: spot.and_then(|value| {
-            UnderlyingPriceObservation::new(
-                value,
-                spot_as_of,
-                spot_currency,
-                spot_source.unwrap_or_default(),
-            )
-            .map(|observation| {
-                observation.with_provider_timestamp(
-                    spot_as_of_raw,
-                    spot_as_of_timezone.as_deref().map(parse_timestamp_timezone),
+    Ok(Some(StoredOptionChainSnapshot {
+        session_date: market_close.date_naive(),
+        snapshot: Snapshot {
+            ticker,
+            timestamp_utc,
+            contratos,
+            chains,
+            underlying_price: spot.and_then(|value| {
+                UnderlyingPriceObservation::new(
+                    value,
+                    spot_as_of,
+                    spot_currency,
+                    spot_source.unwrap_or_default(),
                 )
-            })
-        }),
-        collected_at,
-        provider_timestamp: provider_timestamp_raw.map(|raw| ProviderTimestamp {
-            raw,
-            timezone: parse_timestamp_timezone(
-                provider_timestamp_timezone
+                .map(|observation| {
+                    observation.with_provider_timestamp(
+                        spot_as_of_raw,
+                        spot_as_of_timezone.as_deref().map(parse_timestamp_timezone),
+                    )
+                })
+            }),
+            collected_at,
+            provider_timestamp: provider_timestamp_raw.map(|raw| ProviderTimestamp {
+                raw,
+                timezone: parse_timestamp_timezone(
+                    provider_timestamp_timezone
+                        .as_deref()
+                        .unwrap_or("unverified"),
+                ),
+            }),
+            ingestion_diagnostics: {
+                let invalid_occ_symbol_samples: Vec<String> = invalid_occ_symbols
                     .as_deref()
-                    .unwrap_or("unverified"),
-            ),
-        }),
-        ingestion_diagnostics: {
-            let invalid_occ_symbol_samples: Vec<String> = invalid_occ_symbols
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()?
-                .unwrap_or_default();
-            let warnings: Vec<OptionIngestionWarning> = ingestion_warnings
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()?
-                .unwrap_or_default();
-            OptionIngestionDiagnostics {
-                invalid_occ_symbol_count: invalid_occ_symbol_count
-                    .unwrap_or(invalid_occ_symbol_samples.len() as u64),
-                invalid_occ_symbol_samples,
-                warning_count: ingestion_warning_count.unwrap_or(warnings.len() as u64),
-                warnings,
-            }
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                let warnings: Vec<OptionIngestionWarning> = ingestion_warnings
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                OptionIngestionDiagnostics {
+                    invalid_occ_symbol_count: invalid_occ_symbol_count
+                        .unwrap_or(invalid_occ_symbol_samples.len() as u64),
+                    invalid_occ_symbol_samples,
+                    warning_count: ingestion_warning_count.unwrap_or(warnings.len() as u64),
+                    warnings,
+                }
+            },
         },
     }))
 }

@@ -4,7 +4,7 @@ use hexagonal_backend::hexagon::{
     PortResult,
     application::options::OptionsApplication,
     domain::{
-        options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
+        options::{ContratoOpcao, OptionChain, OptionType, Snapshot, StoredOptionChainSnapshot},
         treasury::YieldCurve,
         volatility::TermStructure,
     },
@@ -28,8 +28,14 @@ struct OptionDataMock {
 
 #[async_trait]
 impl ForLoadingOptionChains for OptionDataMock {
-    async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
-        Ok(Some(self.snapshot.clone()))
+    async fn load_option_chain(
+        &self,
+        _ticker: &str,
+    ) -> PortResult<Option<StoredOptionChainSnapshot>> {
+        Ok(Some(StoredOptionChainSnapshot {
+            snapshot: self.snapshot.clone(),
+            session_date: self.snapshot.timestamp_utc.date_naive(),
+        }))
     }
 }
 

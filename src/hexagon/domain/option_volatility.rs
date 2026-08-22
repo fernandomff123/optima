@@ -52,21 +52,7 @@ fn calculate_volatility_from_contracts(
         ));
     }
 
-    let forward_pair = pairs
-        .iter()
-        .filter(|pair| pair.call.bid > 0.0 && pair.put.bid > 0.0)
-        .min_by(|left, right| {
-            let left_difference = (left.call.mid - left.put.mid).abs();
-            let right_difference = (right.call.mid - right.put.mid).abs();
-            left_difference
-                .total_cmp(&right_difference)
-                .then_with(|| left.strike.total_cmp(&right.strike))
-        })
-        .ok_or_else(|| invalid_data("não foi possível determinar o strike ATM com bids válidos"))?;
-    let discount_factor = (interest_rate * time_to_expiration).exp();
-    let forward =
-        forward_pair.strike + discount_factor * (forward_pair.call.mid - forward_pair.put.mid);
-
+    let forward = calculate_forward_from_pairs(&pairs, interest_rate, time_to_expiration)?;
     let k0_pair = pairs
         .iter()
         .filter(|pair| pair.strike <= forward)
@@ -81,6 +67,7 @@ fn calculate_volatility_from_contracts(
         return Err(invalid_data("não existem opções OTM suficientes"));
     }
 
+    let discount_factor = (interest_rate * time_to_expiration).exp();
     let mut sum = 0.0;
     for index in 0..contributions.len() {
         let (strike, option_mid) = contributions[index];
@@ -108,6 +95,43 @@ fn calculate_volatility_from_contracts(
         variance,
         volatility: variance.sqrt() * 100.0,
     })
+}
+
+pub fn calculate_forward(
+    contracts: &[ContratoOpcao],
+    expiration: NaiveDate,
+    interest_rate: f64,
+    time_to_expiration: f64,
+) -> Result<f64, Box<dyn Error + Send + Sync>> {
+    if !interest_rate.is_finite() || !time_to_expiration.is_finite() || time_to_expiration <= 0.0 {
+        return Err(invalid_data("taxa ou maturidade inválida para o forward"));
+    }
+    let pairs = pair_contracts(contracts, expiration);
+    calculate_forward_from_pairs(&pairs, interest_rate, time_to_expiration)
+}
+
+fn calculate_forward_from_pairs(
+    pairs: &[StrikePair<'_>],
+    interest_rate: f64,
+    time_to_expiration: f64,
+) -> Result<f64, Box<dyn Error + Send + Sync>> {
+    let forward_pair = pairs
+        .iter()
+        .filter(|pair| pair.call.bid > 0.0 && pair.put.bid > 0.0)
+        .min_by(|left, right| {
+            let left_difference = (left.call.mid - left.put.mid).abs();
+            let right_difference = (right.call.mid - right.put.mid).abs();
+            left_difference
+                .total_cmp(&right_difference)
+                .then_with(|| left.strike.total_cmp(&right.strike))
+        })
+        .ok_or_else(|| invalid_data("não foi possível determinar o strike ATM com bids válidos"))?;
+    let discount_factor = (interest_rate * time_to_expiration).exp();
+    let forward =
+        forward_pair.strike + discount_factor * (forward_pair.call.mid - forward_pair.put.mid);
+    (forward.is_finite() && forward > 0.0)
+        .then_some(forward)
+        .ok_or_else(|| invalid_data("forward inválido"))
 }
 
 /// Interpola a variância total de duas maturidades para um prazo constante.
@@ -304,7 +328,7 @@ fn is_eligible_constant_maturity(
     })
 }
 
-fn is_pm_settlement(root: &str) -> bool {
+pub fn is_pm_settlement(root: &str) -> bool {
     !root.eq_ignore_ascii_case("SPX")
 }
 

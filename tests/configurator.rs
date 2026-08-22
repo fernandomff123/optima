@@ -25,6 +25,7 @@ use hexagonal_backend::{
             for_simulating_strategies::{ForSimulatingStrategies, ScenarioGridRequest},
             for_streaming_market_prices::ForStreamingMarketPrices,
             for_synchronizing_market_data::ForSynchronizingMarketData,
+            for_viewing_gamma_exposure::ForViewingGammaExposure,
             for_viewing_interest_rates::ForViewingInterestRates,
             for_viewing_intraday_options::ForViewingIntradayOptions,
             for_viewing_market_data::ForViewingMarketData,
@@ -90,6 +91,7 @@ async fn configurator_wires_every_application_to_its_driving_port() {
     fn portfolio_valuation(_: &impl ForViewingPortfolioPositions) {}
     fn intraday_simulation(_: &impl ForPreparingIntradaySimulations) {}
     fn intraday_options(_: &impl ForViewingIntradayOptions) {}
+    fn gamma_exposure(_: &impl ForViewingGammaExposure) {}
     fn options(_: &impl ForAnalyzingOptions) {}
     fn portfolios(_: &impl ForManagingPortfolios) {}
     fn saved_strategies(_: &impl ForManagingSavedStrategies) {}
@@ -106,6 +108,7 @@ async fn configurator_wires_every_application_to_its_driving_port() {
     portfolio_valuation(&configured.portfolio_valuation);
     intraday_simulation(&configured.intraday_simulation);
     intraday_options(&configured.intraday_simulation);
+    gamma_exposure(&configured.gamma_exposure);
     options(&configured.options);
     portfolios(&configured.portfolios);
     saved_strategies(&configured.saved_strategies);

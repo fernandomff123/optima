@@ -309,6 +309,13 @@ pub struct Snapshot {
     pub ingestion_diagnostics: OptionIngestionDiagnostics,
 }
 
+/// A persisted provider snapshot paired with its factual market session.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredOptionChainSnapshot {
+    pub snapshot: Snapshot,
+    pub session_date: NaiveDate,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

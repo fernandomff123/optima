@@ -14,7 +14,7 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 
 use crate::hexagon::{
     PortError,
@@ -28,6 +28,7 @@ use crate::hexagon::{
         for_simulating_strategies::ForSimulatingStrategies,
         for_synchronizing_market_data::ForSynchronizingMarketData,
         for_synchronizing_market_data::SynchronizeTrackedTickers,
+        for_viewing_gamma_exposure::{ForViewingGammaExposure, GammaExposureRequest},
         for_viewing_market_data::ForViewingMarketData,
         for_viewing_sector_performance::ForViewingSectorPerformance,
     },
@@ -167,6 +168,7 @@ pub const CANONICAL_ALIASES: &[(&str, &str, &str, &str)] = &[
 ];
 
 pub const EXISTING_CANONICAL_ROUTES: &[(&str, &str)] = &[
+    ("GET", "/api/options/gamma-exposure/{ticker}"),
     ("GET", "/api/market/sectors"),
     ("GET", "/api/data-refresh/status"),
     ("POST", "/api/data-refresh"),
@@ -187,6 +189,7 @@ pub const NON_CANONICAL_SYNCHRONIZATION_ALIASES: &[(&str, &str)] = &[
 struct HttpState {
     market_data: Arc<dyn ForViewingMarketData>,
     options: Arc<dyn ForAnalyzingOptions>,
+    gamma_exposure: Arc<dyn ForViewingGammaExposure>,
     simulation: Arc<dyn ForSimulatingStrategies>,
     portfolios: Arc<dyn ForManagingPortfolios>,
     synchronization: Arc<dyn ForSynchronizingMarketData>,
@@ -200,6 +203,23 @@ struct HttpState {
 pub struct MarketViewingPorts {
     market_data: Arc<dyn ForViewingMarketData>,
     sector_performance: Arc<dyn ForViewingSectorPerformance>,
+}
+
+pub struct OptionsViewingPorts {
+    options: Arc<dyn ForAnalyzingOptions>,
+    gamma_exposure: Arc<dyn ForViewingGammaExposure>,
+}
+
+impl OptionsViewingPorts {
+    pub fn new(
+        options: Arc<dyn ForAnalyzingOptions>,
+        gamma_exposure: Arc<dyn ForViewingGammaExposure>,
+    ) -> Self {
+        Self {
+            options,
+            gamma_exposure,
+        }
+    }
 }
 
 pub struct SynchronizationPorts {
@@ -281,10 +301,34 @@ pub fn router_with_data_refresh(
     saved_strategies: Arc<dyn ForManagingSavedStrategies>,
     tracked_tickers: TrackedTickerPorts,
 ) -> Router {
+    router_with_data_refresh_and_gamma_exposure(
+        market_viewing,
+        OptionsViewingPorts::new(options, Arc::new(UnconfiguredGammaExposure)),
+        simulation,
+        portfolios,
+        synchronization,
+        saved_strategies,
+        tracked_tickers,
+    )
+}
+
+pub fn router_with_data_refresh_and_gamma_exposure(
+    market_viewing: MarketViewingPorts,
+    options_viewing: OptionsViewingPorts,
+    simulation: Arc<dyn ForSimulatingStrategies>,
+    portfolios: Arc<dyn ForManagingPortfolios>,
+    synchronization: SynchronizationPorts,
+    saved_strategies: Arc<dyn ForManagingSavedStrategies>,
+    tracked_tickers: TrackedTickerPorts,
+) -> Router {
     let canonical = Router::new()
         .route("/api/market-data/{ticker}/history", get(market_history))
         .route("/api/market-data/{ticker}/live-price", get(live_price))
         .route("/api/options/{ticker}/chain", get(option_chain))
+        .route(
+            "/api/options/gamma-exposure/{ticker}",
+            get(view_gamma_exposure),
+        )
         .route("/api/options/{ticker}/term-structure", get(term_structure))
         .route("/api/options/{ticker}/surface", get(volatility_surface))
         .route(
@@ -399,7 +443,8 @@ pub fn router_with_data_refresh(
 
     canonical.merge(compatibility).with_state(HttpState {
         market_data: market_viewing.market_data,
-        options,
+        options: options_viewing.options,
+        gamma_exposure: options_viewing.gamma_exposure,
         simulation,
         portfolios,
         synchronization: synchronization.synchronization,
@@ -409,6 +454,179 @@ pub fn router_with_data_refresh(
         sector_performance: market_viewing.sector_performance,
         data_refresh: synchronization.data_refresh,
     })
+}
+
+struct UnconfiguredGammaExposure;
+
+#[async_trait::async_trait]
+impl ForViewingGammaExposure for UnconfiguredGammaExposure {
+    async fn gamma_exposure(
+        &self,
+        _request: GammaExposureRequest,
+    ) -> crate::hexagon::PortResult<crate::hexagon::domain::gamma_exposure::GammaExposureAnalysis>
+    {
+        Err(PortError::Unavailable(
+            "gamma exposure is not configured".to_string(),
+        ))
+    }
+}
+
+async fn view_gamma_exposure(
+    State(state): State<HttpState>,
+    Path(ticker): Path<String>,
+    Query(query): Query<api_models::GammaExposureQuery>,
+) -> Result<Json<api_models::GammaExposureResponse>, HttpError> {
+    state
+        .gamma_exposure
+        .gamma_exposure(GammaExposureRequest {
+            ticker,
+            range_percent: query.range_percent.unwrap_or(20.0),
+            points: query.points.unwrap_or(81),
+            valuation_time: Utc::now(),
+        })
+        .await
+        .map(map_gamma_exposure)
+        .map(Json)
+        .map_err(HttpError)
+}
+
+fn map_gamma_exposure(
+    analysis: crate::hexagon::domain::gamma_exposure::GammaExposureAnalysis,
+) -> api_models::GammaExposureResponse {
+    use crate::hexagon::domain::gamma_exposure::{ExclusionReason as R, SnapshotOrigin as O};
+    let reason = |value| match value {
+        R::MissingSpot => api_models::GammaExposureExclusionReason::MissingSpot,
+        R::InvalidSpot => api_models::GammaExposureExclusionReason::InvalidSpot,
+        R::MissingGamma => api_models::GammaExposureExclusionReason::MissingGamma,
+        R::InvalidGamma => api_models::GammaExposureExclusionReason::InvalidGamma,
+        R::MissingOpenInterest => api_models::GammaExposureExclusionReason::MissingOpenInterest,
+        R::InvalidOpenInterest => api_models::GammaExposureExclusionReason::InvalidOpenInterest,
+        R::MissingMultiplier => api_models::GammaExposureExclusionReason::MissingMultiplier,
+        R::InvalidMultiplier => api_models::GammaExposureExclusionReason::InvalidMultiplier,
+        R::InvalidStrike => api_models::GammaExposureExclusionReason::InvalidStrike,
+        R::ExpiredContract => api_models::GammaExposureExclusionReason::ExpiredContract,
+        R::MissingImpliedVolatility => {
+            api_models::GammaExposureExclusionReason::MissingImpliedVolatility
+        }
+        R::MissingForwardCarry => api_models::GammaExposureExclusionReason::MissingForwardCarry,
+        R::NumericOverflow => api_models::GammaExposureExclusionReason::NumericOverflow,
+    };
+    let exposure = analysis.current_exposure;
+    let current_exposure = api_models::CurrentGammaExposureResponse {
+        ticker: exposure.ticker,
+        spot: exposure.spot,
+        currency: exposure.currency,
+        as_of: exposure.as_of,
+        snapshot_origin: match exposure.snapshot_origin {
+            O::Intraday => api_models::GammaExposureSnapshotOrigin::Intraday,
+            O::EndOfDay => api_models::GammaExposureSnapshotOrigin::EndOfDay,
+        },
+        calls_gex: exposure.calls_gex,
+        puts_gex: exposure.puts_gex,
+        net_gex: exposure.net_gex,
+        by_strike: exposure
+            .by_strike
+            .into_iter()
+            .map(|bucket| api_models::GammaExposureStrike {
+                strike: bucket.key,
+                calls_gex: bucket.calls_gex,
+                puts_gex: bucket.puts_gex,
+                net_gex: bucket.net_gex,
+            })
+            .collect(),
+        by_expiration: exposure
+            .by_expiration
+            .into_iter()
+            .map(|bucket| api_models::GammaExposureExpiration {
+                expiration: bucket.key,
+                calls_gex: bucket.calls_gex,
+                puts_gex: bucket.puts_gex,
+                net_gex: bucket.net_gex,
+            })
+            .collect(),
+        methodology: exposure.methodology.to_string(),
+        sign_convention: exposure.sign_convention.to_string(),
+        diagnostics: api_models::GammaExposureDiagnostics {
+            total_contracts: exposure.diagnostics.total_contracts,
+            included_contracts: exposure.diagnostics.included_contracts,
+            excluded_contracts: exposure.diagnostics.excluded_contracts,
+            excluded_by_reason: exposure
+                .diagnostics
+                .excluded_by_reason
+                .into_iter()
+                .map(|(value, count)| api_models::GammaExposureExclusionCount {
+                    reason: reason(value),
+                    count,
+                })
+                .collect(),
+            exclusion_samples: exposure
+                .diagnostics
+                .samples
+                .into_iter()
+                .map(|sample| api_models::GammaExposureExclusionSample {
+                    occ_symbol: sample.occ_symbol,
+                    reasons: sample.reasons.into_iter().map(reason).collect(),
+                })
+                .collect(),
+            exclusion_sample_limit: exposure.diagnostics.sample_limit,
+        },
+    };
+    let Some(modeled) = analysis.modeled_profile else {
+        return api_models::GammaExposureResponse {
+            current_exposure,
+            modeled_profile: api_models::DataState::Unavailable,
+        };
+    };
+    let total_contracts = modeled.included_contracts + modeled.excluded_contracts;
+    let diagnostics = api_models::GammaExposureDiagnostics {
+        total_contracts,
+        included_contracts: modeled.included_contracts,
+        excluded_contracts: modeled.excluded_contracts,
+        excluded_by_reason: modeled
+            .excluded_by_reason
+            .into_iter()
+            .map(|(value, count)| api_models::GammaExposureExclusionCount {
+                reason: reason(value),
+                count,
+            })
+            .collect(),
+        exclusion_samples: modeled
+            .samples
+            .into_iter()
+            .map(|sample| api_models::GammaExposureExclusionSample {
+                occ_symbol: sample.occ_symbol,
+                reasons: sample.reasons.into_iter().map(reason).collect(),
+            })
+            .collect(),
+        exclusion_sample_limit: modeled.sample_limit,
+    };
+    api_models::GammaExposureResponse {
+        current_exposure,
+        modeled_profile: api_models::DataState::Available(
+            api_models::ModeledGammaExposureProfile {
+                valuation_time: modeled.valuation_time,
+                range_percent: modeled.range_percent,
+                points: modeled.points,
+                methodology: modeled.methodology.to_string(),
+                sticky_strike_assumption: modeled.sticky_strike_assumption.to_string(),
+                included_contracts: modeled.included_contracts,
+                excluded_contracts: modeled.excluded_contracts,
+                diagnostics,
+                profile: modeled
+                    .profile
+                    .into_iter()
+                    .map(|point| api_models::ModeledGammaExposurePoint {
+                        spot: point.spot,
+                        call_gex: point.call_gex,
+                        put_gex: point.put_gex,
+                        net_gex: point.net_gex,
+                    })
+                    .collect(),
+                zero_crossings: modeled.zero_crossings,
+                nearest_zero_crossing: modeled.nearest_zero_crossing,
+            },
+        ),
+    }
 }
 
 async fn canonical_error_boundary(request: Request<Body>, next: Next) -> Response {

@@ -8,7 +8,7 @@ use hexagonal_backend::hexagon::{
         index_history::IndexHistory,
         live_price::LivePrice,
         market_history::MarketHistory,
-        options::Snapshot,
+        options::{Snapshot, StoredOptionChainSnapshot},
         portfolio::Portfolio,
         tracked_ticker::{ResolvedUnderlying, UnderlyingMetadata},
         treasury::YieldCurve,
@@ -141,7 +141,10 @@ impl ForStoringVolatilityTermStructures for OptionDataStoreMock {
 
 #[async_trait]
 impl ForLoadingOptionChains for StoredOptionChainsMock {
-    async fn load_option_chain(&self, _ticker: &str) -> PortResult<Option<Snapshot>> {
+    async fn load_option_chain(
+        &self,
+        _ticker: &str,
+    ) -> PortResult<Option<StoredOptionChainSnapshot>> {
         Ok(None)
     }
 }
