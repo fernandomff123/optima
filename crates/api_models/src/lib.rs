@@ -126,6 +126,7 @@ pub enum GammaExposureExclusionReason {
     InvalidStrike,
     ExpiredContract,
     MissingImpliedVolatility,
+    InvalidImpliedVolatility,
     MissingForwardCarry,
     NumericOverflow,
 }

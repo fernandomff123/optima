@@ -508,6 +508,9 @@ fn map_gamma_exposure(
         R::MissingImpliedVolatility => {
             api_models::GammaExposureExclusionReason::MissingImpliedVolatility
         }
+        R::InvalidImpliedVolatility => {
+            api_models::GammaExposureExclusionReason::InvalidImpliedVolatility
+        }
         R::MissingForwardCarry => api_models::GammaExposureExclusionReason::MissingForwardCarry,
         R::NumericOverflow => api_models::GammaExposureExclusionReason::NumericOverflow,
     };

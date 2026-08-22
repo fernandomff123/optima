@@ -120,6 +120,20 @@ impl ForLoadingYieldCurves for YieldCurves {
     }
 }
 
+#[derive(Clone)]
+struct FailingYieldCurves {
+    calls: Arc<AtomicUsize>,
+    result: PortResult<Option<YieldCurve>>,
+}
+
+#[async_trait]
+impl ForLoadingYieldCurves for FailingYieldCurves {
+    async fn load_yield_curve(&self, _: NaiveDate) -> PortResult<Option<YieldCurve>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.result.clone()
+    }
+}
+
 fn request(ticker: &str) -> GammaExposureRequest {
     GammaExposureRequest {
         ticker: ticker.into(),
@@ -251,6 +265,105 @@ fn modeled_profile_reuses_black_scholes_on_a_centered_bounded_grid() {
             )
             .is_err()
         );
+    }
+}
+
+#[test]
+fn modeled_profile_uses_factual_settlement_time_for_same_day_and_prior_expirations() {
+    let valuation = Utc.with_ymd_and_hms(2026, 9, 18, 15, 0, 0).unwrap();
+    let same_day = valuation.date_naive();
+    let future = NaiveDate::from_ymd_opt(2026, 9, 21).unwrap();
+    let prior = NaiveDate::from_ymd_opt(2026, 9, 17).unwrap();
+    let make_snapshot = |expiration| {
+        let mut value = snapshot(vec![contract(
+            "SPXW-CONTRACT",
+            OptionType::Call,
+            100.0,
+            expiration,
+        )]);
+        value.chains[0].root = "SPXW".into();
+        value
+    };
+    let input = ModeledExpirationInput {
+        time_to_expiration: 5.0 / 24.0 / 365.0,
+        interest_rate: 0.04,
+        dividend_yield: 0.02,
+    };
+
+    let before_pm_close = modeled_profile(
+        &make_snapshot(same_day),
+        valuation,
+        20.0,
+        21,
+        &BTreeMap::from([(("SPXW".into(), same_day), input)]),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(before_pm_close.included_contracts, 1);
+
+    for expiration in [same_day, prior] {
+        let mut value = make_snapshot(expiration);
+        let control = contract("FUTURE", OptionType::Call, 105.0, future);
+        value.chains[0].contratos.push(control.clone());
+        value.contratos.push(control);
+        let result = modeled_profile(
+            &value,
+            valuation,
+            20.0,
+            21,
+            &BTreeMap::from([(("SPXW".into(), future), input)]),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.included_contracts, 1);
+        assert_eq!(
+            result.excluded_by_reason[&ExclusionReason::ExpiredContract],
+            1
+        );
+    }
+}
+
+#[test]
+fn modeled_profile_diagnostics_distinguish_missing_and_invalid_inputs() {
+    let expiration = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
+    let valuation = Utc.with_ymd_and_hms(2026, 8, 21, 15, 0, 0).unwrap();
+    let mut contracts = vec![contract("VALID", OptionType::Call, 100.0, expiration)];
+    let mut missing_oi = contract("MISSING-OI", OptionType::Call, 101.0, expiration);
+    missing_oi.open_interest = None;
+    contracts.push(missing_oi);
+    let mut invalid_oi = contract("INVALID-OI", OptionType::Call, 102.0, expiration);
+    invalid_oi.open_interest = Some(f64::NAN);
+    contracts.push(invalid_oi);
+    let mut missing_multiplier = contract("MISSING-MULT", OptionType::Call, 103.0, expiration);
+    missing_multiplier.contract_specification = None;
+    contracts.push(missing_multiplier);
+    let mut invalid_multiplier = contract("INVALID-MULT", OptionType::Call, 104.0, expiration);
+    invalid_multiplier
+        .contract_specification
+        .as_mut()
+        .unwrap()
+        .contract_multiplier = 0.0;
+    contracts.push(invalid_multiplier);
+    let mut missing_iv = contract("MISSING-IV", OptionType::Call, 105.0, expiration);
+    missing_iv.implied_volatility = None;
+    contracts.push(missing_iv);
+    let mut invalid_iv = contract("INVALID-IV", OptionType::Call, 106.0, expiration);
+    invalid_iv.implied_volatility = Some(f64::INFINITY);
+    contracts.push(invalid_iv);
+
+    let result = modeled_profile(&snapshot(contracts), valuation, 20.0, 21, &modeled_inputs())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.included_contracts, 1);
+    for reason in [
+        ExclusionReason::MissingOpenInterest,
+        ExclusionReason::InvalidOpenInterest,
+        ExclusionReason::MissingMultiplier,
+        ExclusionReason::InvalidMultiplier,
+        ExclusionReason::MissingImpliedVolatility,
+        ExclusionReason::InvalidImpliedVolatility,
+    ] {
+        assert_eq!(result.excluded_by_reason[&reason], 1);
     }
 }
 
@@ -395,6 +508,32 @@ impl ForConsultingTradingCalendar for Calendar {
 #[derive(Clone)]
 struct EarlyCloseCalendar {
     requested_closes: Arc<Mutex<Vec<NaiveDate>>>,
+}
+
+#[derive(Clone)]
+struct SettlementCalendar {
+    opens: Arc<Mutex<Vec<NaiveDate>>>,
+    closes: Arc<Mutex<Vec<NaiveDate>>>,
+}
+
+impl ForConsultingTradingCalendar for SettlementCalendar {
+    fn is_regular_session(&self, _: DateTime<Utc>) -> PortResult<bool> {
+        Ok(true)
+    }
+    fn next_session_transition(&self, instant: DateTime<Utc>) -> PortResult<DateTime<Utc>> {
+        Ok(instant)
+    }
+    fn latest_session_close_before(&self, instant: DateTime<Utc>) -> PortResult<DateTime<Utc>> {
+        Ok(instant)
+    }
+    fn session_open(&self, date: NaiveDate) -> PortResult<DateTime<Utc>> {
+        self.opens.lock().unwrap().push(date);
+        Ok(date.and_hms_opt(14, 30, 0).unwrap().and_utc())
+    }
+    fn session_close(&self, date: NaiveDate) -> PortResult<DateTime<Utc>> {
+        self.closes.lock().unwrap().push(date);
+        Ok(date.and_hms_opt(21, 0, 0).unwrap().and_utc())
+    }
 }
 
 impl ForConsultingTradingCalendar for EarlyCloseCalendar {
@@ -557,6 +696,90 @@ async fn regular_session_uses_transient_intraday_snapshot_without_storage() {
 }
 
 #[tokio::test]
+async fn intraday_spxw_0dte_uses_pm_close_while_spx_preserves_am_settlement() {
+    let expiration = NaiveDate::from_ymd_opt(2026, 8, 21).unwrap();
+    let pair = |root: &str| {
+        let mut call = contract(&format!("{root}-CALL"), OptionType::Call, 100.0, expiration);
+        call.mid = 5.0;
+        let mut put = contract(&format!("{root}-PUT"), OptionType::Put, 100.0, expiration);
+        put.mid = 4.0;
+        OptionChain {
+            root: root.into(),
+            contratos: vec![call, put],
+        }
+    };
+    let opens = Arc::new(Mutex::new(Vec::new()));
+    let closes = Arc::new(Mutex::new(Vec::new()));
+    let app = GammaExposureApplication::new(
+        SettlementCalendar {
+            opens: opens.clone(),
+            closes: closes.clone(),
+        },
+        Intraday {
+            calls: Arc::new(AtomicUsize::new(0)),
+            result: Ok(provider_snapshot(vec![pair("SPXW"), pair("SPX")])),
+        },
+        Stored {
+            calls: Arc::new(AtomicUsize::new(0)),
+            result: Ok(None),
+        },
+        Specifications {
+            calls: Arc::new(AtomicUsize::new(0)),
+            requested: Arc::new(Mutex::new(Vec::new())),
+            result: Ok(BTreeMap::from([
+                (
+                    OptionContractIdentity {
+                        root: "SPXW".into(),
+                        occ_symbol: "SPXW-CALL".into(),
+                    },
+                    OptionContractSpecificationResolution::Found(specification(
+                        "SPXW", 100.0, "USD",
+                    )),
+                ),
+                (
+                    OptionContractIdentity {
+                        root: "SPXW".into(),
+                        occ_symbol: "SPXW-PUT".into(),
+                    },
+                    OptionContractSpecificationResolution::Found(specification(
+                        "SPXW", 100.0, "USD",
+                    )),
+                ),
+                (
+                    OptionContractIdentity {
+                        root: "SPX".into(),
+                        occ_symbol: "SPX-CALL".into(),
+                    },
+                    OptionContractSpecificationResolution::Found(specification(
+                        "SPX", 100.0, "USD",
+                    )),
+                ),
+                (
+                    OptionContractIdentity {
+                        root: "SPX".into(),
+                        occ_symbol: "SPX-PUT".into(),
+                    },
+                    OptionContractSpecificationResolution::Found(specification(
+                        "SPX", 100.0, "USD",
+                    )),
+                ),
+            ])),
+        },
+        YieldCurves,
+    );
+    let result = app.gamma_exposure(request("SPX")).await.unwrap();
+    let profile = result.modeled_profile.unwrap();
+    assert_eq!(profile.included_contracts, 2);
+    assert_eq!(profile.excluded_contracts, 2);
+    assert_eq!(
+        profile.excluded_by_reason[&ExclusionReason::ExpiredContract],
+        2
+    );
+    assert_eq!(opens.lock().unwrap().as_slice(), &[expiration]);
+    assert_eq!(closes.lock().unwrap().as_slice(), &[expiration]);
+}
+
+#[tokio::test]
 async fn outside_session_uses_eod_without_provider_and_reports_absence() {
     let expiration = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
     let eod = snapshot(vec![contract("P", OptionType::Put, 100.0, expiration)]);
@@ -570,6 +793,7 @@ async fn outside_session_uses_eod_without_provider_and_reports_absence() {
         result.current_exposure.snapshot_origin,
         SnapshotOrigin::EndOfDay
     );
+    assert!(result.modeled_profile.is_none());
     assert_eq!(calls.provider.load(Ordering::SeqCst), 0);
     assert_eq!(calls.storage.load(Ordering::SeqCst), 1);
     assert_eq!(calls.resolver.load(Ordering::SeqCst), 0);
@@ -618,6 +842,47 @@ async fn eod_profile_uses_the_loaded_sessions_official_early_close() {
         session_date.and_hms_opt(18, 0, 0).unwrap().and_utc()
     );
     assert!(requested_closes.lock().unwrap().contains(&session_date));
+}
+
+#[tokio::test]
+async fn missing_or_failed_yield_curve_preserves_current_exposure() {
+    let expiration = NaiveDate::from_ymd_opt(2026, 9, 18).unwrap();
+    for curve_result in [
+        Ok(None),
+        Err(PortError::Unavailable("curve loader failed".into())),
+    ] {
+        let curve_calls = Arc::new(AtomicUsize::new(0));
+        let app = GammaExposureApplication::new(
+            Calendar(false),
+            Intraday {
+                calls: Arc::new(AtomicUsize::new(0)),
+                result: Err(PortError::Unavailable("must not call".into())),
+            },
+            Stored {
+                calls: Arc::new(AtomicUsize::new(0)),
+                result: Ok(Some(stored_snapshot(snapshot(vec![contract(
+                    "CURRENT",
+                    OptionType::Call,
+                    100.0,
+                    expiration,
+                )])))),
+            },
+            Specifications {
+                calls: Arc::new(AtomicUsize::new(0)),
+                requested: Arc::new(Mutex::new(Vec::new())),
+                result: Ok(BTreeMap::new()),
+            },
+            FailingYieldCurves {
+                calls: curve_calls.clone(),
+                result: curve_result,
+            },
+        );
+        let result = app.gamma_exposure(request("SPX")).await.unwrap();
+        assert_eq!(result.current_exposure.diagnostics.included_contracts, 1);
+        assert!(result.current_exposure.calls_gex > 0.0);
+        assert!(result.modeled_profile.is_none());
+        assert_eq!(curve_calls.load(Ordering::SeqCst), 1);
+    }
 }
 
 #[tokio::test]
@@ -974,6 +1239,11 @@ async fn offsetless_provider_timestamp_does_not_expose_collection_time_as_as_of(
 
 #[test]
 fn public_dto_has_stable_json_names_and_explicit_methodology() {
+    assert_eq!(
+        serde_json::to_value(api_models::GammaExposureExclusionReason::InvalidImpliedVolatility)
+            .unwrap(),
+        serde_json::json!("invalid_implied_volatility")
+    );
     let dto = api_models::GammaExposureResponse {
         current_exposure: api_models::CurrentGammaExposureResponse {
             ticker: "SPX".into(),

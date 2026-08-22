@@ -113,17 +113,20 @@ where
                 "gamma exposure for '{ticker}' is unavailable because no contracts are eligible"
             )));
         }
-        let expiration_inputs = self
+        let modeled_profile = match self
             .modeled_expiration_inputs(&snapshot, valuation_time)
-            .await?;
-        let modeled_profile = modeled_profile(
-            &snapshot,
-            valuation_time,
-            request.range_percent,
-            request.points,
-            &expiration_inputs,
-        )
-        .map_err(|message| PortError::Unavailable(message.into()))?;
+            .await
+        {
+            Ok(expiration_inputs) => modeled_profile(
+                &snapshot,
+                valuation_time,
+                request.range_percent,
+                request.points,
+                &expiration_inputs,
+            )
+            .unwrap_or(None),
+            Err(_) => None,
+        };
         Ok(GammaExposureAnalysis {
             current_exposure: exposure,
             modeled_profile,

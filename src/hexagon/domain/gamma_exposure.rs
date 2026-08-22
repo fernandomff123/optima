@@ -33,6 +33,7 @@ pub enum ExclusionReason {
     InvalidStrike,
     ExpiredContract,
     MissingImpliedVolatility,
+    InvalidImpliedVolatility,
     MissingForwardCarry,
     NumericOverflow,
 }
@@ -166,29 +167,41 @@ pub fn modeled_profile(
     let mut eligible = Vec::new();
     for chain in &snapshot.chains {
         for contract in &chain.contratos {
-            let reason = if contract.expiration <= valuation_time.date_naive() {
-                Some(ExclusionReason::ExpiredContract)
-            } else if contract
-                .implied_volatility
-                .is_none_or(|value| !value.is_finite() || value <= 0.0)
+            let model = expiration_inputs.get(&(chain.root.clone(), contract.expiration));
+            let reason = if contract.expiration < valuation_time.date_naive()
+                || model.is_some_and(|value| {
+                    !value.time_to_expiration.is_finite() || value.time_to_expiration <= 0.0
+                })
+                || (contract.expiration == valuation_time.date_naive() && model.is_none())
             {
+                Some(ExclusionReason::ExpiredContract)
+            } else if contract.implied_volatility.is_none() {
                 Some(ExclusionReason::MissingImpliedVolatility)
             } else if contract
-                .open_interest
-                .is_none_or(|value| !value.is_finite() || value < 0.0)
+                .implied_volatility
+                .is_some_and(|value| !value.is_finite() || value <= 0.0)
             {
+                Some(ExclusionReason::InvalidImpliedVolatility)
+            } else if contract.open_interest.is_none() {
                 Some(ExclusionReason::MissingOpenInterest)
+            } else if contract
+                .open_interest
+                .is_some_and(|value| !value.is_finite() || value < 0.0)
+            {
+                Some(ExclusionReason::InvalidOpenInterest)
+            } else if contract.contract_specification.is_none() {
+                Some(ExclusionReason::MissingMultiplier)
             } else if contract
                 .contract_specification
                 .as_ref()
-                .is_none_or(|value| {
+                .is_some_and(|value| {
                     !value.contract_multiplier.is_finite() || value.contract_multiplier <= 0.0
                 })
             {
-                Some(ExclusionReason::MissingMultiplier)
+                Some(ExclusionReason::InvalidMultiplier)
             } else if !contract.strike.is_finite() || contract.strike <= 0.0 {
                 Some(ExclusionReason::InvalidStrike)
-            } else if !expiration_inputs.contains_key(&(chain.root.clone(), contract.expiration)) {
+            } else if model.is_none() {
                 Some(ExclusionReason::MissingForwardCarry)
             } else {
                 None
@@ -202,7 +215,9 @@ pub fn modeled_profile(
                 );
                 continue;
             }
-            let model = expiration_inputs[&(chain.root.clone(), contract.expiration)];
+            let Some(model) = model.copied() else {
+                continue;
+            };
             let candidate = ModeledContract {
                 option_type: contract.option_type,
                 strike: contract.strike,
