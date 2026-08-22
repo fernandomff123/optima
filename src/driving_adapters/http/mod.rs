@@ -632,7 +632,7 @@ fn map_gamma_exposure(
     }
 }
 
-async fn canonical_error_boundary(request: Request<Body>, next: Next) -> Response {
+pub(super) async fn canonical_error_boundary(request: Request<Body>, next: Next) -> Response {
     let response = next.run(request).await;
     if !response.status().is_client_error() && !response.status().is_server_error() {
         return response;
@@ -648,8 +648,10 @@ async fn canonical_error_boundary(request: Request<Body>, next: Next) -> Respons
 
     let (mut parts, body) = response.into_parts();
     let message = match axum::body::to_bytes(body, usize::MAX).await {
-        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
-        Err(error) => error.to_string(),
+        Ok(bytes) if !parts.status.is_server_error() => {
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+        Ok(_) | Err(_) => String::new(),
     };
     let error = api_models::ApiError {
         error: if message.is_empty() {
@@ -1202,7 +1204,7 @@ async fn greeks(
 }
 
 #[derive(Debug)]
-struct HttpError(PortError);
+pub(super) struct HttpError(pub(super) PortError);
 
 impl axum::response::IntoResponse for HttpError {
     fn into_response(self) -> axum::response::Response {
@@ -1213,8 +1215,106 @@ impl axum::response::IntoResponse for HttpError {
             PortError::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
         };
         let body = api_models::ApiError {
-            error: self.0.to_string(),
+            error: match self.0 {
+                PortError::Unavailable(_) => "service unavailable".to_string(),
+                error => error.to_string(),
+            },
         };
         (status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use axum::{
+        Router,
+        body::Body,
+        http::{Request, StatusCode, header},
+        middleware,
+        response::{IntoResponse, Response},
+        routing::get,
+    };
+    use tower::ServiceExt;
+
+    use super::{HttpError, canonical_error_boundary};
+    use crate::hexagon::PortError;
+
+    #[tokio::test]
+    async fn canonical_port_error_mapper_covers_all_public_statuses_with_one_json_envelope() {
+        let cases = [
+            (
+                PortError::InvalidRequest("invalid".to_string()),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                PortError::NotFound("missing".to_string()),
+                StatusCode::NOT_FOUND,
+            ),
+            (
+                PortError::Conflict("conflict".to_string()),
+                StatusCode::CONFLICT,
+            ),
+            (
+                PortError::Unavailable("DuckDB /private/path SQL provider".to_string()),
+                StatusCode::SERVICE_UNAVAILABLE,
+            ),
+        ];
+        for (error, expected_status) in cases {
+            let response = HttpError(error).into_response();
+            assert_eq!(response.status(), expected_status);
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let error: api_models::ApiError = serde_json::from_slice(&body).unwrap();
+            if expected_status == StatusCode::SERVICE_UNAVAILABLE {
+                assert_eq!(error.error, "service unavailable");
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct PreservedExtension(&'static str);
+
+    #[tokio::test]
+    async fn canonical_boundary_preserves_status_headers_and_extensions_and_redacts_internal_body()
+    {
+        let app = Router::new()
+            .route(
+                "/failure",
+                get(|| async {
+                    let mut response =
+                        Response::new(Body::from("DuckDB /private/path SELECT provider-secret"));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response.headers_mut().insert(
+                        header::HeaderName::from_static("x-preserved"),
+                        header::HeaderValue::from_static("yes"),
+                    );
+                    response.extensions_mut().insert(PreservedExtension("kept"));
+                    response
+                }),
+            )
+            .layer(middleware::from_fn(canonical_error_boundary));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/failure")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(response.headers()["x-preserved"], "yes");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(
+            response.extensions().get::<PreservedExtension>(),
+            Some(&PreservedExtension("kept"))
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: api_models::ApiError = serde_json::from_slice(&body).unwrap();
+        assert_eq!(error.error, "Internal Server Error");
     }
 }

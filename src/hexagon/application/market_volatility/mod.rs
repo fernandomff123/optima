@@ -17,7 +17,7 @@ use crate::hexagon::{
         for_loading_market_history::ForLoadingMarketHistory,
         for_loading_volatility_term_structures::ForLoadingVolatilityTermStructures,
     },
-    driving_ports::for_viewing_volatility::ForViewingVolatility,
+    driving_ports::for_viewing_volatility::{ForViewingVolatility, HistoricalVolatilityRequest},
 };
 
 const TERM_TICKERS: [&str; 4] = ["VIX9D", "VIX3M", "VIX6M", "VIX1Y"];
@@ -99,35 +99,20 @@ where
 
     async fn historical_volatility(
         &self,
-        ticker: &str,
+        request: HistoricalVolatilityRequest,
     ) -> PortResult<HistoricalVolatilityOverview> {
-        let ticker = normalized_ticker(ticker)?;
+        let ticker = normalized_ticker(&request.ticker)?;
+        validate_historical_volatility_request(&request)?;
         let history = self
             .market_history_store
             .load_market_history(&ticker)
             .await?;
-        let as_of = history
-            .daily_quotes
-            .last()
-            .map(|quote| quote.timestamp.date_naive());
-        let points = [10, 20, 60]
-            .into_iter()
-            .filter_map(|window| historical_volatility::calculate(&history, window))
-            .collect();
-        let series = [10, 20, 60]
-            .into_iter()
-            .flat_map(|window| {
-                let values = historical_volatility::calculate_series(&history, window);
-                let start = values.len().saturating_sub(1_260);
-                values.into_iter().skip(start)
-            })
-            .collect();
-        Ok(HistoricalVolatilityOverview {
-            ticker,
-            as_of,
-            points,
-            series,
-        })
+        let mut horizons = request.horizons_sessions;
+        horizons.sort_unstable();
+        let mut overview =
+            historical_volatility::analyze(&history, &horizons, request.series_limit);
+        overview.ticker = ticker;
+        Ok(overview)
     }
 
     async fn implied_volatility(&self, ticker: &str) -> PortResult<ImpliedVolatilityOverview> {
@@ -169,6 +154,35 @@ where
                 .collect(),
         })
     }
+}
+
+fn validate_historical_volatility_request(request: &HistoricalVolatilityRequest) -> PortResult<()> {
+    if request.horizons_sessions.is_empty() || request.horizons_sessions.len() > 6 {
+        return Err(PortError::InvalidRequest(
+            "horizons must contain between 1 and 6 values".to_string(),
+        ));
+    }
+    if request
+        .horizons_sessions
+        .iter()
+        .any(|value| !(2..=252).contains(value))
+    {
+        return Err(PortError::InvalidRequest(
+            "each horizon must be between 2 and 252".to_string(),
+        ));
+    }
+    let unique: std::collections::HashSet<_> = request.horizons_sessions.iter().collect();
+    if unique.len() != request.horizons_sessions.len() {
+        return Err(PortError::InvalidRequest(
+            "horizons must not contain duplicates".to_string(),
+        ));
+    }
+    if request.series_limit == 0 || request.series_limit > 1_260 {
+        return Err(PortError::InvalidRequest(
+            "limit must be between 1 and 1260".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 impl<IndexHistoryStore, OptionDataStore, MarketHistoryStore>
