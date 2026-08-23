@@ -172,6 +172,36 @@ fn intraday_volatility_surface_is_calculated_by_the_application() {
 }
 
 #[test]
+fn yield_curve_interpolation_is_calculated_by_the_application() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let http_root = root.join("src/driving_adapters/http");
+    let mut http_files = Vec::new();
+    rust_files(&http_root, &mut http_files);
+    for path in http_files {
+        let source = fs::read_to_string(&path).expect("HTTP source must be readable");
+        for forbidden in ["BoundedCubicSpline", "bond_equivalent_yield"] {
+            assert!(
+                !source.contains(forbidden),
+                "{} performs financial yield-curve calculation '{forbidden}'",
+                path.display()
+            );
+        }
+    }
+
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/interest_rates/mod.rs"))
+            .expect("interest-rate application source must be readable");
+    assert!(application.contains("BoundedCubicSpline::from_treasury_curve"));
+    assert!(application.contains("bond_equivalent_yield(days)"));
+    for concrete in ["Cboe", "Yahoo", "DuckDb", "driven_adapters"] {
+        assert!(
+            !application.contains(concrete),
+            "interest-rate application depends on concrete adapter '{concrete}'"
+        );
+    }
+}
+
+#[test]
 fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let application =
