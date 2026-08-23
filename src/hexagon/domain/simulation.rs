@@ -1,5 +1,5 @@
 use crate::hexagon::domain::options::{OptionType, Snapshot};
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use std::{error::Error, f64::consts::PI, fmt};
 
@@ -11,6 +11,67 @@ const MIN_VOLATILITY: f64 = 1.0e-6;
 pub struct IntradaySimulationMarket {
     pub snapshot: Snapshot,
     pub spot: f64,
+}
+
+/// Provider-neutral catalog of option contracts eligible for simulation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimulationCatalog {
+    pub ticker: String,
+    pub snapshot_time: DateTime<Utc>,
+    pub spot: f64,
+    pub expirations: Vec<NaiveDate>,
+    pub contracts: Vec<crate::hexagon::domain::options::ContratoOpcao>,
+}
+
+impl SimulationCatalog {
+    pub fn from_snapshot(ticker: String, snapshot: &Snapshot, spot: f64) -> Self {
+        let valuation_date = snapshot.timestamp_utc.date_naive();
+        let expirations = snapshot
+            .contratos
+            .iter()
+            .map(|contract| contract.expiration)
+            .filter(|expiration| {
+                let days = (*expiration - valuation_date).num_days();
+                (1..=365).contains(&days)
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut contracts = snapshot
+            .contratos
+            .iter()
+            .filter(|contract| expirations.contains(&contract.expiration))
+            .filter(|contract| {
+                contract.bid.is_finite()
+                    && contract.ask.is_finite()
+                    && contract.bid >= 0.0
+                    && contract.ask >= contract.bid
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        contracts.sort_by(|left, right| {
+            left.expiration
+                .cmp(&right.expiration)
+                .then_with(|| left.strike.total_cmp(&right.strike))
+                .then_with(|| {
+                    option_type_order(left.option_type).cmp(&option_type_order(right.option_type))
+                })
+        });
+        Self {
+            ticker,
+            snapshot_time: snapshot.timestamp_utc,
+            spot,
+            expirations,
+            contracts,
+        }
+    }
+}
+
+fn option_type_order(option_type: OptionType) -> u8 {
+    match option_type {
+        OptionType::Call => 0,
+        OptionType::Put => 1,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -519,9 +580,206 @@ impl Error for SimulationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
 
     fn date(year: i32, month: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+
+    fn catalog_contract(
+        symbol: &str,
+        option_type: OptionType,
+        expiration: NaiveDate,
+        strike: f64,
+        bid: f64,
+        ask: f64,
+    ) -> crate::hexagon::domain::options::ContratoOpcao {
+        crate::hexagon::domain::options::ContratoOpcao {
+            occ_symbol: symbol.to_string(),
+            option_type,
+            strike,
+            expiration,
+            bid,
+            ask,
+            mid: 1.0,
+            spread: 0.2,
+            volume: 0.0,
+            open_interest: None,
+            delta: 0.5,
+            gamma: None,
+            vega: 0.1,
+            theta: -0.01,
+            rho: 0.01,
+            theo: 1.0,
+            implied_volatility: None,
+            contract_specification: None,
+        }
+    }
+
+    #[test]
+    fn catalog_preserves_inclusive_expiration_bounds_and_quote_semantics() {
+        let valuation_date = date(2026, 8, 20);
+        let contracts = vec![
+            catalog_contract("DAY-0", OptionType::Call, valuation_date, 100.0, 1.0, 1.2),
+            catalog_contract(
+                "DAY-1",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(1),
+                100.0,
+                0.0,
+                0.0,
+            ),
+            catalog_contract(
+                "DAY-365",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(365),
+                100.0,
+                1.0,
+                1.2,
+            ),
+            catalog_contract(
+                "DAY-366",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(366),
+                100.0,
+                1.0,
+                1.2,
+            ),
+            catalog_contract(
+                "NEGATIVE-BID",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                -0.01,
+                1.0,
+            ),
+            catalog_contract(
+                "CROSSED",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                2.0,
+                1.0,
+            ),
+            catalog_contract(
+                "POSITIVE-INFINITE-BID",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                f64::INFINITY,
+                f64::INFINITY,
+            ),
+            catalog_contract(
+                "NEGATIVE-INFINITE-BID",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                f64::NEG_INFINITY,
+                1.0,
+            ),
+            catalog_contract(
+                "NAN-BID",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                f64::NAN,
+                1.0,
+            ),
+            catalog_contract(
+                "POSITIVE-INFINITE-ASK",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                1.0,
+                f64::INFINITY,
+            ),
+            catalog_contract(
+                "NEGATIVE-INFINITE-ASK",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                1.0,
+                f64::NEG_INFINITY,
+            ),
+            catalog_contract(
+                "NAN-ASK",
+                OptionType::Call,
+                valuation_date + chrono::Duration::days(30),
+                100.0,
+                1.0,
+                f64::NAN,
+            ),
+        ];
+        let snapshot = Snapshot {
+            ticker: "SPX".to_string(),
+            timestamp_utc: Utc.with_ymd_and_hms(2026, 8, 20, 23, 59, 59).unwrap(),
+            contratos: contracts,
+            chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
+        };
+
+        let catalog = SimulationCatalog::from_snapshot("SPX".to_string(), &snapshot, 100.0);
+
+        assert_eq!(
+            catalog.expirations,
+            vec![
+                valuation_date + chrono::Duration::days(1),
+                valuation_date + chrono::Duration::days(30),
+                valuation_date + chrono::Duration::days(365)
+            ]
+        );
+        assert_eq!(
+            catalog
+                .contracts
+                .iter()
+                .map(|contract| contract.occ_symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["DAY-1", "DAY-365"]
+        );
+        assert!(
+            catalog
+                .contracts
+                .iter()
+                .all(|contract| contract.bid.is_finite() && contract.ask.is_finite())
+        );
+        assert_eq!(catalog.contracts[0].gamma, None);
+        assert_eq!(catalog.contracts[0].open_interest, None);
+        assert_eq!(catalog.snapshot_time, snapshot.timestamp_utc);
+    }
+
+    #[test]
+    fn catalog_orders_deterministically_and_preserves_total_ties() {
+        let valuation_date = date(2026, 8, 20);
+        let expiration = valuation_date + chrono::Duration::days(30);
+        let snapshot = Snapshot {
+            ticker: "SPX".to_string(),
+            timestamp_utc: Utc.with_ymd_and_hms(2026, 8, 20, 12, 0, 0).unwrap(),
+            contratos: vec![
+                catalog_contract("PUT", OptionType::Put, expiration, 100.0, 1.0, 1.2),
+                catalog_contract("CALL-FIRST", OptionType::Call, expiration, 100.0, 1.0, 1.2),
+                catalog_contract("LOWER", OptionType::Put, expiration, 99.0, 1.0, 1.2),
+                catalog_contract("CALL-SECOND", OptionType::Call, expiration, 100.0, 1.0, 1.2),
+            ],
+            chains: Vec::new(),
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
+        };
+
+        let catalog = SimulationCatalog::from_snapshot("SPX".to_string(), &snapshot, 100.0);
+
+        assert_eq!(
+            catalog
+                .contracts
+                .iter()
+                .map(|contract| contract.occ_symbol.as_str())
+                .collect::<Vec<_>>(),
+            ["LOWER", "CALL-FIRST", "CALL-SECOND", "PUT"]
+        );
     }
 
     #[test]

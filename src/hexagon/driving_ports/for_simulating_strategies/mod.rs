@@ -9,8 +9,8 @@ use crate::hexagon::{
     domain::{
         options::Snapshot,
         simulation::{
-            ScenarioGrid, SimulationLegSelection, SimulationRequest, SimulationResult,
-            SimulationScenario, SimulationStrategyKind,
+            ScenarioGrid, SimulationCatalog, SimulationLegSelection, SimulationRequest,
+            SimulationResult, SimulationScenario, SimulationStrategyKind,
         },
     },
 };
@@ -39,9 +39,21 @@ pub struct ScenarioGridRequest {
     pub required_spots: Vec<f64>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimulationCatalogRequest {
+    pub ticker: String,
+    pub snapshot: Snapshot,
+    pub spot: f64,
+}
+
 /// Provided interface containing the complete strategy-simulation conversation.
 #[async_trait]
 pub trait ForSimulatingStrategies: Send + Sync {
+    async fn simulation_catalog(
+        &self,
+        request: SimulationCatalogRequest,
+    ) -> PortResult<SimulationCatalog>;
+
     async fn build_scenario_grid(&self, request: ScenarioGridRequest) -> PortResult<ScenarioGrid>;
 
     async fn simulate_strategy(&self, request: SimulationRequest) -> PortResult<SimulationResult>;

@@ -24,7 +24,8 @@ use hexagonal_backend::{
             },
             saved_strategy::SavedStrategy,
             simulation::{
-                Greeks, ScenarioGrid, SimulationRequest, SimulationResult, SimulationScenario,
+                Greeks, ScenarioGrid, SimulationCatalog, SimulationRequest, SimulationResult,
+                SimulationScenario,
             },
             tracked_ticker::{TrackedTicker, UnderlyingMetadata, UnderlyingResolutionState},
             volatility::TermStructure,
@@ -38,6 +39,7 @@ use hexagonal_backend::{
             for_resolving_underlyings::{ForResolvingUnderlyings, UnderlyingResolution},
             for_simulating_strategies::{
                 ForSimulatingStrategies, ScenarioGridRequest, SimulateScenario,
+                SimulationCatalogRequest,
             },
             for_synchronizing_market_data::{
                 ForSynchronizingMarketData, SynchronizationReport, SynchronizeTrackedTickers,
@@ -339,6 +341,13 @@ impl ForManagingPortfolios for PortfoliosMock {
 
 #[async_trait]
 impl ForSimulatingStrategies for SimulationMock {
+    async fn simulation_catalog(
+        &self,
+        _request: SimulationCatalogRequest,
+    ) -> PortResult<SimulationCatalog> {
+        Err(PortError::Unavailable("unused".to_string()))
+    }
+
     async fn build_scenario_grid(&self, _request: ScenarioGridRequest) -> PortResult<ScenarioGrid> {
         Err(PortError::InvalidRequest("invalid mock grid".to_string()))
     }

@@ -8,13 +8,13 @@ use crate::hexagon::{
     PortError, PortResult,
     domain::simulation::{
         BlackScholesSimulator, ExerciseStyle, MarketState, OptionContract, PricingConfig,
-        PricingModel, ScenarioGrid, SimulationCurve, SimulationLeg, SimulationLegSelection,
-        SimulationRequest, SimulationResult, SimulationScenario, SimulationScenarioPoint,
-        SimulationStrategyKind, SimulationTradeSide, SimulationWarning, Strategy, StrategyLeg,
-        StrategySimulator,
+        PricingModel, ScenarioGrid, SimulationCatalog, SimulationCurve, SimulationLeg,
+        SimulationLegSelection, SimulationRequest, SimulationResult, SimulationScenario,
+        SimulationScenarioPoint, SimulationStrategyKind, SimulationTradeSide, SimulationWarning,
+        Strategy, StrategyLeg, StrategySimulator,
     },
     driving_ports::for_simulating_strategies::{
-        ForSimulatingStrategies, ScenarioGridRequest, SimulateScenario,
+        ForSimulatingStrategies, ScenarioGridRequest, SimulateScenario, SimulationCatalogRequest,
     },
 };
 
@@ -440,6 +440,17 @@ fn execute_scenario(command: SimulateScenario) -> PortResult<SimulationScenario>
 
 #[async_trait]
 impl ForSimulatingStrategies for SimulationApplication {
+    async fn simulation_catalog(
+        &self,
+        request: SimulationCatalogRequest,
+    ) -> PortResult<SimulationCatalog> {
+        Ok(SimulationCatalog::from_snapshot(
+            request.ticker,
+            &request.snapshot,
+            request.spot,
+        ))
+    }
+
     async fn build_scenario_grid(&self, request: ScenarioGridRequest) -> PortResult<ScenarioGrid> {
         let mut grid = ScenarioGrid::centered(
             request.spot,

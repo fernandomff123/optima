@@ -4,12 +4,16 @@ use async_trait::async_trait;
 
 use crate::hexagon::{
     PortResult,
-    domain::{simulation::IntradaySimulationMarket, volatility_surface::VolatilitySurface},
+    domain::{
+        simulation::{IntradaySimulationMarket, SimulationCatalog},
+        volatility_surface::VolatilitySurface,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntradayOptionsMarket {
     pub market: IntradaySimulationMarket,
+    pub catalog: SimulationCatalog,
     pub volatility_surface: Option<VolatilitySurface>,
 }
 
