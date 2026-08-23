@@ -172,6 +172,42 @@ fn intraday_volatility_surface_is_calculated_by_the_application() {
 }
 
 #[test]
+fn intraday_catalog_selection_is_calculated_outside_http() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let http_root = root.join("src/driving_adapters/http");
+    let mut http_files = Vec::new();
+    rust_files(&http_root, &mut http_files);
+    for path in http_files {
+        let source = fs::read_to_string(&path).expect("HTTP source must be readable");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+        for forbidden in [
+            "(1..=365)",
+            "contract.bid.is_finite()",
+            "contract.ask.is_finite()",
+            "contract.bid >=",
+            "contract.ask >=",
+        ] {
+            assert!(
+                !production.contains(forbidden),
+                "{} selects simulation-catalog contracts in HTTP using '{forbidden}'",
+                path.display()
+            );
+        }
+    }
+
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/intraday_simulation/mod.rs"))
+            .expect("intraday application source must be readable");
+    assert!(application.contains("SimulationCatalog::from_snapshot"));
+    for concrete in ["Cboe", "Yahoo", "DuckDb", "driven_adapters"] {
+        assert!(
+            !application.contains(concrete),
+            "intraday application depends on concrete adapter '{concrete}'"
+        );
+    }
+}
+
+#[test]
 fn yield_curve_interpolation_is_calculated_by_the_application() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let http_root = root.join("src/driving_adapters/http");

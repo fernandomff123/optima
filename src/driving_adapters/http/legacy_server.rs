@@ -11,7 +11,9 @@ use crate::hexagon::{
     driving_ports::for_managing_saved_strategies::{ForManagingSavedStrategies, SaveStrategy},
     driving_ports::for_managing_tracked_tickers::ForManagingTrackedTickers,
     driving_ports::for_preparing_intraday_simulations::ForPreparingIntradaySimulations,
-    driving_ports::for_simulating_strategies::{ForSimulatingStrategies, SimulateScenario},
+    driving_ports::for_simulating_strategies::{
+        ForSimulatingStrategies, SimulateScenario, SimulationCatalogRequest,
+    },
     driving_ports::for_streaming_market_prices::ForStreamingMarketPrices,
     driving_ports::for_viewing_interest_rates::ForViewingInterestRates,
     driving_ports::for_viewing_intraday_options::ForViewingIntradayOptions,
@@ -567,13 +569,17 @@ async fn simulation_contracts(
         .and_then(|quote| quote.close)
         .filter(|price| price.is_finite() && *price > 0.0)
         .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(
-        crate::driving_adapters::http::legacy_simulation_views::catalog(
-            &ticker.trim().to_ascii_uppercase(),
-            &snapshot,
+    state
+        .simulation
+        .simulation_catalog(SimulationCatalogRequest {
+            ticker: ticker.trim().to_ascii_uppercase(),
+            snapshot,
             spot,
-        ),
-    ))
+        })
+        .await
+        .map(crate::driving_adapters::http::legacy_simulation_views::catalog)
+        .map(Json)
+        .map_err(port_status)
 }
 
 async fn simulate_scenarios(
@@ -1307,11 +1313,7 @@ async fn options_intraday_response(
         .await
         .map_err(port_status)?;
     let normalized = ticker.trim().to_ascii_uppercase();
-    let catalog = crate::driving_adapters::http::legacy_simulation_views::catalog(
-        &normalized,
-        &result.market.snapshot,
-        result.market.spot,
-    );
+    let catalog = crate::driving_adapters::http::legacy_simulation_views::catalog(result.catalog);
     let volatility_surface = result
         .volatility_surface
         .map(legacy_volatility_surface)
@@ -1349,7 +1351,7 @@ mod tests {
         PortResult,
         domain::{
             options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
-            simulation::IntradaySimulationMarket,
+            simulation::{IntradaySimulationMarket, SimulationCatalog},
             volatility_surface::{VolatilitySurface, VolatilitySurfacePoint},
         },
         driving_ports::{
@@ -1456,11 +1458,19 @@ mod tests {
             provider_timestamp: None,
             ingestion_diagnostics: Default::default(),
         };
+        let catalog = SimulationCatalog {
+            ticker: "SPY".to_string(),
+            snapshot_time,
+            spot: 100.0,
+            expirations: vec![expiration],
+            contracts: snapshot.contratos.clone(),
+        };
         IntradayOptionsMarket {
             market: IntradaySimulationMarket {
                 snapshot,
                 spot: 100.0,
             },
+            catalog,
             volatility_surface: Some(VolatilitySurface {
                 ticker: "SPY".to_string(),
                 snapshot_time,

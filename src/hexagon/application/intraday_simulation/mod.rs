@@ -4,7 +4,10 @@ use async_trait::async_trait;
 
 use crate::hexagon::{
     PortError, PortResult,
-    domain::{simulation::IntradaySimulationMarket, volatility_surface::VolatilitySurface},
+    domain::{
+        simulation::{IntradaySimulationMarket, SimulationCatalog},
+        volatility_surface::VolatilitySurface,
+    },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
         for_obtaining_live_prices::ForObtainingLivePrices,
@@ -80,9 +83,15 @@ where
 {
     async fn intraday_options(&self, ticker: &str) -> PortResult<IntradayOptionsMarket> {
         let market = self.intraday_market(ticker).await?;
+        let catalog = SimulationCatalog::from_snapshot(
+            normalized_ticker(ticker)?,
+            &market.snapshot,
+            market.spot,
+        );
         let volatility_surface = VolatilitySurface::from_snapshot(&market.snapshot, market.spot);
         Ok(IntradayOptionsMarket {
             market,
+            catalog,
             volatility_surface,
         })
     }

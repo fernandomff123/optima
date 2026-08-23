@@ -5,9 +5,9 @@ use api_models::{
     SimulationGreeksOverview, SimulationLegOverview, SimulationOverview, SimulationPointOverview,
 };
 
-use crate::hexagon::domain::options::{OptionType, Snapshot};
+use crate::hexagon::domain::options::OptionType;
 use crate::hexagon::domain::simulation::{
-    SimulationScenario, SimulationStrategyKind, SimulationTradeSide,
+    SimulationCatalog, SimulationScenario, SimulationStrategyKind, SimulationTradeSide,
 };
 
 /// Translates the hexagon's scenario result into the existing HTTP contract.
@@ -78,58 +78,37 @@ pub fn scenario(value: SimulationScenario) -> SimulationOverview {
     }
 }
 
-pub fn catalog(ticker: &str, snapshot: &Snapshot, spot: f64) -> SimulationCatalogOverview {
-    let valuation_date = snapshot.timestamp_utc.date_naive();
-    let expirations = snapshot
-        .contratos
-        .iter()
-        .map(|contract| contract.expiration)
-        .filter(|expiration| {
-            let days = (*expiration - valuation_date).num_days();
-            (1..=365).contains(&days)
-        })
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    let mut contracts = snapshot
-        .contratos
-        .iter()
-        .filter(|contract| expirations.contains(&contract.expiration))
-        .filter(|contract| contract.bid >= 0.0 && contract.ask >= contract.bid)
-        .map(|contract| SimulationContractOverview {
-            occ_symbol: contract.occ_symbol.clone(),
-            option_type: match contract.option_type {
-                OptionType::Call => "Call",
-                OptionType::Put => "Put",
-            }
-            .to_string(),
-            strike: contract.strike,
-            expiration: contract.expiration,
-            bid: contract.bid,
-            ask: contract.ask,
-            mid: contract.mid,
-            implied_volatility: contract.implied_volatility,
-            delta: contract.delta,
-            gamma: contract.gamma,
-            theta: contract.theta,
-            vega: contract.vega,
-            rho: contract.rho,
-            volume: contract.volume,
-            open_interest: contract.open_interest,
-        })
-        .collect::<Vec<_>>();
-    contracts.sort_by(|left, right| {
-        left.expiration
-            .cmp(&right.expiration)
-            .then_with(|| left.strike.total_cmp(&right.strike))
-            .then_with(|| left.option_type.cmp(&right.option_type))
-    });
+pub fn catalog(value: SimulationCatalog) -> SimulationCatalogOverview {
     SimulationCatalogOverview {
-        ticker: ticker.to_string(),
-        snapshot_time: snapshot.timestamp_utc,
-        spot,
-        expirations,
-        contracts,
+        ticker: value.ticker,
+        snapshot_time: value.snapshot_time,
+        spot: value.spot,
+        expirations: value.expirations,
+        contracts: value
+            .contracts
+            .into_iter()
+            .map(|contract| SimulationContractOverview {
+                occ_symbol: contract.occ_symbol,
+                option_type: match contract.option_type {
+                    OptionType::Call => "Call",
+                    OptionType::Put => "Put",
+                }
+                .to_string(),
+                strike: contract.strike,
+                expiration: contract.expiration,
+                bid: contract.bid,
+                ask: contract.ask,
+                mid: contract.mid,
+                implied_volatility: contract.implied_volatility,
+                delta: contract.delta,
+                gamma: contract.gamma,
+                theta: contract.theta,
+                vega: contract.vega,
+                rho: contract.rho,
+                volume: contract.volume,
+                open_interest: contract.open_interest,
+            })
+            .collect(),
     }
 }
 
@@ -138,7 +117,7 @@ mod tests {
     use chrono::{NaiveDate, TimeZone, Utc};
 
     use super::*;
-    use crate::hexagon::domain::options::{ContratoOpcao, OptionChain};
+    use crate::hexagon::domain::options::ContratoOpcao;
 
     fn contract(symbol: &str, gamma: Option<f64>, open_interest: Option<f64>) -> ContratoOpcao {
         ContratoOpcao {
@@ -171,21 +150,13 @@ mod tests {
             contract("BOTH-MISSING", None, None),
             contract("ZERO", Some(0.0), Some(0.0)),
         ];
-        let snapshot = Snapshot {
+        let result = catalog(SimulationCatalog {
             ticker: "SPY".to_string(),
-            timestamp_utc: Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 0).unwrap(),
-            contratos: contracts.clone(),
-            chains: vec![OptionChain {
-                root: "SPY".to_string(),
-                contratos: contracts,
-            }],
-            underlying_price: None,
-            collected_at: None,
-            provider_timestamp: None,
-            ingestion_diagnostics: Default::default(),
-        };
-
-        let result = catalog("SPY", &snapshot, 100.0);
+            snapshot_time: Utc.with_ymd_and_hms(2026, 8, 20, 15, 0, 0).unwrap(),
+            spot: 100.0,
+            expirations: vec![NaiveDate::from_ymd_opt(2026, 9, 18).unwrap()],
+            contracts,
+        });
         assert_eq!(result.contracts.len(), 4);
         assert_eq!(
             result

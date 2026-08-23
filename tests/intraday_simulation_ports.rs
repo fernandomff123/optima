@@ -124,6 +124,10 @@ async fn obtains_intraday_inputs_through_mocked_driven_ports() {
 
     let options_market = application.intraday_options("SPX").await.unwrap();
     assert_eq!(options_market.market.spot, 5_250.0);
+    assert_eq!(options_market.catalog.ticker, "SPX");
+    assert_eq!(options_market.catalog.spot, 5_250.0);
+    assert_eq!(options_market.catalog.contracts.len(), 1);
+    assert_eq!(options_market.catalog.contracts[0].occ_symbol, "TEST-CALL");
     let surface = options_market
         .volatility_surface
         .expect("application must calculate the intraday surface");
