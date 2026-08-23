@@ -253,14 +253,22 @@ async fn market_rates(
         .await
         .map_err(port_status)?;
     let as_of = latest_index_date(&vix)?;
-    let curve = state
-        .interest_rates
-        .yield_curve(as_of)
+    market_rates_response(state.interest_rates.as_ref(), as_of)
+        .await
+        .map(Json)
+}
+
+async fn market_rates_response(
+    interest_rates: &dyn ForViewingInterestRates,
+    as_of: chrono::NaiveDate,
+) -> Result<api_models::MarketRatesResponse, StatusCode> {
+    let curve = interest_rates
+        .interest_rate_curve(as_of)
         .await
         .map_err(port_status)?;
-    crate::driving_adapters::http::legacy_market_views::rates(as_of, curve.as_ref())
-        .map(Json)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    Ok(crate::driving_adapters::http::legacy_market_views::rates(
+        as_of, curve,
+    ))
 }
 
 async fn asset_live_prices(
@@ -1344,7 +1352,10 @@ mod tests {
             simulation::IntradaySimulationMarket,
             volatility_surface::{VolatilitySurface, VolatilitySurfacePoint},
         },
-        driving_ports::for_viewing_intraday_options::IntradayOptionsMarket,
+        driving_ports::{
+            for_viewing_interest_rates::InterestRateCurveProjection,
+            for_viewing_intraday_options::IntradayOptionsMarket,
+        },
     };
 
     struct IntradayOptionsStub(PortResult<IntradayOptionsMarket>);
@@ -1353,6 +1364,57 @@ mod tests {
     impl ForViewingIntradayOptions for IntradayOptionsStub {
         async fn intraday_options(&self, _ticker: &str) -> PortResult<IntradayOptionsMarket> {
             self.0.clone()
+        }
+    }
+
+    struct InterestRatesStub(PortResult<Option<InterestRateCurveProjection>>);
+
+    #[async_trait::async_trait]
+    impl ForViewingInterestRates for InterestRatesStub {
+        async fn yield_curve(
+            &self,
+            _on_or_before: chrono::NaiveDate,
+        ) -> PortResult<Option<crate::hexagon::domain::treasury::YieldCurve>> {
+            unreachable!("raw curve is not used by the market-rates endpoint")
+        }
+
+        async fn interest_rate_curve(
+            &self,
+            _on_or_before: chrono::NaiveDate,
+        ) -> PortResult<Option<InterestRateCurveProjection>> {
+            self.0.clone()
+        }
+
+        async fn continuously_compounded_rate(
+            &self,
+            _on_or_before: chrono::NaiveDate,
+            _days_to_maturity: f64,
+        ) -> PortResult<Option<f64>> {
+            unreachable!("continuous rate is not used by the market-rates endpoint")
+        }
+    }
+
+    #[tokio::test]
+    async fn market_rates_propagates_every_port_error_variant() {
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 8, 3).expect("valid date");
+        for (error, expected) in [
+            (
+                PortError::InvalidRequest("invalid".into()),
+                StatusCode::BAD_REQUEST,
+            ),
+            (PortError::NotFound("missing".into()), StatusCode::NOT_FOUND),
+            (PortError::Conflict("conflict".into()), StatusCode::CONFLICT),
+            (
+                PortError::Unavailable("storage".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ] {
+            assert_eq!(
+                market_rates_response(&InterestRatesStub(Err(error)), date)
+                    .await
+                    .expect_err("port errors must be propagated"),
+                expected
+            );
         }
     }
 

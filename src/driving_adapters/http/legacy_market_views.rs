@@ -5,19 +5,18 @@
 
 use api_models::{
     BenchmarkOverview, DataState, Freshness, IndexHistoryOverview, IndexHistoryPoint, IndexValue,
-    InterpolatedRatePoint, MarketBenchmarkResponse, MarketRatesResponse, MarketSpxHistoryResponse,
+    MarketBenchmarkResponse, MarketRatesResponse, MarketSpxHistoryResponse,
     MarketVixHistoryResponse, MarketVolatilityResponse, PriceHistoryOverview, PriceHistoryPoint,
-    RatePoint, RatesOverview, ViewMetadata, VolatilityOverview,
+    RatesOverview, ViewMetadata, VolatilityOverview,
 };
 use chrono::NaiveDate;
 
 use crate::hexagon::domain::{
     index_history::IndexHistory,
-    interest_rates::BoundedCubicSpline,
     market_history::MarketHistory,
     market_volatility::{MarketVolatilityOverview, VolatilityIndexValue},
-    treasury::YieldCurve,
 };
+use crate::hexagon::driving_ports::for_viewing_interest_rates::InterestRateCurveProjection;
 
 const HISTORY_SESSIONS: usize = 1_260;
 
@@ -81,10 +80,7 @@ pub fn volatility(overview: MarketVolatilityOverview) -> MarketVolatilityRespons
     }
 }
 
-pub fn rates(
-    as_of: NaiveDate,
-    curve: Option<&YieldCurve>,
-) -> Result<MarketRatesResponse, crate::hexagon::domain::interest_rates::InterestRateError> {
+pub fn rates(as_of: NaiveDate, curve: Option<InterestRateCurveProjection>) -> MarketRatesResponse {
     let rates = match curve {
         None => DataState::Unavailable,
         Some(curve) => {
@@ -92,14 +88,29 @@ pub fn rates(
             state(
                 RatesOverview {
                     metadata: metadata(curve.date, "U.S. Treasury", freshness),
-                    points: yield_points(curve),
-                    interpolated_points: interpolated_yield_points(curve)?,
+                    points: curve
+                        .published_points
+                        .into_iter()
+                        .map(|point| api_models::RatePoint {
+                            tenor: point.tenor,
+                            days: point.days,
+                            rate_percent: point.rate_percent,
+                        })
+                        .collect(),
+                    interpolated_points: curve
+                        .interpolated_points
+                        .into_iter()
+                        .map(|point| api_models::InterpolatedRatePoint {
+                            days: point.days,
+                            rate_percent: point.rate_percent,
+                        })
+                        .collect(),
                 },
                 freshness,
             )
         }
     };
-    Ok(MarketRatesResponse { as_of, rates })
+    MarketRatesResponse { as_of, rates }
 }
 
 fn market_history_views(
@@ -155,43 +166,6 @@ fn index_value(value: VolatilityIndexValue) -> IndexValue {
     }
 }
 
-fn yield_points(curve: &YieldCurve) -> Vec<RatePoint> {
-    [
-        ("1M", 30.0, curve.m1),
-        ("3M", 91.0, curve.m3),
-        ("6M", 182.0, curve.m6),
-        ("1Y", 365.0, curve.y1),
-        ("2Y", 730.0, curve.y2),
-        ("5Y", 1_825.0, curve.y5),
-        ("10Y", 3_650.0, curve.y10),
-        ("30Y", 10_950.0, curve.y30),
-    ]
-    .into_iter()
-    .filter_map(|(tenor, days, rate)| {
-        rate.map(|rate| RatePoint {
-            tenor: tenor.to_string(),
-            days,
-            rate_percent: rate * 100.0,
-        })
-    })
-    .collect()
-}
-
-fn interpolated_yield_points(
-    curve: &YieldCurve,
-) -> Result<Vec<InterpolatedRatePoint>, crate::hexagon::domain::interest_rates::InterestRateError> {
-    let spline = BoundedCubicSpline::from_treasury_curve(curve)?;
-    (1..=360)
-        .map(|month| {
-            let days = f64::from(month) * 30.0;
-            Ok(InterpolatedRatePoint {
-                days,
-                rate_percent: spline.bond_equivalent_yield(days)? * 100.0,
-            })
-        })
-        .collect()
-}
-
 fn freshness(date: NaiveDate, as_of: NaiveDate) -> Freshness {
     if date >= as_of {
         Freshness::Current
@@ -213,5 +187,83 @@ fn metadata(session_date: NaiveDate, source: &str, freshness: Freshness) -> View
         collected_at: None,
         source: source.to_string(),
         freshness,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hexagon::driving_ports::for_viewing_interest_rates::{
+        InterpolatedInterestRatePoint, PublishedInterestRatePoint,
+    };
+
+    #[test]
+    fn rates_mapping_preserves_the_complete_legacy_json_and_360_point_order() {
+        let date = NaiveDate::from_ymd_opt(2026, 8, 3).expect("valid date");
+        let projection = InterestRateCurveProjection {
+            date,
+            published_points: vec![
+                PublishedInterestRatePoint {
+                    tenor: "1M".to_string(),
+                    days: 30.0,
+                    rate_percent: 4.0,
+                },
+                PublishedInterestRatePoint {
+                    tenor: "3M".to_string(),
+                    days: 91.0,
+                    rate_percent: 4.1,
+                },
+            ],
+            interpolated_points: (1..=360)
+                .map(|month| InterpolatedInterestRatePoint {
+                    days: f64::from(month) * 30.0,
+                    rate_percent: 4.0,
+                })
+                .collect(),
+        };
+        let response = rates(date, Some(projection));
+        let expected_interpolated: Vec<_> = (1..=360)
+            .map(|month| {
+                serde_json::json!({
+                    "days": f64::from(month) * 30.0,
+                    "rate_percent": 4.0
+                })
+            })
+            .collect();
+
+        assert_eq!(
+            serde_json::to_value(response).expect("response must serialize"),
+            serde_json::json!({
+                "as_of": "2026-08-03",
+                "rates": {
+                    "state": "available",
+                    "data": {
+                        "metadata": {
+                            "session_date": "2026-08-03",
+                            "collected_at": null,
+                            "source": "U.S. Treasury",
+                            "freshness": "current"
+                        },
+                        "points": [
+                            {"tenor": "1M", "days": 30.0, "rate_percent": 4.0},
+                            {"tenor": "3M", "days": 91.0, "rate_percent": 4.1}
+                        ],
+                        "interpolated_points": expected_interpolated
+                    }
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn absent_curve_preserves_the_legacy_unavailable_json() {
+        let date = NaiveDate::from_ymd_opt(2026, 8, 3).expect("valid date");
+        assert_eq!(
+            serde_json::to_value(rates(date, None)).expect("response must serialize"),
+            serde_json::json!({
+                "as_of": "2026-08-03",
+                "rates": {"state": "unavailable"}
+            })
+        );
     }
 }
