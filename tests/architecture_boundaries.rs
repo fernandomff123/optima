@@ -145,6 +145,33 @@ fn applications_do_not_know_axum() {
 }
 
 #[test]
+fn intraday_volatility_surface_is_calculated_by_the_application() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let http_root = root.join("src/driving_adapters/http");
+    let mut http_files = Vec::new();
+    rust_files(&http_root, &mut http_files);
+    for path in http_files {
+        let source = fs::read_to_string(&path).expect("HTTP source must be readable");
+        assert!(
+            !source.contains("VolatilitySurface::from_snapshot"),
+            "{} calculates a volatility surface in the HTTP adapter",
+            path.display()
+        );
+    }
+
+    let application =
+        fs::read_to_string(root.join("src/hexagon/application/intraday_simulation/mod.rs"))
+            .expect("intraday application source must be readable");
+    assert!(application.contains("VolatilitySurface::from_snapshot"));
+    for concrete in ["Cboe", "Yahoo", "DuckDb", "driven_adapters"] {
+        assert!(
+            !application.contains(concrete),
+            "intraday application depends on concrete adapter '{concrete}'"
+        );
+    }
+}
+
+#[test]
 fn option_snapshot_enrichment_respects_hexagonal_boundaries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let application =

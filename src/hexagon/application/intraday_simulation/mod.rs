@@ -4,7 +4,7 @@ use async_trait::async_trait;
 
 use crate::hexagon::{
     PortError, PortResult,
-    domain::simulation::IntradaySimulationMarket,
+    domain::{simulation::IntradaySimulationMarket, volatility_surface::VolatilitySurface},
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
         for_obtaining_live_prices::ForObtainingLivePrices,
@@ -12,7 +12,7 @@ use crate::hexagon::{
     },
     driving_ports::{
         for_preparing_intraday_simulations::ForPreparingIntradaySimulations,
-        for_viewing_intraday_options::ForViewingIntradayOptions,
+        for_viewing_intraday_options::{ForViewingIntradayOptions, IntradayOptionsMarket},
     },
 };
 
@@ -78,8 +78,13 @@ where
     LivePrices: ForObtainingLivePrices,
     TradingCalendar: ForConsultingTradingCalendar,
 {
-    async fn intraday_options(&self, ticker: &str) -> PortResult<IntradaySimulationMarket> {
-        self.intraday_market(ticker).await
+    async fn intraday_options(&self, ticker: &str) -> PortResult<IntradayOptionsMarket> {
+        let market = self.intraday_market(ticker).await?;
+        let volatility_surface = VolatilitySurface::from_snapshot(&market.snapshot, market.spot);
+        Ok(IntradayOptionsMarket {
+            market,
+            volatility_surface,
+        })
     }
 }
 

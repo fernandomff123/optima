@@ -1285,30 +1285,35 @@ async fn options_intraday(
     State(state): State<LegacyHttpPorts>,
     Path(ticker): Path<String>,
 ) -> Result<Json<api_models::OptionsIntradayResponse>, StatusCode> {
-    let market = state
-        .intraday_options
+    options_intraday_response(state.intraday_options.as_ref(), ticker)
+        .await
+        .map(Json)
+}
+
+async fn options_intraday_response(
+    intraday_options: &dyn ForViewingIntradayOptions,
+    ticker: String,
+) -> Result<api_models::OptionsIntradayResponse, StatusCode> {
+    let result = intraday_options
         .intraday_options(&ticker)
         .await
         .map_err(port_status)?;
     let normalized = ticker.trim().to_ascii_uppercase();
     let catalog = crate::driving_adapters::http::legacy_simulation_views::catalog(
         &normalized,
-        &market.snapshot,
-        market.spot,
+        &result.market.snapshot,
+        result.market.spot,
     );
-    let volatility_surface =
-        crate::hexagon::domain::volatility_surface::VolatilitySurface::from_snapshot(
-            &market.snapshot,
-            market.spot,
-        )
+    let volatility_surface = result
+        .volatility_surface
         .map(legacy_volatility_surface)
         .unwrap_or(api_models::DataState::Unavailable);
-    Ok(Json(api_models::OptionsIntradayResponse {
+    Ok(api_models::OptionsIntradayResponse {
         ticker: normalized,
-        snapshot_time: market.snapshot.timestamp_utc,
+        snapshot_time: result.market.snapshot.timestamp_utc,
         catalog,
         volatility_surface,
-    }))
+    })
 }
 
 fn asset_summary(tracked: &TrackedTicker) -> AssetSummary {
@@ -1332,6 +1337,202 @@ fn asset_summary(tracked: &TrackedTicker) -> AssetSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hexagon::{
+        PortResult,
+        domain::{
+            options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
+            simulation::IntradaySimulationMarket,
+            volatility_surface::{VolatilitySurface, VolatilitySurfacePoint},
+        },
+        driving_ports::for_viewing_intraday_options::IntradayOptionsMarket,
+    };
+
+    struct IntradayOptionsStub(PortResult<IntradayOptionsMarket>);
+
+    #[async_trait::async_trait]
+    impl ForViewingIntradayOptions for IntradayOptionsStub {
+        async fn intraday_options(&self, _ticker: &str) -> PortResult<IntradayOptionsMarket> {
+            self.0.clone()
+        }
+    }
+
+    fn intraday_options_result() -> IntradayOptionsMarket {
+        let snapshot_time = chrono::DateTime::parse_from_rfc3339("2026-08-19T20:00:00Z")
+            .expect("valid timestamp")
+            .with_timezone(&chrono::Utc);
+        let expiration = chrono::NaiveDate::from_ymd_opt(2026, 9, 18).expect("valid expiration");
+        let contract = ContratoOpcao {
+            occ_symbol: "SPY260918C00105000".to_string(),
+            option_type: OptionType::Call,
+            strike: 105.0,
+            expiration,
+            bid: 1.0,
+            ask: 1.2,
+            mid: 1.1,
+            spread: 0.2,
+            volume: 10.0,
+            open_interest: Some(100.0),
+            delta: 0.4,
+            gamma: Some(0.02),
+            vega: 0.1,
+            theta: -0.03,
+            rho: 0.01,
+            theo: 1.1,
+            implied_volatility: Some(0.25),
+            contract_specification: None,
+        };
+        let snapshot = Snapshot {
+            ticker: "SPY".to_string(),
+            timestamp_utc: snapshot_time,
+            contratos: vec![contract.clone()],
+            chains: vec![OptionChain {
+                root: "SPY".to_string(),
+                contratos: vec![contract],
+            }],
+            underlying_price: None,
+            collected_at: None,
+            provider_timestamp: None,
+            ingestion_diagnostics: Default::default(),
+        };
+        IntradayOptionsMarket {
+            market: IntradaySimulationMarket {
+                snapshot,
+                spot: 100.0,
+            },
+            volatility_surface: Some(VolatilitySurface {
+                ticker: "SPY".to_string(),
+                snapshot_time,
+                reference_price: 100.0,
+                points: vec![VolatilitySurfacePoint {
+                    expiration,
+                    days_to_expiration: 30,
+                    strike: 105.0,
+                    moneyness: 1.05,
+                    option_type: OptionType::Call,
+                    implied_volatility: 0.25,
+                }],
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn intraday_options_preserves_the_complete_legacy_contract() {
+        let result = intraday_options_result();
+        let snapshot_time = result.market.snapshot.timestamp_utc;
+        let expiration = result.market.snapshot.contratos[0].expiration;
+        let response =
+            options_intraday_response(&IntradayOptionsStub(Ok(result)), " spy ".to_string())
+                .await
+                .expect("port result must map successfully");
+
+        assert_eq!(
+            serde_json::to_value(&response).expect("response must serialize"),
+            serde_json::json!({
+                "ticker": "SPY",
+                "snapshot_time": "2026-08-19T20:00:00Z",
+                "catalog": {
+                    "ticker": "SPY",
+                    "snapshot_time": "2026-08-19T20:00:00Z",
+                    "spot": 100.0,
+                    "expirations": ["2026-09-18"],
+                    "contracts": [{
+                        "occ_symbol": "SPY260918C00105000",
+                        "option_type": "Call",
+                        "strike": 105.0,
+                        "expiration": "2026-09-18",
+                        "bid": 1.0,
+                        "ask": 1.2,
+                        "mid": 1.1,
+                        "implied_volatility": 0.25,
+                        "delta": 0.4,
+                        "gamma": 0.02,
+                        "theta": -0.03,
+                        "vega": 0.1,
+                        "rho": 0.01,
+                        "volume": 10.0,
+                        "open_interest": 100.0
+                    }]
+                },
+                "volatility_surface": {
+                    "state": "available",
+                    "data": {
+                        "metadata": {
+                            "session_date": "2026-08-19",
+                            "collected_at": null,
+                            "source": "market data",
+                            "freshness": "current"
+                        },
+                        "reference_price": 100.0,
+                        "expirations": [{"date": "2026-09-18", "days": 30}],
+                        "moneyness_levels": [80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0],
+                        "points": [{
+                            "expiration": "2026-09-18",
+                            "days": 30,
+                            "strike": 105.0,
+                            "moneyness_percent": 105.0,
+                            "volatility_percent": 25.0
+                        }],
+                        "observations": [{
+                            "expiration": "2026-09-18",
+                            "days": 30,
+                            "strike": 105.0,
+                            "moneyness_percent": 105.0,
+                            "volatility_percent": 25.0
+                        }]
+                    }
+                }
+            })
+        );
+        assert_eq!(response.ticker, "SPY");
+        assert_eq!(response.snapshot_time, snapshot_time);
+        assert_eq!(response.catalog.ticker, "SPY");
+        assert_eq!(response.catalog.snapshot_time, snapshot_time);
+        assert_eq!(response.catalog.spot, 100.0);
+        assert_eq!(response.catalog.expirations, vec![expiration]);
+        assert_eq!(response.catalog.contracts.len(), 1);
+        assert_eq!(
+            response.catalog.contracts[0].occ_symbol,
+            "SPY260918C00105000"
+        );
+        let api_models::DataState::Available(surface) = response.volatility_surface else {
+            panic!("surface must remain available");
+        };
+        assert_eq!(surface.reference_price, 100.0);
+        assert_eq!(surface.expirations.len(), 1);
+        assert_eq!(surface.expirations[0].date, expiration);
+        assert_eq!(
+            surface.moneyness_levels,
+            vec![80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0]
+        );
+        assert_eq!(surface.points.len(), 1);
+        assert_eq!(surface.points[0].moneyness_percent, 105.0);
+        assert_eq!(surface.points[0].volatility_percent, 25.0);
+        assert_eq!(surface.observations.len(), 1);
+        assert_eq!(surface.observations[0].moneyness_percent, 105.0);
+        assert_eq!(surface.observations[0].volatility_percent, 25.0);
+    }
+
+    #[tokio::test]
+    async fn intraday_options_propagates_port_errors_without_mapping_a_response() {
+        for (error, expected) in [
+            (
+                PortError::InvalidRequest("bad ticker".into()),
+                StatusCode::BAD_REQUEST,
+            ),
+            (PortError::NotFound("missing".into()), StatusCode::NOT_FOUND),
+            (PortError::Conflict("closed".into()), StatusCode::CONFLICT),
+            (
+                PortError::Unavailable("provider failed".into()),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        ] {
+            let status =
+                options_intraday_response(&IntradayOptionsStub(Err(error)), "SPY".to_string())
+                    .await
+                    .expect_err("port error must be propagated");
+            assert_eq!(status, expected);
+        }
+    }
 
     #[test]
     fn classifies_spy_as_an_etf() {
