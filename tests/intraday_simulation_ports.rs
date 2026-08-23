@@ -8,7 +8,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 use hexagonal_backend::hexagon::{
     PortError, PortResult,
     application::intraday_simulation::IntradaySimulationApplication,
-    domain::{live_price::LivePrice, options::Snapshot},
+    domain::{
+        live_price::LivePrice,
+        options::{ContratoOpcao, OptionChain, OptionType, Snapshot},
+    },
     driven_ports::{
         for_consulting_trading_calendar::ForConsultingTradingCalendar,
         for_obtaining_live_prices::ForObtainingLivePrices,
@@ -26,11 +29,35 @@ struct OptionChainsMock(Arc<AtomicUsize>);
 impl ForObtainingOptionChains for OptionChainsMock {
     async fn obtain_option_chain(&self, ticker: &str) -> PortResult<Snapshot> {
         self.0.fetch_add(1, Ordering::Relaxed);
+        let expiration = Utc::now().date_naive() + chrono::Duration::days(30);
+        let contract = ContratoOpcao {
+            occ_symbol: "TEST-CALL".to_string(),
+            option_type: OptionType::Call,
+            strike: 5_300.0,
+            expiration,
+            bid: 10.0,
+            ask: 11.0,
+            mid: 10.5,
+            spread: 1.0,
+            volume: 100.0,
+            open_interest: Some(1_000.0),
+            delta: 0.4,
+            gamma: Some(0.01),
+            vega: 0.1,
+            theta: -0.02,
+            rho: 0.01,
+            theo: 10.5,
+            implied_volatility: Some(0.2),
+            contract_specification: None,
+        };
         Ok(Snapshot {
             ticker: ticker.to_string(),
             timestamp_utc: Utc::now(),
-            contratos: Vec::new(),
-            chains: Vec::new(),
+            contratos: vec![contract.clone()],
+            chains: vec![OptionChain {
+                root: ticker.to_string(),
+                contratos: vec![contract],
+            }],
             underlying_price: None,
             collected_at: None,
             provider_timestamp: None,
@@ -96,7 +123,12 @@ async fn obtains_intraday_inputs_through_mocked_driven_ports() {
     assert_eq!(market.spot, 5_250.0);
 
     let options_market = application.intraday_options("SPX").await.unwrap();
-    assert_eq!(options_market.spot, 5_250.0);
+    assert_eq!(options_market.market.spot, 5_250.0);
+    let surface = options_market
+        .volatility_surface
+        .expect("application must calculate the intraday surface");
+    assert_eq!(surface.reference_price, 5_250.0);
+    assert_eq!(surface.points.len(), 1);
 }
 
 #[tokio::test]
