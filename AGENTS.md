@@ -539,6 +539,8 @@ Para o frontend, executar também as validações configuradas no repositório p
 * testes do frontend;
 * testes arquiteturais.
 
+Em tarefas limitadas ao frontend, executar validações apenas para o package `optima-web` e respetivo build CSR. Não executar check, clippy ou test do workspace completo quando backend, crates partilhadas e contratos não foram alterados. Validações backend ou workspace-wide só são exigidas quando o âmbito da alteração possa afetá-los.
+
 Se alguma validação não estiver ainda configurada, declarar isso explicitamente. Não fingir que foi executada.
 
 Não abrir a DuckDB normal apenas para validar uma alteração. Usar fixtures, mocks ou bases de dados temporárias de teste.
