@@ -1,0 +1,3708 @@
+Direção geral: “Bloomberg moderno”, não “dashboard de cartões”
+Para stocks, índices e opções, o melhor estilo não é uma página cheia de cards arredondados. Um Bloomberg moderno deve privilegiar:
+
+alta densidade de informação, mas com hierarquia clara;
+gráficos e tabelas como elementos principais;
+navegação consistente, rápida e orientada ao ativo;
+painéis que possam ser redimensionados, recolhidos e trocados, sem perder contexto;
+uma paleta escura discreta, onde verde/vermelho têm significado financeiro e não decorativo;
+pouca decoração e pouca superfície desperdiçada.
+A ideia central: o utilizador deve conseguir navegar de um ticker para preço, cadeia de opções, IV, GEX e simulação sem “mudar mentalmente de aplicação”.
+
+1. Estrutura global da aplicação
+text
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ LOGO │ Pesquisa global: "SPX, AAPL, NVDA..." │ Mercado aberto │ Alertas │ User│
+├───────────────┬──────────────────────────────────────────────────────────────┤
+│               │ Context bar                                                   │
+│ NAVEGAÇÃO     │ [SPX]  5,018.44  +0.62%   |  1D ▼  |  US Options ▼ | Atualizado│
+│               ├──────────────────────────────────────────────────────────────┤
+│  Visão geral  │                                                              │
+│  Mercados     │                      ÁREA DE TRABALHO                         │
+│  Ativos       │                                                              │
+│  Opções       │                                                              │
+│  Volatilidade │                                                              │
+│  GEX / Fluxo  │                                                              │
+│  Simulações   │                                                              │
+│  Portfolio    │                                                              │
+│               │                                                              │
+│ ───────────   │                                                              │
+│ Watchlist     │                                                              │
+│ SPX  +0.62%   │                                                              │
+│ NDX  +0.81%   │                                                              │
+│ AAPL -0.34%   │                                                              │
+│ NVDA +1.72%   │                                                              │
+├───────────────┴──────────────────────────────────────────────────────────────┤
+│ Feed / estado: dados em tempo real · ligação estável · última atualização    │
+└──────────────────────────────────────────────────────────────────────────────┘
+Navegação lateral
+A sidebar deve permanecer estável em toda a aplicação. Idealmente pode alternar entre:
+
+modo expandido: ícone + texto + watchlist;
+modo compacto: apenas ícones, deixando mais área para gráficos.
+Secções principais
+
+
+
+Secção	Objetivo
+Visão geral	Mercado global, watchlists, movers, calendário e alertas
+Mercados	Índices, setores, commodities, FX, taxas
+Ativos	Página de detalhe para ações, ETFs e índices
+Opções	Chain, opções por vencimento, Greeks, open interest
+Volatilidade	IV smile, term structure, volatility surface
+GEX / Fluxo	Gamma exposure, OI, volume, put/call, níveis relevantes
+Simulações	Payoff, stress tests, cenários e comparação de estratégias
+Portfolio	P&L, exposição, Greeks agregados, risco
+2. Regra de navegação: o ativo é o centro
+Em vez de páginas completamente isoladas, cada ativo deve ter uma espécie de “workspace” próprio.
+
+Ao pesquisar SPX, AAPL ou NVDA, o utilizador entra numa visão de ativo com tabs persistentes:
+
+text
+
+
+[AAPL]  $192.41  +1.13%     Mercado aberto
+
+[ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Assim:
+
+escolhe-se o ativo uma vez;
+todas as ferramentas usam o mesmo underlying;
+evita-se repetir dropdowns de ticker em cada gráfico;
+cada módulo herda o contexto do ativo.
+3. Dashboard / Visão geral do mercado
+O dashboard deve servir para responder rapidamente:
+
+O que está a acontecer no mercado?
+Onde está o movimento?
+Que ativo merece investigação?
+Existem eventos que explicam o movimento?
+text
+
+
+┌──────────────────────────────────────────────────────────────────────┐
+│ MERCADOS                                      Data: hoje · US Session │
+├────────────────────────────┬────────────────────────────┬────────────┤
+│ Índices                    │ Movers                     │ Agenda     │
+│ SPX     5,018 +0.62%       │ NVDA      +4.2%            │ 10:00 CPI  │
+│ NDX    17,820 +0.81%       │ AMD       +3.1%            │ 14:00 FOMC │
+│ RUT     2,038 -0.18%       │ TSLA      -2.9%            │ Earnings   │
+│ VIX       14.2 -4.6%       │ BA        -2.5%            │ AAPL AMC   │
+├──────────────────────────────────────────────────────────────────────┤
+│ MARKET MAP / HEATMAP                                                  │
+│                                                                      │
+│  Technology       Financials       Healthcare        Energy          │
+│  [NVDA +4.2]      [JPM +1.2]       [LLY -0.8]        [XOM +0.4]      │
+│  [MSFT +1.1]      [BAC +0.8]       [UNH -1.1]        [CVX -0.2]      │
+├──────────────────────────────────────┬───────────────────────────────┤
+│ Gráfico SPX / NDX / VIX              │ Watchlist                      │
+│                                      │ SPY     501.20  +0.61%         │
+│ gráfico intraday comparativo         │ QQQ     428.40  +0.84%         │
+│                                      │ AAPL    192.41  +1.13%         │
+│                                      │ NVDA    890.20  +4.20%         │
+└──────────────────────────────────────┴───────────────────────────────┘
+Elementos importantes
+Heatmap de setores como bloco central e não uma coleção de cartões.
+Calendário económico e earnings sempre visível, mas compacto.
+O gráfico no dashboard deve ser comparativo: SPX, NDX, VIX, yields ou setores.
+Watchlist fixa, que permita abrir qualquer ativo com um clique.
+4. Página de ativo: ações, ETFs e índices
+Esta é provavelmente a página mais utilizada.
+
+text
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ AAPL · Apple Inc.                                              NASDAQ          │
+│ $192.41  +2.15 (+1.13%)      Mercado aberto      Última atualização: 2s      │
+│ 52W: 164.08 — 199.62   Volume: 48.2M   Market Cap: 2.97T                     │
+├───────────────────────────────────────────────────────────┬──────────────────┤
+│ [1D] [5D] [1M] [3M] [YTD] [1Y] [All]  Candles  Indicators │ Resumo           │
+│                                                           │                  │
+│                                                           │ Bid / Ask        │
+│                  GRÁFICO PRINCIPAL                        │ 192.40 / 192.42  │
+│                  Candles + Volume                         │                  │
+│                  Eventos + médias móveis                  │ IV Rank: 32      │
+│                                                           │ IV Percentile: 48│
+│                                                           │ Beta: 1.21       │
+│                                                           │ Earnings: 2 May  │
+│                                                           │                  │
+├───────────────────────────────────────────────────────────┴──────────────────┤
+│ [ Estatísticas ] [ Opções ] [ Volatilidade ] [ GEX ] [ Notícias ]             │
+│                                                                              │
+│ Conteúdo da tab selecionada                                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+Decisões de UX
+O gráfico de preço deve dominar a primeira área da página.
+Métricas devem estar num painel lateral estreito, não em grandes cards.
+Ações secundárias — adicionar alerta, comparar, exportar — ficam em menu ···.
+Indicadores técnicos devem ser colocados num botão/selector compacto: não expor RSI, MACD, VWAP, médias e bandas todos ao mesmo tempo.
+5. Opções: chain como elemento principal
+A página de opções deve ser uma mesa de trabalho, não apenas uma tabela.
+
+text
+
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ AAPL Options                                                               │
+│ Spot: 192.41     IV Rank: 32     Put/Call OI: 0.84     Próximo earnings: 2M │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Expiração: [ 17 May 2025 ▼ ]  |  Mostrar: [ ±10 strikes ATM ▼ ]            │
+│ Métrica: [ Last ] [ IV ] [ Delta ] [ OI ] [ Volume ]                       │
+├────────────────────────────────────────────┬──────────────────────────────┤
+│ CALLS                                      │ PUTS                         │
+│ Bid   Ask  IV   Delta  OI  Vol │ Strike    │ Vol  OI Delta  IV  Bid  Ask │
+│ 5.10  5.25 24%  .62   12k  3k  │ 190.00    │ 4k  16k -.38 25% 2.80 2.95  │
+│ 3.20  3.35 23%  .47   18k  6k  │ 192.50    │ 7k  21k -.51 24% 3.90 4.05  │
+│ 1.85  2.00 22%  .31   10k  2k  │ 195.00    │ 2k  10k -.66 25% 5.55 5.70  │
+├────────────────────────────────────────────┴──────────────────────────────┤
+│ Painel analítico inferior: [ Vol Smile ] [ OI ] [ Volume ] [ Greeks ]      │
+│                                                                              │
+│                        gráfico associado à métrica selecionada               │
+└───────────────────────────────────────────────────────────────────────────┘
+Recomendação
+Não apresentar todas as colunas simultaneamente.
+Usar um selector de métrica para dar prioridade visual a uma dimensão: IV, Delta, OI ou volume.
+Manter uma base fixa mínima: bid, ask, strike, IV, delta e OI.
+O strike ATM deve ficar destacado com uma linha vertical ou fundo subtil.
+Calls e puts devem ser separados visualmente, mas alinhados pelo strike central.
+6. Volatility Surface: página de análise, não apenas gráfico 3D
+Uma superfície 3D é visualmente forte, mas muitas vezes é menos útil para leitura precisa. Por isso a página deve ter três vistas coordenadas.
+
+text
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ VOLATILIDADE · AAPL                                                        │
+│ Métrica: [ Implied Volatility ▼ ]  Tipo: [ Calls + Puts ▼ ]                │
+│ Expirações: [ Todas ▼ ]       Normalização: [ Moneyness ▼ ]                │
+├─────────────────────────────────────────────────────┬──────────────────────┤
+│                                                     │ Snapshot              │
+│              SUPERFÍCIE 3D                          │                      │
+│              Strike / Moneyness                     │ ATM IV: 23.8%        │
+│              DTE                                    │ 30D IV: 24.4%        │
+│              Implied Volatility                     │ 30D RV: 19.2%        │
+│                                                     │ IV Rank: 32           │
+│                                                     │ Skew 25Δ: -2.1 vols   │
+├─────────────────────────────────────────────────────┴──────────────────────┤
+│ [ Smile por vencimento ] [ Term Structure ] [ Heatmap ]                    │
+│                                                                            │
+│ gráfico 2D selecionado, para leitura e comparação precisa                  │
+└────────────────────────────────────────────────────────────────────────────┘
+Organização recomendada
+Vista 1 — Superfície 3D
+Útil para exploração visual:
+
+eixo X: moneyness ou delta;
+eixo Y: days-to-expiry;
+eixo Z: IV;
+pontos observados podem ser mostrados discretamente sobre a superfície interpolada.
+Vista 2 — IV Smile
+A mais importante para tomada de decisão:
+
+várias curvas, uma por vencimento;
+comparar 7D, 30D, 60D, 90D;
+permitir selecionar duas ou três expiries em vez de mostrar todas.
+Vista 3 — Term structure
+IV ATM por vencimento;
+excelente para perceber eventos, earnings ou stress de curto prazo.
+Vista 4 — Heatmap
+strike/moneyness × vencimento;
+cor representa IV;
+mais rápido de ler do que a superfície 3D.
+A superfície 3D pode ser a vista inicial, mas smile e term structure devem ser imediatamente acessíveis.
+
+7. GEX: mapa de níveis, não apenas barras
+GEX deve ajudar a responder: onde estão os níveis de suporte/resistência potenciais e qual o regime de gamma?
+
+text
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ GEX · SPX                                                                  │
+│ Spot: 5,018.44    Expiração: [ Todas ▼ ]  Cálculo: [ Net GEX ▼ ]           │
+│ Data: [ Hoje ▼ ]    Agrupamento: [ 5 pontos ▼ ]                            │
+├──────────────────────────────────────────────────────┬─────────────────────┤
+│                                                      │ Níveis chave         │
+│               GRÁFICO GEX POR STRIKE                 │                     │
+│                                                      │ Gamma Flip: 4,980    │
+│   barras verdes: gamma positivo                      │ Call Wall: 5,100    │
+│   barras vermelhas: gamma negativo                   │ Put Wall: 4,900     │
+│   linha vertical: spot atual                         │ Max GEX: 5,050      │
+│                                                      │ Regime: Long Gamma   │
+├──────────────────────────────────────────────────────┴─────────────────────┤
+│ [ GEX por expiry ] [ Open Interest ] [ Options Volume ] [ Put/Call ]        │
+│                                                                            │
+│ linha temporal ou barras empilhadas por vencimento                         │
+└────────────────────────────────────────────────────────────────────────────┘
+Vistas GEX úteis
+Net GEX por strike
+A vista principal. Barras positivas/negativas e spot marcado.
+
+GEX por vencimento
+Permite perceber se o risco está concentrado no zero-DTE, semanal ou mensal.
+
+Open Interest por strike
+Complementa GEX; não deve ser confundido com ele.
+
+Volume intraday de opções
+Útil para identificar fluxo recente, sobretudo em índices.
+
+Níveis-chave resumidos
+Sempre num painel lateral:
+
+Gamma Flip;
+Call Wall;
+Put Wall;
+maior GEX positivo;
+maior GEX negativo;
+regime atual: long/short gamma.
+8. Simulações: evitar “N botões” com um modelo em camadas
+O problema normal de simuladores é colocar preço, volatilidade, tempo, juros, dividendos, strikes, quantity, greeks, modelos e cenários todos no mesmo ecrã.
+
+A solução é separar claramente:
+
+posição/estratégia;
+cenário base;
+stress controls;
+resultado visual.
+Estrutura ideal
+text
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ SIMULAÇÃO · AAPL                                                           │
+│ Estratégia: Long Call Spread                        [ Guardar cenário ]     │
+├───────────────────────┬───────────────────────────────────┬────────────────┤
+│ POSIÇÃO               │ RESULTADO                         │ CENÁRIO         │
+│                       │                                   │                │
+│ +1 Call 190 · May 17  │           PAYOFF / P&L            │ Preset         │
+│ -1 Call 200 · May 17  │                                   │ [ Base ▼ ]     │
+│                       │  linha atual                      │                │
+│ [ editar pernas ]     │  linha cenário                    │ Spot           │
+│                       │  intervalo probabilístico         │ 192.41 → 198   │
+│                       │                                   │                │
+│                       │  X: preço no vencimento           │ Volatilidade   │
+│                       │  Y: P&L                           │ 23.8% → 28%    │
+│                       │                                   │                │
+│                       │                                   │ Tempo           │
+│                       │                                   │ Hoje → +7 dias │
+├───────────────────────┴───────────────────────────────────┴────────────────┤
+│ Max Profit  +$720   |  Max Loss  -$280  | Breakeven  192.80  | POP 56%      │
+├────────────────────────────────────────────────────────────────────────────┤
+│ [ Payoff ] [ P&L por data ] [ Greeks ] [ Heatmap P&L ] [ Monte Carlo ]     │
+└────────────────────────────────────────────────────────────────────────────┘
+Como controlar parâmetros sem poluir
+A. Um único selector de preset
+Em vez de múltiplos botões:
+
+text
+
+
+Cenário: [ Base ▼ ]
+Opções:
+
+Base;
+Bull moderado;
+Bull forte;
+Bear moderado;
+Bear forte;
+Volatilidade sobe;
+Volatilidade desce;
+Pós-earnings;
+Personalizado.
+Ao escolher um preset, spot, IV e tempo são alterados em conjunto.
+
+B. Três controlos visíveis, os restantes escondidos
+Para quase todas as simulações, os parâmetros realmente importantes são:
+
+Preço do underlying
+Volatilidade implícita
+Passagem do tempo
+Estes devem existir como sliders/inputs compactos no painel direito.
+
+text
+
+
+Spot            192.41 → 198.00
+[──────────────●──────]
+
+IV              23.8% → 28.0%
+[──────────────●──────]
+
+Data             Hoje → +7 dias
+[──────────●──────────]
+Os restantes parâmetros — juros, dividendos, modelo de pricing, skew adjustment — ficam dentro de:
+
+text
+
+
+[ Ajustes avançados ▸ ]
+Por defeito, fechado.
+
+C. Manipulação direta no gráfico
+Quando possível, o próprio gráfico deve controlar o cenário:
+
+arrastar uma linha vertical para mudar o preço futuro;
+arrastar um marcador temporal para avançar no tempo;
+selecionar áreas no heatmap para definir intervalo de stress;
+hover mostra P&L, delta, theta e probabilidade nesse ponto.
+Isto reduz a necessidade de controlos tradicionais.
+
+9. Modos de visualização da simulação
+Não colocar todos os gráficos no ecrã. Usar tabs no mesmo espaço principal:
+
+
+
+
+Tab	Utilidade
+Payoff	P&L no vencimento
+P&L por data	Efeito combinado de spot, IV e theta antes do vencimento
+Heatmap P&L	Spot × volatilidade ou spot × tempo
+Greeks	Delta, gamma, theta e vega ao longo do preço
+Monte Carlo	Distribuição de resultados e probability of profit
+A tab mais poderosa para simulação deve ser o Heatmap P&L:
+
+text
+
+
+                Volatilidade
+              18%   22%   26%   30%   34%
+Preço 185      -320  -250  -160   -80   +20
+Preço 190      -180   -90   +10   +110  +220
+Preço 195       +40  +130  +250   +360  +480
+Preço 200      +280  +390  +510   +630  +750
+vermelho: perda;
+verde: ganho;
+ponto marcado: cenário atual;
+clique numa célula: aplica o cenário correspondente.
+Isto é muito mais eficiente do que dezenas de inputs.
+
+10. Linguagem visual recomendada
+Paleta
+text
+
+
+Fundo principal:       azul-marinho / carvão muito escuro
+Superfície secundária: ligeiramente mais clara
+Bordas:                cinzento-azulado discreto
+Texto principal:       quase branco
+Texto secundário:      cinzento frio
+
+Positivo:              verde controlado
+Negativo:              vermelho controlado
+Seleção / interação:   azul elétrico ou azul-violeta
+Avisos / eventos:      âmbar
+Evitar:
+
+verde e vermelho demasiado saturados em toda a interface;
+gradientes grandes;
+cards com sombras pesadas;
+cantos excessivamente arredondados;
+widgets decorativos sem informação acionável.
+Tipografia
+Fonte sans para interface: Inter, IBM Plex Sans ou similar.
+Fonte monoespaçada para preços, P&L, IV, strikes e timestamps: IBM Plex Mono, JetBrains Mono ou similar.
+Números devem ter alinhamento tabular para evitar “saltos” visuais nas atualizações.
+11. Prioridade de implementação
+Fase 1 — Base de navegação
+Layout global com sidebar, pesquisa e watchlist.
+Dashboard de mercado.
+Página de detalhe de ativo com gráfico principal.
+Context bar persistente do ticker.
+Fase 2 — Opções
+Options chain funcional.
+Vol smile e term structure.
+Métricas de IV, OI, volume e Greeks.
+Fase 3 — Análise avançada
+Volatility surface 3D + heatmap.
+GEX por strike e por vencimento.
+Níveis-chave: gamma flip, call wall e put wall.
+Fase 4 — Simulador
+Construtor de posição.
+Payoff e P&L por data.
+Presets de cenário.
+Apenas três controlos visíveis: spot, IV e tempo.
+Heatmap de stress e comparação entre cenários guardados.
+Princípio final
+A estrutura deve seguir esta hierarquia:
+
+text
+
+
+Mercado
+  → Ativo
+      → Preço
+      → Opções
+          → Volatilidade
+          → GEX
+          → Simulação
+Desta forma, a aplicação parece uma plataforma única de análise financeira, e não uma coleção de dashboards independentes.
+
+no ecran de activos por vezes temos [ Estatísticas ] [ Opções ] [ Volatilidade ] [ GEX ] [ Notícias ]             │
+│                                                                           outras vezes [ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ] depende do contexto em que estamos ?
+Sim — as duas listas representam níveis ligeiramente diferentes, mas não devem coexistir de forma ambígua no mesmo ecrã. O ideal é definir uma navegação principal consistente por ativo e usar sub-tabs apenas dentro de módulos complexos.
+
+A recomendação é usar esta estrutura:
+
+text
+
+
+Ativo / Ticker
+└── Navegação principal do ativo
+    ├── Overview
+    ├── Chart
+    ├── Options
+    ├── Volatility
+    ├── GEX
+    ├── Simulation
+    └── News
+Ou seja, a segunda versão é a arquitetura mais completa e deve ser a base.
+
+Estrutura recomendada
+text
+
+
+[AAPL] Apple Inc. · NASDAQ
+$192.41  +1.13%   Mercado aberto
+
+[ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Cada tab representa uma área de trabalho independente, mas mantém o ticker e o contexto selecionado.
+
+
+
+
+Tab	Conteúdo
+Overview	resumo do ativo: preço, mini-chart, estatísticas essenciais, earnings, notícias recentes e highlights de opções
+Chart	gráfico técnico completo: candles, volume, indicadores, comparação, drawings
+Options	options chain, seleção de expiração, Greeks, IV, OI e volume
+Volatility	IV smile, term structure, heatmap e volatility surface 3D
+GEX	Net GEX, gamma flip, call/put walls, GEX por strike e expiry
+Simulation	construção de estratégia, payoff, P&L, heatmaps de stress, cenários
+News	notícias, filings, earnings, eventos e research
+Onde entram “Estatísticas”?
+Estatísticas não deve ser uma tab principal, salvo se tiveres uma quantidade muito grande de dados fundamentalistas.
+
+Na maioria dos casos, entra dentro de Overview, numa zona secundária:
+
+text
+
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ AAPL · Overview                                                           │
+├──────────────────────────────────────────────┬────────────────────────────┤
+│                                              │ Estatísticas-chave          │
+│              Gráfico resumido                │                            │
+│              1D / 5D / 1M / 1Y               │ Market Cap     2.97T       │
+│                                              │ P/E            29.4        │
+│                                              │ EPS            6.43        │
+│                                              │ Beta           1.21        │
+│                                              │ 52W Range      164—199     │
+├──────────────────────────────────────────────┴────────────────────────────┤
+│ Earnings · Ratings · Opções resumidas · Notícias recentes                  │
+└───────────────────────────────────────────────────────────────────────────┘
+Se, mais tarde, adicionares informação fundamental profunda — balanço, income statement, cash flow, valuation models, ownership, estimativas de analistas — então podes criar uma tab específica:
+
+text
+
+
+[ Overview ] [ Chart ] [ Fundamentals ] [ Options ] [ Volatility ] ...
+Mas para a primeira versão, manter “Estatísticas” dentro de Overview reduz navegação desnecessária.
+
+O que muda dependendo do tipo de ativo?
+A navegação deve ser consistente, mas algumas tabs podem desaparecer ou adaptar-se consoante o instrumento.
+
+Exemplo: ação com opções líquidas — AAPL
+text
+
+
+[ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Tudo está disponível.
+
+Exemplo: índice — SPX
+text
+
+
+[ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Também tem praticamente tudo, e GEX pode ser ainda mais relevante do que numa ação individual.
+
+No Overview do SPX, em vez de market cap e P/E, mostras:
+
+breadth do mercado;
+advance/decline ratio;
+setores;
+VIX;
+put/call ratio;
+níveis técnicos;
+calendário macroeconómico.
+Exemplo: ETF — SPY
+text
+
+
+[ Overview ] [ Chart ] [ Holdings ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Aqui pode existir Holdings, pois é relevante para ETFs.
+
+Exemplo: ação sem opções ou com dados insuficientes
+text
+
+
+[ Overview ] [ Chart ] [ Fundamentals ] [ News ]
+Não deves mostrar tabs vazias. Podes:
+
+esconder Options, Volatility, GEX e Simulation; ou
+mostrá-las desativadas, com tooltip:
+text
+
+
+[ Options 🔒 ]
+“Não existem dados de opções suficientes para este ativo.”
+
+Para uma plataforma profissional, eu prefiro esconder por defeito. Reduz ruído e evita transmitir que a funcionalidade está avariada.
+
+Regra prática: tabs principais vs sub-tabs
+Usa esta regra:
+
+Tab principal: muda a pergunta que o utilizador está a tentar responder.
+Sub-tab: muda apenas a visualização dos mesmos dados.
+Por exemplo:
+
+text
+
+
+Volatility
+├── Surface 3D
+├── Smile
+├── Term Structure
+└── Heatmap
+Aqui não precisas de criar quatro tabs principais globais. São variações de análise de volatilidade, por isso vivem dentro de Volatility.
+
+Da mesma forma:
+
+text
+
+
+GEX
+├── Net GEX
+├── GEX por Expiry
+├── Open Interest
+├── Options Volume
+└── Dealer Positioning
+E para simulações:
+
+text
+
+
+Simulation
+├── Payoff
+├── P&L by Date
+├── P&L Heatmap
+├── Greeks
+└── Monte Carlo
+Wireframe final recomendado
+text
+
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ AAPL · Apple Inc. · NASDAQ                                                  │
+│ $192.41  +2.15 (+1.13%)     Open      Updated 2s ago                       │
+│ 52W 164.08—199.62 · Volume 48.2M · IV Rank 32 · Earnings in 14 days        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ [ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ]   │
+│ [ News ]                                                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│                         Conteúdo da área selecionada                        │
+│                                                                             │
+│  Ex.: Overview                                                              │
+│  ┌────────────────────────────────────┬─────────────────────────────────┐ │
+│  │ Gráfico resumido                    │ Estatísticas-chave              │ │
+│  │                                    │ Market cap · P/E · EPS · Beta   │ │
+│  ├────────────────────────────────────┴─────────────────────────────────┤ │
+│  │ Earnings · Opções resumidas · Notícias recentes · Eventos             │ │
+│  └──────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+Portanto: a primeira lista (Estatísticas / Opções / Volatilidade / GEX / Notícias) pode ser vista como uma simplificação inicial, mas para a arquitetura final usaria a segunda, com Overview e Chart separados. Estatísticas torna-se conteúdo do Overview, e não uma área principal isolada.
+
+portanto [AAPL]  é uma seleccao ? depois aparecem os dados, graficos, e as varias botoes opcoes em baixo
+Exatamente. [AAPL] é o ativo atualmente selecionado — não é uma tab. Funciona como o contexto da página/workspace.
+
+O fluxo seria:
+
+text
+
+
+1. Utilizador pesquisa ou escolhe um ticker
+2. AAPL torna-se o ativo selecionado
+3. O cabeçalho atualiza com dados da AAPL
+4. As tabs em baixo mostram diferentes análises desse mesmo ativo
+Exemplo visual:
+
+text
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Pesquisa global: [ AAPL                                           🔍 ]   │
+├──────────────────────────────────────────────────────────────────────────┤
+│ AAPL  Apple Inc. · NASDAQ                                                │
+│ $192.41   +2.15 (+1.13%)   Mercado aberto                                │
+│                                                                          │
+│ [ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ]                │
+│ [ Simulation ] [ News ]                                                  │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│                  Conteúdo da tab selecionada                             │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+Se o utilizador trocar para SPX, tudo continua no mesmo lugar, mas passa a usar os dados do SPX:
+
+text
+
+
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Pesquisa global: [ SPX                                            🔍 ]   │
+├──────────────────────────────────────────────────────────────────────────┤
+│ SPX  S&P 500 Index                                                       │
+│ 5,130.22   +0.42%   Mercado aberto                                       │
+│                                                                          │
+│ [ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ]                │
+│ [ Simulation ] [ News ]                                                  │
+├──────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│                  Dados e gráficos do SPX                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+Hierarquia correta
+text
+
+
+Aplicação
+├── Pesquisa global / Watchlist
+│   └── Seleção de ativo: AAPL
+│
+└── Workspace do ativo AAPL
+    ├── Cabeçalho: preço, variação, mercado, métricas rápidas
+    ├── Tabs de análise
+    │   ├── Overview
+    │   ├── Chart
+    │   ├── Options
+    │   ├── Volatility
+    │   ├── GEX
+    │   ├── Simulation
+    │   └── News
+    │
+    └── Conteúdo da tab ativa
+Portanto:
+
+AAPL / SPX / NVDA = seleção do instrumento;
+Overview / Chart / Options / etc. = modo de análise do instrumento selecionado;
+gráficos, tabelas e métricas = conteúdo dentro da tab ativa.
+Por exemplo, ao clicar em AAPL na watchlist, podes preservar a tab atual:
+
+text
+
+
+Estavas em: SPX → GEX
+Clicas em:  AAPL
+
+Resultado:   AAPL → GEX
+Isto é útil para comparar rapidamente a exposição gamma entre ativos.
+
+Mas se o utilizador vier da pesquisa global ou abrir diretamente um ticker, o comportamento padrão pode ser:
+
+text
+
+
+Pesquisa: TSLA
+Resultado: TSLA → Overview
+A Overview é a landing page natural de qualquer ativo.
+
+mas escrevo AAPL ou escolho de uma lista enorme de possiveis activos ?
+Fazes ambos, através de uma pesquisa com autocomplete — não mostras uma lista enorme completa.
+
+text
+
+
+[ 🔍 Pesquisar ativo, ticker, índice ou ETF... ]
+O utilizador pode escrever:
+
+text
+
+
+aapl
+E aparece uma lista filtrada:
+
+text
+
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🔍 aapl                                                      │
+├─────────────────────────────────────────────────────────────┤
+│ AAPL   Apple Inc.                          Equity · NASDAQ  │
+│ AAP.L  Anglo American Platinum             Equity · LSE     │
+│ AAPL34 Apple Inc. BDR                      Equity · B3      │
+└─────────────────────────────────────────────────────────────┘
+Ao clicar ou premir Enter em AAPL, esse passa a ser o ativo selecionado.
+
+Depois o campo/cabeçalho mostra:
+
+text
+
+
+[AAPL] Apple Inc. · NASDAQ
+$192.41  +1.13%
+E as tabs aparecem abaixo:
+
+text
+
+
+[ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Não usar uma dropdown com todos os ativos
+Evita algo deste género:
+
+text
+
+
+[ AAPL ▼ ]
+  ├── milhares de ações
+  ├── ETFs
+  ├── índices
+  └── opções
+Não escala bem e é difícil de navegar.
+
+Em vez disso, a pesquisa deve ter resultados organizados:
+
+text
+
+
+Pesquisar: "sp"
+┌─────────────────────────────────────────────────────────────────┐
+│ RECENTES                                                         │
+│ SPX      S&P 500 Index                          Index            │
+│ SPY      SPDR S&P 500 ETF Trust                 ETF              │
+├─────────────────────────────────────────────────────────────────┤
+│ RESULTADOS                                                        │
+│ SPX      S&P 500 Index                          Index · CBOE     │
+│ SPY      SPDR S&P 500 ETF Trust                 ETF · NYSE Arca  │
+│ SPLG     SPDR Portfolio S&P 500 ETF             ETF · NYSE Arca  │
+│ XSP      Mini-SPX Index Options                 Options Index    │
+└─────────────────────────────────────────────────────────────────┘
+Formas complementares de selecionar um ativo
+Além da pesquisa, podes selecionar através de:
+
+1. Watchlist na sidebar
+text
+
+
+WATCHLIST
+SPX     5,130.22   +0.42%
+AAPL      192.41   +1.13%
+NVDA      875.28   -0.64%
+TSLA      183.12   +2.04%
+Clicar numa linha seleciona o ativo.
+
+2. Links dentro da aplicação
+Por exemplo, numa notícia:
+
+text
+
+
+Apple implied volatility rises ahead of earnings
+[AAPL]
+Clicar em AAPL abre o workspace desse ativo.
+
+3. URL direta
+text
+
+
+/assets/AAPL/overview
+/assets/SPX/gex
+/assets/NVDA/options
+Isto permite bookmarks e partilhar uma análise específica.
+
+Portanto, a interface ideal é:
+
+text
+
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ [ 🔍 Pesquisar ticker, nome, ETF ou índice... ]     Mercado: OPEN      │
+├───────────────┬────────────────────────────────────────────────────────┤
+│ Watchlist     │ AAPL · Apple Inc. · NASDAQ                             │
+│               │ $192.41  +1.13%                                       │
+│ SPX           │                                                        │
+│ AAPL  ← ativo │ [ Overview ] [ Chart ] [ Options ] [ Volatility ] ... │
+│ NVDA          │                                                        │
+│ TSLA          │ Conteúdo da tab selecionada                            │
+│               │                                                        │
+└───────────────┴────────────────────────────────────────────────────────┘
+Assim, o utilizador pode escrever AAPL, pesquisar “Apple”, clicar na watchlist ou abrir uma URL. Em todos os casos, o resultado é o mesmo: AAPL torna-se o contexto ativo e os dados/tabs atualizam para esse ativo.
+
+bom isso é uma ideia fantastica mas estou a ver 1 problema : ou tenho guardada a lista enorme e a medida que o utilizador escre AA ele mostra o filtro dos itens com AA ou entao faco uma busca online por tudo o que comeca por AA mas parece demorado
+Sim, esse é o problema normal de um symbol search. A solução não é escolher apenas entre “guardar tudo no browser” ou “pesquisar online a cada tecla”. O ideal é um modelo híbrido.
+
+Comportamento recomendado
+Mostrar imediatamente ativos locais relevantes:
+
+watchlist;
+recentes;
+favoritos;
+índices principais / ETFs principais.
+Após o utilizador escrever pelo menos 2 caracteres, fazer uma pesquisa no teu backend com um pequeno debounce (por exemplo, 180–250 ms).
+
+Guardar os resultados em cache para evitar repetir pedidos.
+
+text
+
+
+Utilizador escreve: A
+→ não faz pesquisa remota ainda
+→ mostra Recentes / Watchlist
+
+Utilizador escreve: AA
+→ espera 200 ms
+→ GET /api/instruments/search?q=AA&limit=10
+
+Utilizador escreve: AAP
+→ cancela o pedido anterior, se ainda estiver em curso
+→ GET /api/instruments/search?q=AAP&limit=10
+Visualmente:
+
+text
+
+
+[ 🔍 AAP                                               ]
+
+RECENTES
+AAPL     Apple Inc.                         Equity · NASDAQ
+
+RESULTADOS
+AAPL     Apple Inc.                         Equity · NASDAQ
+AAP      Advance Auto Parts                 Equity · NYSE
+AAPD     Direxion Daily AAPL Bear 1X        ETF · NASDAQ
+Não guardes necessariamente “tudo” no frontend
+Uma lista de ações americanas não é gigantesca tecnicamente — dezenas de milhares de instrumentos até são viáveis em memória — mas, quando adicionas:
+
+ações globais;
+ETFs;
+índices;
+ADRs;
+fundos;
+obrigações;
+opções por strike e expiração;
+instrumentos expirados ou delisted;
+a lista cresce rapidamente e deixa de fazer sentido enviá-la toda para o browser.
+
+Além disso, precisas de nomes atualizados, exchange, moeda, tipo de instrumento, estado ativo/inativo, etc.
+
+Portanto:
+
+text
+
+
+Browser
+├── Watchlist local
+├── Ativos recentes
+├── Alguns ativos populares
+└── Cache dos resultados anteriores
+
+Backend
+└── Base de dados de instrumentos pesquisável
+    ├── ticker
+    ├── nome
+    ├── tipo: Equity / ETF / Index / Crypto / ...
+    ├── exchange
+    ├── moeda
+    ├── ativo/inativo
+    └── identificador interno
+A pesquisa deve ser no teu backend, não diretamente no fornecedor de dados
+Arquitetura:
+
+text
+
+
+Leptos CSR
+   │
+   │ GET /api/instruments/search?q=aapl
+   ▼
+Teu backend
+   │
+   ├── procura na tua tabela local de instrumentos
+   │
+   └── devolve os 10–20 melhores resultados
+Não recomendo fazer isto diretamente no frontend contra APIs externas porque:
+
+expões a API key;
+podes ter problemas de CORS;
+ficas dependente da latência do fornecedor;
+cada tecla pode consumir quota/custo;
+não controlas bem a ordenação dos resultados;
+a experiência pode ficar inconsistente.
+O backend pode atualizar a lista de instrumentos uma vez por dia, ou quando o mercado abre/fecha, a partir do teu data provider.
+
+Estrutura mínima da tabela
+Uma tabela simples resolve a pesquisa:
+
+text
+
+
+instruments
+──────────────────────────────────────────────
+id                UUID / bigint
+symbol            AAPL
+name              Apple Inc.
+instrument_type   equity
+exchange          NASDAQ
+currency          USD
+country           US
+is_active         true
+provider_symbol   AAPL.US
+E o endpoint:
+
+text
+
+
+GET /api/instruments/search?q=aap&limit=12
+Resposta:
+
+json
+
+
+[
+  {
+    "id": "us-aapl",
+    "symbol": "AAPL",
+    "name": "Apple Inc.",
+    "type": "equity",
+    "exchange": "NASDAQ",
+    "currency": "USD"
+  },
+  {
+    "id": "us-aap",
+    "symbol": "AAP",
+    "name": "Advance Auto Parts, Inc.",
+    "type": "equity",
+    "exchange": "NYSE",
+    "currency": "USD"
+  }
+]
+Depois a UI navega usando o identificador interno, não apenas o ticker:
+
+text
+
+
+/assets/us-aapl/overview
+Ou, se quiseres URLs mais limpas:
+
+text
+
+
+/assets/AAPL/overview
+Mas internamente resolves AAPL + exchange + tipo para evitar ambiguidades.
+
+Pesquisa rápida no servidor
+Numa base de dados como PostgreSQL, uma pesquisa por prefixo em symbol é extremamente rápida se estiver indexada.
+
+A ordenação deve privilegiar:
+
+correspondência exata de ticker;
+ticker que começa pelo texto;
+nome que começa pelo texto;
+texto contido no nome;
+ativos na watchlist ou recentemente usados;
+mercados/tipos preferidos pelo utilizador.
+Para aap, a ordem ideal seria:
+
+text
+
+
+AAPL    Apple Inc.                ← ticker começa por AAP
+AAP     Advance Auto Parts
+AAPD    Direxion Daily AAPL Bear
+...
+Mas para aapl, o resultado exato fica sempre no topo:
+
+text
+
+
+AAPL    Apple Inc.                ← correspondência exata
+Debounce e cancelamento são essenciais
+Sem debounce, se alguém escrever AAPL rapidamente, podes gerar quatro pedidos:
+
+text
+
+
+A
+AA
+AAP
+AAPL
+Com debounce de 200 ms, normalmente só envias o pedido final:
+
+text
+
+
+AAPL
+E, se houver um pedido antigo pendente, deves ignorar/cancelar a resposta caso o texto já tenha mudado.
+
+Por exemplo:
+
+text
+
+
+Pesquisa atual: AAPL
+Resposta lenta anterior: AA
+
+→ não renderizar a resposta de AA
+→ renderizar apenas resultados que correspondam a AAPL
+Para o MVP
+Podes começar ainda mais simples:
+
+text
+
+
+No frontend:
+- Watchlist
+- Recentes
+- ~100–500 ativos mais populares
+
+No backend:
+- Pesquisa de símbolos numa tabela de instrumentos
+- debounce de 200 ms
+- mínimo de 2 caracteres
+- máximo de 10 resultados
+- cache por query
+Isto dá uma experiência muito rápida sem tentar resolver já o universo inteiro de instrumentos.
+
+A ideia central é:
+
+text
+
+
+Não descarregar todos os ativos para o browser.
+Não chamar um fornecedor externo em cada tecla.
+Manter um “instrument master” pesquisável no teu backend.
+Assim, escrever AA, AAP ou Apple parece instantâneo para o utilizador, mesmo que tenhas centenas de milhares de instrumentos na base de dados.
+
+podia guardar numa tabela no backend
+Sim — é precisamente o mais indicado: guardar os instrumentos numa tabela no backend, normalmente chamada algo como instruments, symbols ou instrument_master.
+
+O frontend não precisa de conhecer a lista inteira. Só pede os melhores resultados para o texto escrito.
+
+text
+
+
+Frontend (Leptos)
+    │
+    │  /api/instruments/search?q=aap
+    ▼
+Backend
+    │
+    │  pesquisa na tabela instruments
+    ▼
+PostgreSQL / SQLite / outra BD
+Tabela mínima
+sql
+
+
+CREATE TABLE instruments (
+    id              BIGSERIAL PRIMARY KEY,
+    symbol          VARCHAR(32) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
+    instrument_type VARCHAR(24) NOT NULL, -- equity, etf, index, crypto...
+    exchange        VARCHAR(64),
+    currency        VARCHAR(8),
+    country         VARCHAR(8),
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    provider_symbol VARCHAR(128),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+Exemplos:
+
+text
+
+
+id   symbol  name                         type     exchange   currency
+1    AAPL    Apple Inc.                   equity   NASDAQ     USD
+2    SPX     S&P 500 Index                index    CBOE       USD
+3    SPY     SPDR S&P 500 ETF Trust       etf      NYSE Arca  USD
+4    NVDA    NVIDIA Corporation           equity   NASDAQ     USD
+5    EWZ     iShares MSCI Brazil ETF      etf      NYSE Arca  USD
+Também deves impedir duplicados no mesmo mercado:
+
+sql
+
+
+CREATE UNIQUE INDEX instruments_symbol_exchange_type_uq
+ON instruments (
+    UPPER(symbol),
+    COALESCE(exchange, ''),
+    instrument_type
+);
+E criar índices para pesquisa:
+
+sql
+
+
+CREATE INDEX instruments_symbol_prefix_idx
+ON instruments (UPPER(symbol));
+
+CREATE INDEX instruments_active_symbol_idx
+ON instruments (is_active, UPPER(symbol));
+Query de pesquisa simples
+Para um MVP, pesquisar por prefixo de ticker e nome já é suficiente:
+
+sql
+
+
+SELECT
+    id,
+    symbol,
+    name,
+    instrument_type,
+    exchange,
+    currency
+FROM instruments
+WHERE is_active = TRUE
+  AND (
+      UPPER(symbol) LIKE UPPER($1) || '%'
+      OR UPPER(name) LIKE '%' || UPPER($1) || '%'
+  )
+ORDER BY
+    CASE
+        WHEN UPPER(symbol) = UPPER($1) THEN 0
+        WHEN UPPER(symbol) LIKE UPPER($1) || '%' THEN 1
+        WHEN UPPER(name) LIKE UPPER($1) || '%' THEN 2
+        ELSE 3
+    END,
+    symbol
+LIMIT $2;
+Se $1 = 'aap', devolve algo como:
+
+text
+
+
+AAPL   Apple Inc.                    Equity · NASDAQ
+AAP    Advance Auto Parts             Equity · NYSE
+AAPD   Direxion Daily AAPL Bear 1X    ETF · NASDAQ
+Endpoint
+text
+
+
+GET /api/instruments/search?q=aap&limit=12
+Resposta:
+
+json
+
+
+{
+  "results": [
+    {
+      "id": 1,
+      "symbol": "AAPL",
+      "name": "Apple Inc.",
+      "instrument_type": "equity",
+      "exchange": "NASDAQ",
+      "currency": "USD"
+    }
+  ]
+}
+No Leptos:
+
+esperas 200 ms depois da última tecla;
+só procuras depois de 2 caracteres;
+pedes no máximo 10–12 resultados;
+guardas resultados recentes em memória;
+mostras a watchlist e os recentes antes de começar a escrever.
+Como encher a tabela
+Tens três opções, por ordem de maturidade:
+
+1. MVP: seed manual
+Começa com os ativos que queres suportar:
+
+sql
+
+
+INSERT INTO instruments
+(symbol, name, instrument_type, exchange, currency)
+VALUES
+('AAPL', 'Apple Inc.', 'equity', 'NASDAQ', 'USD'),
+('MSFT', 'Microsoft Corporation', 'equity', 'NASDAQ', 'USD'),
+('NVDA', 'NVIDIA Corporation', 'equity', 'NASDAQ', 'USD'),
+('SPX', 'S&P 500 Index', 'index', 'CBOE', 'USD'),
+('SPY', 'SPDR S&P 500 ETF Trust', 'etf', 'NYSE Arca', 'USD');
+2. Import periódico do fornecedor
+Um job diário obtém o catálogo do teu provider e faz upsert:
+
+text
+
+
+Data provider → job de sincronização → instruments
+Assim tens tickers novos, alterações de nome e ativos delisted marcados como inativos.
+
+3. Combinação
+Para começar, faz seed com:
+
+principais ações US;
+principais ETFs;
+índices;
+os ativos da tua watchlist;
+ativos com opções disponíveis.
+Depois adicionas sincronização automática.
+
+Nota importante sobre opções
+Não coloques cada contrato de opção nesta tabela de pesquisa principal.
+
+Por exemplo, isto não deve aparecer ao pesquisar AAPL:
+
+text
+
+
+AAPL 2026-06-19 200 Call
+AAPL 2026-06-19 210 Call
+AAPL 2026-06-19 220 Put
+A pesquisa principal serve para selecionar o ativo subjacente:
+
+text
+
+
+AAPL → Apple Inc.
+Depois, dentro de:
+
+text
+
+
+AAPL → Options
+carregas expirações, strikes, calls e puts desse ativo.
+
+Portanto, sim: uma tabela no backend é a solução correta. É leve, rápida, escalável e deixa a UI muito mais limpa.
+
+isto dee da r um trabalho imenso, ja nao digo em termos da chamada do leptos ao backend, mas construir todo esta estrutura de movimento entre topicos que esta excelente. seria possivivel construires uma especie de arvore que mostra os percursos e os ecrans tipicos  ? Assim é mais fácil construir. O botoes  ou tabs devem ter icons ou só texto ? Vou usar plotly.rs . recomendas ?
+Sim — a parte difícil não é o fetch entre Leptos e backend. É definir uma estrutura coerente de:
+
+ecrãs;
+navegação;
+estado do ativo selecionado;
+tabs disponíveis;
+percursos do utilizador.
+Se desenhares isso antes, a implementação fica muito mais mecânica.
+
+1. Árvore geral da aplicação
+text
+
+
+APP
+│
+├── Header global
+│   ├── Logo / nome da plataforma
+│   ├── Pesquisa global de ativos
+│   │   ├── Resultados recentes
+│   │   ├── Watchlist / favoritos
+│   │   └── Resultados da pesquisa
+│   │
+│   ├── Estado do mercado
+│   │   ├── OPEN
+│   │   ├── PRE-MARKET
+│   │   ├── CLOSED
+│   │   └── AFTER HOURS
+│   │
+│   └── Perfil / definições
+│
+├── Sidebar fixa
+│   ├── Navegação principal
+│   │   ├── Dashboard
+│   │   ├── Markets
+│   │   ├── Assets
+│   │   ├── Options
+│   │   ├── Volatility
+│   │   ├── GEX
+│   │   ├── Simulations
+│   │   └── Portfolio
+│   │
+│   ├── Watchlist
+│   │   ├── SPX
+│   │   ├── AAPL
+│   │   ├── NVDA
+│   │   ├── TSLA
+│   │   └── + Add asset
+│   │
+│   └── Sidebar footer
+│       ├── Settings
+│       └── Theme / ajuda
+│
+└── Área de conteúdo principal
+    │
+    ├── Dashboard
+    ├── Markets
+    ├── Asset Workspace
+    ├── Portfolio
+    └── Settings
+2. Rotas / URLs recomendadas
+Mesmo numa aplicação CSR, deves usar rotas. Isto permite:
+
+bookmarks;
+partilhar análises;
+atualizar a página sem perder o contexto;
+usar o botão Back/Forward do browser.
+text
+
+
+/                                   → Dashboard
+/markets                            → Markets overview
+/assets                             → Assets screener / pesquisa
+/assets/AAPL                        → AAPL Overview
+/assets/AAPL/chart                  → AAPL Chart
+/assets/AAPL/options                → AAPL Options
+/assets/AAPL/volatility             → AAPL Volatility
+/assets/AAPL/gex                    → AAPL GEX
+/assets/AAPL/simulation             → AAPL Simulation
+/assets/AAPL/news                   → AAPL News
+/assets/SPX/gex                     → SPX GEX
+/portfolio                          → Portfolio
+/settings                           → Settings
+Uma regra simples:
+
+text
+
+
+/asset/{symbol}/{tab}
+Exemplo:
+
+text
+
+
+/assets/AAPL/options
+A rota diz duas coisas:
+
+text
+
+
+Ativo selecionado: AAPL
+Ecrã ativo: Options
+3. Árvore do Asset Workspace
+Este será o coração da aplicação.
+
+text
+
+
+Asset Workspace
+│
+├── Asset Header
+│   ├── Símbolo: AAPL
+│   ├── Nome: Apple Inc.
+│   ├── Tipo: Equity
+│   ├── Mercado: NASDAQ
+│   ├── Preço atual
+│   ├── Variação diária
+│   ├── Volume
+│   ├── IV Rank
+│   ├── 52W Range
+│   ├── Adicionar/remover da watchlist
+│   └── Menu "More"
+│
+├── Asset Tabs
+│   ├── Overview
+│   ├── Chart
+│   ├── Options
+│   ├── Volatility
+│   ├── GEX
+│   ├── Simulation
+│   ├── News
+│   └── Holdings              ← apenas ETFs
+│
+└── Conteúdo da tab selecionada
+A tabs não precisam de ser exatamente iguais para todos os instrumentos.
+
+4. Tabs por tipo de ativo
+Equity com opções: AAPL, NVDA, TSLA
+text
+
+
+Overview | Chart | Options | Volatility | GEX | Simulation | News
+Índice com opções: SPX, NDX
+text
+
+
+Overview | Chart | Options | Volatility | GEX | Simulation | News
+ETF com opções: SPY, QQQ, IWM
+text
+
+
+Overview | Chart | Holdings | Options | Volatility | GEX | Simulation | News
+Ação sem opções
+text
+
+
+Overview | Chart | Simulation | News
+Ou podes mostrar as tabs avançadas desativadas:
+
+text
+
+
+Overview | Chart | Options 🔒 | Volatility 🔒 | GEX 🔒 | News
+Mas eu recomendo, inicialmente, escondê-las. Uma interface vazia ou desativada pode parecer incompleta.
+
+Crypto, caso adiciones mais tarde
+text
+
+
+Overview | Chart | Derivatives | Volatility | Simulation | News
+5. Conteúdo típico de cada ecrã
+A. Dashboard
+É o ecrã inicial. Não está preso a um único ativo.
+
+text
+
+
+Dashboard
+│
+├── Market snapshot
+│   ├── SPX
+│   ├── NDX
+│   ├── VIX
+│   ├── DXY
+│   ├── US 10Y yield
+│   └── BTC / ETH, se suportares crypto
+│
+├── Watchlist performance
+│   └── Tabela de ativos com preço e variação
+│
+├── Market movers
+│   ├── Top gainers
+│   ├── Top losers
+│   └── Unusual volume
+│
+├── Volatility snapshot
+│   ├── VIX
+│   ├── IV Rank dos favoritos
+│   └── maiores alterações de IV
+│
+├── Upcoming events
+│   ├── Earnings
+│   ├── FOMC
+│   ├── CPI
+│   └── Expirações importantes
+│
+└── Latest news
+B. Asset → Overview
+text
+
+
+AAPL · Overview
+│
+├── Price Chart
+│   ├── 1D / 5D / 1M / 3M / 1Y / Max
+│   └── Volume
+│
+├── Key Metrics
+│   ├── Market Cap
+│   ├── P/E
+│   ├── EPS
+│   ├── Beta
+│   ├── Dividend Yield
+│   ├── IV Rank
+│   └── IV Percentile
+│
+├── Performance
+│   ├── Day
+│   ├── Week
+│   ├── Month
+│   ├── Year-to-date
+│   └── 1 year
+│
+├── Earnings
+│   ├── Próxima data
+│   ├── Estimativa EPS
+│   ├── Estimativa de receita
+│   └── Histórico de earnings
+│
+├── Options Snapshot
+│   ├── Put/Call Ratio
+│   ├── ATM IV
+│   ├── Total OI
+│   └── Expirações relevantes
+│
+└── Latest News
+C. Asset → Chart
+Este ecrã deve focar-se no gráfico de preço e indicadores.
+
+text
+
+
+AAPL · Chart
+│
+├── Chart toolbar
+│   ├── Timeframe: 1D / 5D / 1M / 3M / 1Y / Max
+│   ├── Interval: 1m / 5m / 1h / 1D / 1W
+│   ├── Tipo: Candles / Line / Area
+│   ├── Indicators
+│   │   ├── SMA
+│   │   ├── EMA
+│   │   ├── VWAP
+│   │   ├── RSI
+│   │   ├── MACD
+│   │   └── Bollinger Bands
+│   └── Reset chart
+│
+├── Main price chart
+│   ├── Candlesticks
+│   ├── Overlays
+│   ├── Earnings markers
+│   └── Important GEX levels, opcionalmente
+│
+├── Volume chart
+│
+└── Indicator panels
+    ├── RSI
+    └── MACD
+D. Asset → Options
+text
+
+
+AAPL · Options
+│
+├── Options controls
+│   ├── Expiration selector
+│   ├── DTE selector
+│   ├── Calls / Puts / Both
+│   ├── Mostrar strikes: ±5 / ±10 / ±20 / All
+│   └── Métrica destacada: IV / Delta / OI / Volume
+│
+├── Options Chain
+│   │
+│   ├── Calls
+│   │   ├── Last
+│   │   ├── Change
+│   │   ├── Bid
+│   │   ├── Ask
+│   │   ├── IV
+│   │   ├── Delta
+│   │   ├── Gamma
+│   │   ├── Theta
+│   │   ├── Vega
+│   │   ├── Volume
+│   │   └── Open Interest
+│   │
+│   ├── Strike
+│   │   └── ATM strike destacado
+│   │
+│   └── Puts
+│       └── mesmas métricas
+│
+├── Contract Detail Drawer
+│   ├── Contrato escolhido
+│   ├── Greeks
+│   ├── Histórico de IV
+│   ├── Bid / Ask
+│   └── Adicionar à simulação
+│
+└── Bottom analytics
+    ├── IV Smile
+    ├── OI by Strike
+    ├── Volume by Strike
+    └── Put/Call ratio
+Importante: no MVP, não metas todas as métricas possíveis na tabela. Começa com:
+
+text
+
+
+Calls: Last | IV | Delta | OI | Volume
+Strike
+Puts: Last | IV | Delta | OI | Volume
+O resto pode ficar num drawer/modal de detalhe.
+
+E. Asset → Volatility
+text
+
+
+AAPL · Volatility
+│
+├── Controls
+│   ├── Expirations selecionadas
+│   ├── Métrica: IV / Skew / IV Change
+│   ├── Delta ou Moneyness
+│   └── Período histórico
+│
+├── Volatility Summary Cards
+│   ├── ATM IV
+│   ├── IV Rank
+│   ├── IV Percentile
+│   ├── 30D IV
+│   └── Realized Volatility
+│
+├── Main view switcher
+│   ├── IV Smile
+│   ├── Term Structure
+│   ├── IV Surface
+│   └── Heatmap
+│
+├── IV Smile
+│   └── IV por strike/moneyness para várias expirações
+│
+├── Term Structure
+│   └── ATM IV por DTE
+│
+├── IV Surface
+│   └── Moneyness × DTE × IV
+│
+└── Historical IV / Realized Volatility
+F. Asset → GEX
+text
+
+
+AAPL · Gamma Exposure
+│
+├── GEX controls
+│   ├── Expiração
+│   ├── Todas as expirações / expiry específica
+│   ├── Mostrar calls / puts / net
+│   └── Modelo de cálculo
+│
+├── Key levels
+│   ├── Spot Price
+│   ├── Gamma Flip
+│   ├── Call Wall
+│   ├── Put Wall
+│   └── Max GEX
+│
+├── Main GEX chart
+│   └── Net GEX por strike
+│
+├── Optional price chart overlay
+│   ├── Spot
+│   ├── Gamma Flip
+│   ├── Call Wall
+│   └── Put Wall
+│
+└── Expiry breakdown
+    ├── 0DTE
+    ├── Weekly
+    ├── Monthly
+    └── All expirations
+Este é um ótimo ecrã para Plotly, porque barras horizontais, linhas de níveis e tooltips funcionam muito bem.
+
+G. Asset → Simulation
+text
+
+
+AAPL · Simulation
+│
+├── Strategy / Position Builder
+│   ├── Single option
+│   ├── Vertical spread
+│   ├── Iron condor
+│   ├── Straddle
+│   ├── Strangle
+│   ├── Covered call
+│   └── Custom strategy
+│
+├── Positions
+│   ├── AAPL 200 Call
+│   ├── AAPL 220 Call
+│   └── + Add leg
+│
+├── Main scenario controls
+│   ├── Spot Price slider
+│   ├── IV slider
+│   └── Time slider / DTE
+│
+├── Advanced settings drawer
+│   ├── Interest rate
+│   ├── Dividend yield
+│   ├── Model: Black-Scholes / Binomial
+│   └── Price range
+│
+├── Output charts
+│   ├── P&L chart at expiration
+│   ├── P&L heatmap: Spot × Time
+│   ├── P&L heatmap: Spot × IV
+│   ├── Greeks exposure
+│   └── Monte Carlo distribution
+│
+└── Trade summary
+    ├── Max profit
+    ├── Max loss
+    ├── Breakevens
+    ├── Probability of profit
+    └── Net debit / credit
+H. Asset → News
+text
+
+
+AAPL · News
+│
+├── Filters
+│   ├── All
+│   ├── Company
+│   ├── Earnings
+│   ├── Analysts
+│   └── Options / volatility
+│
+├── News feed
+│   ├── Título
+│   ├── Fonte
+│   ├── Data/hora
+│   ├── Resumo curto
+│   └── Sentiment, opcional
+│
+└── Related assets
+    ├── SPY
+    ├── QQQ
+    └── XLK
+6. Percursos típicos do utilizador
+Isto ajuda a perceber como tudo se liga.
+
+Percurso 1: pesquisar uma ação
+text
+
+
+Dashboard
+  ↓
+Pesquisa global
+  ↓
+Escreve "AAPL"
+  ↓
+Seleciona Apple Inc.
+  ↓
+/assets/AAPL
+  ↓
+AAPL Overview
+Percurso 2: analisar opções
+text
+
+
+AAPL Overview
+  ↓
+Clica em "Options"
+  ↓
+/assets/AAPL/options
+  ↓
+Escolhe expiração
+  ↓
+Clica num contrato
+  ↓
+Abre contract detail drawer
+  ↓
+"Add to Simulation"
+  ↓
+/assets/AAPL/simulation
+Percurso 3: analisar volatilidade
+text
+
+
+Pesquisa "NVDA"
+  ↓
+/assets/NVDA
+  ↓
+Volatility
+  ↓
+IV Smile
+  ↓
+Term Structure
+  ↓
+IV Surface
+Percurso 4: GEX de um índice
+text
+
+
+Watchlist
+  ↓
+SPX
+  ↓
+/assets/SPX
+  ↓
+GEX
+  ↓
+Selecionar "All expirations"
+  ↓
+Ver Gamma Flip / Call Wall / Put Wall
+Percurso 5: comparar o mesmo tipo de análise entre ativos
+Este é muito importante e justifica preservar a tab atual.
+
+text
+
+
+/assets/SPX/gex
+  ↓
+Clica em AAPL na watchlist
+  ↓
+/assets/AAPL/gex
+  ↓
+Clica em NVDA na watchlist
+  ↓
+/assets/NVDA/gex
+Ou seja: mudas o ativo, mas continuas no contexto GEX.
+
+7. Estrutura de componentes Leptos
+Não tens de construir tudo de uma vez. Mas a árvore pode ser algo assim:
+
+text
+
+
+App
+│
+├── AppShell
+│   ├── TopHeader
+│   │   ├── GlobalSearch
+│   │   ├── MarketStatus
+│   │   └── UserMenu
+│   │
+│   ├── Sidebar
+│   │   ├── PrimaryNavigation
+│   │   └── Watchlist
+│   │
+│   └── MainContent
+│       └── Router
+│           ├── DashboardPage
+│           ├── MarketsPage
+│           ├── AssetLayout
+│           │   ├── AssetHeader
+│           │   ├── AssetTabs
+│           │   └── AssetTabContent
+│           │       ├── OverviewPage
+│           │       ├── ChartPage
+│           │       ├── OptionsPage
+│           │       ├── VolatilityPage
+│           │       ├── GexPage
+│           │       ├── SimulationPage
+│           │       └── NewsPage
+│           │
+│           ├── PortfolioPage
+│           └── SettingsPage
+O componente mais importante é:
+
+text
+
+
+AssetLayout
+Ele recebe o ativo da URL, carrega os dados comuns e mantém o “frame” estável:
+
+text
+
+
+/assets/AAPL/options
+         │      │
+         │      └── tab atual
+         └───────── ativo atual
+Pseudoestrutura:
+
+rust
+
+
+#[component]
+pub fn AssetLayout() -> impl IntoView {
+    // Lê symbol da rota: AAPL
+    // Carrega resumo do ativo
+    // Decide quais tabs estão disponíveis
+    // Renderiza AssetHeader + AssetTabs + nested route
+}
+8. Botões e tabs: ícones ou texto?
+Resposta curta
+Tabs principais do ativo: texto, sem ícone.
+Navegação da sidebar: ícone + texto.
+Botões de ação pequenos: ícone, com tooltip.
+Ações importantes: ícone + texto.
+Tabs: usa texto
+Para isto:
+
+text
+
+
+Overview | Chart | Options | Volatility | GEX | Simulation | News
+usa texto. Estes nomes são analíticos e precisam de ser explícitos.
+
+Evita uma tab apenas com ícones:
+
+text
+
+
+[ ◫ ] [ ╱ ] [ ⛓ ] [ ∿ ] [ γ ] [ ⌁ ] [ ◉ ]
+Problemas:
+
+ninguém sabe imediatamente o que cada ícone significa;
+“Volatility”, “GEX” e “Simulation” não têm ícones universais;
+torna a app mais bonita, mas menos eficiente;
+obriga o utilizador a depender de tooltips.
+Uma exceção possível:
+
+text
+
+
+[ Overview ] [ Chart ] [ Options ] [ Volatility ] [ GEX ] [ Simulation ] [ News ]
+Podes usar um ícone muito discreto antes do texto, mas não é necessário.
+
+Sidebar: usa ícone + texto
+Aqui os ícones ajudam muito na leitura vertical.
+
+text
+
+
+⌂  Dashboard
+◫  Markets
+⌕  Assets
+◈  Options
+∿  Volatility
+γ  GEX
+▣  Simulations
+▤  Portfolio
+Mas usa uma biblioteca de ícones consistente, por exemplo:
+
+lucide-icons;
+heroicons;
+tabler-icons.
+Eu escolheria algo tipo Lucide porque é minimalista e funciona bem numa interface financeira.
+
+Exemplo conceptual:
+
+text
+
+
+LayoutDashboard  Dashboard
+ChartNoAxesCombined  Markets
+Search              Assets
+BadgeDollarSign     Options
+Waves               Volatility
+Sigma               GEX
+ChartSpline         Simulations
+BriefcaseBusiness   Portfolio
+Mesmo com ícone, mantém sempre o texto na sidebar desktop.
+
+Botões de ação
+Ícone apenas
+Bom para ações muito conhecidas e frequentes:
+
+text
+
+
+[ ☆ ]  adicionar à watchlist
+[ ↻ ]  refresh
+[ ⚙ ]  configurações
+[ ⛶ ]  fullscreen chart
+[ ⤓ ]  exportar CSV
+Mas inclui title/tooltip e aria-label.
+
+Ícone + texto
+Melhor para ações relevantes:
+
+text
+
+
+[ ☆ Add to Watchlist ]
+[ + Add Position ]
+[ ⤓ Export Data ]
+[ ⚙ Advanced Settings ]
+9. Recomendo Plotly.rs?
+Sim, para este projeto, recomendo Plotly.rs, especialmente para um MVP e para análise financeira.
+
+É adequado para:
+
+gráficos de preço;
+candlesticks;
+volume;
+linhas e séries temporais;
+IV smiles;
+term structure;
+heatmaps;
+GEX por strike;
+gráficos de distribuição;
+superfícies 3D de volatilidade;
+hover tooltips densos;
+zoom, pan e seleção.
+Tens vários gráficos que seriam muito trabalhosos de construir manualmente:
+
+text
+
+
+Options Chain analytics
+Volatility Surface 3D
+GEX horizontal bars
+P&L heatmaps
+Monte Carlo histograms
+Candlestick charts
+Plotly resolve muito disso.
+
+Onde Plotly.rs é especialmente forte
+text
+
+
+Chart                         Plotly.rs
+────────────────────────────────────────────────────────
+Candlestick + volume          Muito bom
+IV Smile                      Muito bom
+Term Structure                Muito bom
+GEX por strike                Muito bom
+Heatmap de P&L                Muito bom
+Histograma Monte Carlo        Muito bom
+Surface 3D de IV              Excelente
+Scatter / line charts         Excelente
+Tooltips financeiros          Muito bom
+Zoom e pan                    Já incluído
+Export PNG                    Já incluído
+Atenção a três coisas
+1. Peso do bundle
+Plotly pode ser pesado, sobretudo com 3D.
+
+Para uma app interna, pessoal ou orientada a desktop, normalmente não é um problema relevante.
+
+Para produção pública e mobile-first, vais querer mais tarde otimizar:
+
+carregar Plotly apenas nas páginas que precisam;
+evitar renderizar muitos gráficos simultaneamente;
+destruir gráficos quando sais da página;
+limitar pontos em séries intraday;
+agregar dados históricos.
+2. Não recriar o gráfico a cada alteração pequena
+Em Leptos, evita fazer isto:
+
+text
+
+
+slider muda
+→ componente inteiro renderiza
+→ destrói Plotly
+→ cria Plotly de novo
+É melhor manter uma referência ao container e atualizar os dados/layout do gráfico.
+
+Conceito:
+
+text
+
+
+Criar gráfico uma vez
+        ↓
+Mudança de dados
+        ↓
+Plotly.react / update
+        ↓
+Mudança estrutural grande
+        ↓
+Recriar se necessário
+Para sliders no simulador, isto será importante.
+
+3. Tabelas não são responsabilidade do Plotly
+A Options Chain deve ser uma tabela HTML normal, virtualizada se necessário:
+
+text
+
+
+Leptos + HTML table/grid
+Plotly é para visualização, não para a chain.
+
+10. Ordem realista de construção
+Não tentes começar pelo Volatility Surface ou pelo simulador.
+
+Fase 1 — Estrutura e navegação
+text
+
+
+1. AppShell
+2. Header
+3. Sidebar
+4. Watchlist
+5. Router
+6. AssetLayout
+7. AssetHeader
+8. AssetTabs
+9. Overview com dados mock
+10. Chart com dados mock
+No fim desta fase já tens:
+
+text
+
+
+/assets/AAPL
+/assets/AAPL/chart
+/assets/SPX
+/assets/SPX/chart
+E podes clicar na watchlist, pesquisar um ticker e navegar corretamente.
+
+Fase 2 — Dados reais básicos
+text
+
+
+1. Tabela instruments no backend
+2. Endpoint de search
+3. Endpoint asset summary
+4. Endpoint de preço / candles
+5. Global Search com debounce
+6. Watchlist persistida
+7. Candlestick chart Plotly
+Fase 3 — Options básico
+text
+
+
+1. Expirações
+2. Options chain
+3. Destaque ATM
+4. IV Smile
+5. Open Interest por strike
+6. Contract detail drawer
+Fase 4 — Volatility e GEX
+text
+
+
+1. Term Structure
+2. IV Smile melhorado
+3. GEX bar chart
+4. Gamma Flip / Call Wall / Put Wall
+5. IV heatmap
+6. IV Surface 3D
+Fase 5 — Simulation
+text
+
+
+1. Position builder
+2. P&L at expiration
+3. Spot / IV / Time sliders
+4. P&L heatmap
+5. Greeks
+6. Monte Carlo
+A ideia principal é: primeiro constróis o esqueleto navegável, mesmo que tenha dados falsos. Quando a navegação, rotas e ecrãs estiverem sólidos, cada módulo financeiro passa a ser “só” mais uma página dentro de uma arquitetura já estável.
+
+o meu backend esta desenhado segundo uma arquitectura ports and adapeters (hexagonal) Ficaria bem construir um novo hegagono para o rontend ? faz sentido ?
+Faz sentido aplicar os princípios de arquitetura hexagonal ao frontend, mas eu não tentaria copiar o backend de forma rígida nem criar “um hexágono por ecrã”.
+
+A ideia correta seria:
+
+text
+
+
+Backend hexagonal
+        ↕ HTTP / JSON / WebSocket
+Frontend com arquitetura orientada a features
+e com ports/adapters nas fronteiras importantes
+Ou seja: o frontend pode ser outro hexágono, mas com responsabilidades diferentes.
+
+No backend, o centro é a lógica de negócio e os casos de uso.
+No frontend, o centro é sobretudo:
+
+estado da UI;
+navegação;
+contexto do ativo selecionado;
+ações do utilizador;
+modelos de apresentação;
+orquestração de chamadas ao backend.
+Recomendação prática
+Eu faria algo que podes chamar de:
+
+text
+
+
+Frontend Hexagonal / Clean Architecture leve
+Não uma arquitetura excessivamente “enterprise”.
+
+text
+
+
+┌─────────────────────────────────────────────────────────┐
+│                    Leptos UI Adapters                   │
+│                                                         │
+│ Header · Sidebar · Asset Tabs · Options Table · Charts  │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           │ chama casos de uso
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                  Application / Use Cases                 │
+│                                                         │
+│ SearchInstruments                                       │
+│ LoadAssetWorkspace                                      │
+│ LoadOptionsChain                                        │
+│ LoadVolatilityAnalysis                                  │
+│ LoadGexAnalysis                                         │
+│ RunSimulation                                           │
+│ ManageWatchlist                                         │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           │ depende de traits/ports
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Frontend Ports                        │
+│                                                         │
+│ InstrumentSearchPort                                    │
+│ AssetMarketDataPort                                     │
+│ OptionsDataPort                                         │
+│ WatchlistPort                                           │
+│ ChartRendererPort            opcional                   │
+│ BrowserStoragePort           opcional                   │
+└──────────────────────────┬──────────────────────────────┘
+                           │
+                           │ implementações concretas
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                    Frontend Adapters                     │
+│                                                         │
+│ HttpMarketDataAdapter       → REST backend               │
+│ WebSocketQuoteAdapter       → preços live                │
+│ LocalStorageWatchlistAdapter→ browser storage            │
+│ PlotlyChartAdapter          → plotly.js / plotly.rs      │
+└─────────────────────────────────────────────────────────┘
+O que isto te dá
+Se a UI chama diretamente URLs por todo o lado:
+
+rust
+
+
+fetch("/api/assets/AAPL/options")
+vais acabar com chamadas HTTP espalhadas por:
+
+text
+
+
+AssetHeader
+OptionsPage
+VolatilityPage
+GexPage
+SimulationPage
+Watchlist
+GlobalSearch
+Funciona inicialmente, mas torna-se difícil de manter.
+
+Com ports/adapters, a página depende de uma abstração:
+
+rust
+
+
+trait OptionsDataPort {
+    async fn get_chain(
+        &self,
+        symbol: &str,
+        expiration: Option<NaiveDate>,
+    ) -> Result<OptionsChain, AppError>;
+}
+A implementação HTTP fica isolada:
+
+rust
+
+
+pub struct HttpOptionsDataAdapter {
+    base_url: String,
+}
+
+impl OptionsDataPort for HttpOptionsDataAdapter {
+    async fn get_chain(
+        &self,
+        symbol: &str,
+        expiration: Option<NaiveDate>,
+    ) -> Result<OptionsChain, AppError> {
+        // GET /api/assets/{symbol}/options?expiration=...
+        // Converter JSON DTO -> modelo de frontend
+    }
+}
+E o componente Leptos não precisa de saber se os dados vêm de:
+
+REST;
+GraphQL;
+WebSocket;
+cache local;
+mocks;
+fixtures para desenvolvimento.
+Mas não exageres nas abstrações
+Não cries traits para tudo.
+
+Por exemplo, isto é demasiado:
+
+text
+
+
+ButtonPort
+TabPort
+SidebarPort
+TooltipPort
+TablePort
+CssPort
+Esses elementos são detalhes normais da UI. Não são fronteiras arquiteturais relevantes.
+
+Cria ports onde existe uma dependência externa, volátil ou substituível.
+
+Bons candidatos a ports
+text
+
+
+InstrumentSearchPort
+AssetRepositoryPort
+MarketDataPort
+OptionsAnalyticsPort
+VolatilityAnalyticsPort
+GexAnalyticsPort
+SimulationPort
+WatchlistPort
+UserPreferencesPort
+RealtimeQuotesPort
+BrowserStoragePort
+Maus candidatos a ports
+text
+
+
+AssetTabsPort
+HeaderPort
+ButtonPort
+ModalPort
+TablePort
+CardPort
+Esses devem apenas ser componentes Leptos reutilizáveis.
+
+Estrutura de diretórios recomendada
+Eu evitaria uma organização puramente técnica assim:
+
+text
+
+
+components/
+services/
+api/
+models/
+utils/
+Com o tempo, torna-se difícil perceber a que funcionalidade cada ficheiro pertence.
+
+Para esta aplicação, usa uma estrutura por feature, mantendo camadas dentro de cada feature.
+
+text
+
+
+src/
+├── app/
+│   ├── mod.rs
+│   ├── router.rs
+│   ├── shell.rs
+│   └── routes.rs
+│
+├── shared/
+│   ├── domain/
+│   │   ├── instrument.rs
+│   │   ├── money.rs
+│   │   ├── market_status.rs
+│   │   └── errors.rs
+│   │
+│   ├── ui/
+│   │   ├── button.rs
+│   │   ├── card.rs
+│   │   ├── data_table.rs
+│   │   ├── loading_state.rs
+│   │   ├── empty_state.rs
+│   │   └── icons.rs
+│   │
+│   └── infrastructure/
+│       ├── http_client.rs
+│       ├── websocket_client.rs
+│       ├── local_storage.rs
+│       └── plotly.rs
+│
+├── features/
+│   ├── dashboard/
+│   │   ├── presentation/
+│   │   │   ├── dashboard_page.rs
+│   │   │   ├── market_snapshot.rs
+│   │   │   └── movers_table.rs
+│   │   ├── application/
+│   │   │   └── load_dashboard.rs
+│   │   ├── domain/
+│   │   │   └── dashboard_models.rs
+│   │   └── ports.rs
+│   │
+│   ├── instruments/
+│   │   ├── presentation/
+│   │   │   ├── global_search.rs
+│   │   │   └── search_results.rs
+│   │   ├── application/
+│   │   │   └── search_instruments.rs
+│   │   ├── domain/
+│   │   │   └── instrument.rs
+│   │   ├── ports.rs
+│   │   └── adapters/
+│   │       └── http_instrument_search.rs
+│   │
+│   ├── asset_workspace/
+│   │   ├── presentation/
+│   │   │   ├── asset_layout.rs
+│   │   │   ├── asset_header.rs
+│   │   │   └── asset_tabs.rs
+│   │   ├── application/
+│   │   │   └── load_asset_summary.rs
+│   │   ├── domain/
+│   │   │   └── asset_summary.rs
+│   │   ├── ports.rs
+│   │   └── adapters/
+│   │       └── http_asset_repository.rs
+│   │
+│   ├── options/
+│   │   ├── presentation/
+│   │   │   ├── options_page.rs
+│   │   │   ├── options_chain.rs
+│   │   │   ├── expiration_selector.rs
+│   │   │   └── contract_drawer.rs
+│   │   ├── application/
+│   │   │   ├── load_options_chain.rs
+│   │   │   └── select_contract.rs
+│   │   ├── domain/
+│   │   │   ├── option_contract.rs
+│   │   │   ├── options_chain.rs
+│   │   │   └── greeks.rs
+│   │   ├── ports.rs
+│   │   └── adapters/
+│   │       └── http_options_adapter.rs
+│   │
+│   ├── volatility/
+│   │   ├── presentation/
+│   │   ├── application/
+│   │   ├── domain/
+│   │   ├── ports.rs
+│   │   └── adapters/
+│   │
+│   ├── gex/
+│   │   ├── presentation/
+│   │   ├── application/
+│   │   ├── domain/
+│   │   ├── ports.rs
+│   │   └── adapters/
+│   │
+│   ├── simulation/
+│   │   ├── presentation/
+│   │   ├── application/
+│   │   ├── domain/
+│   │   ├── ports.rs
+│   │   └── adapters/
+│   │
+│   └── watchlist/
+│       ├── presentation/
+│       ├── application/
+│       ├── domain/
+│       ├── ports.rs
+│       └── adapters/
+│
+└── main.rs
+Isto parece muito no início, mas podes criar as pastas apenas quando a feature nasce.
+
+Exemplo: a feature de pesquisa
+A pesquisa global é uma boa feature para aplicar esta estrutura.
+
+text
+
+
+GlobalSearch Leptos component
+        │
+        ▼
+SearchInstruments use case
+        │
+        ▼
+InstrumentSearchPort
+        │
+        ▼
+HttpInstrumentSearchAdapter
+        │
+        ▼
+GET /api/instruments/search?q=AAPL
+Port
+rust
+
+
+#[async_trait::async_trait(?Send)]
+pub trait InstrumentSearchPort {
+    async fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Instrument>, AppError>;
+}
+Use case
+rust
+
+
+pub struct SearchInstruments<P> {
+    repository: P,
+}
+
+impl<P> SearchInstruments<P>
+where
+    P: InstrumentSearchPort,
+{
+    pub async fn execute(
+        &self,
+        query: String,
+    ) -> Result<Vec<Instrument>, AppError> {
+        let normalized = query.trim().to_uppercase();
+
+        if normalized.len() < 2 {
+            return Ok(vec![]);
+        }
+
+        self.repository.search(&normalized, 10).await
+    }
+}
+Aqui tens regras específicas da experiência de pesquisa:
+
+menos de dois caracteres não chama o backend;
+máximo de dez resultados;
+normalização do texto;
+mais tarde, podes fundir favoritos e recentes.
+Adapter HTTP
+rust
+
+
+pub struct HttpInstrumentSearchAdapter {
+    pub base_url: String,
+}
+
+#[async_trait::async_trait(?Send)]
+impl InstrumentSearchPort for HttpInstrumentSearchAdapter {
+    async fn search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<Instrument>, AppError> {
+        let url = format!(
+            "{}/api/instruments/search?q={}&limit={}",
+            self.base_url,
+            urlencoding::encode(query),
+            limit
+        );
+
+        // Fazer request com gloo-net ou reqwest WASM.
+        // Converter SearchResponseDto para Vec<Instrument>.
+        todo!()
+    }
+}
+UI Leptos
+O componente não deve saber detalhes da URL:
+
+rust
+
+
+#[component]
+pub fn GlobalSearch() -> impl IntoView {
+    // input signal
+    // debounce
+    // invoca SearchInstruments
+    // apresenta Loading / Error / Empty / Results
+    view! {
+        <div class="global-search">
+            // ...
+        </div>
+    }
+}
+Plotly.rs como adapter
+Plotly é uma dependência externa e é perfeitamente razoável tratá-lo como adapter.
+
+text
+
+
+GexPage / VolatilityPage / SimulationPage
+                │
+                ▼
+      modelo de gráfico da aplicação
+                │
+                ▼
+        PlotlyChartAdapter
+                │
+                ▼
+             Plotly.rs
+Por exemplo, a tua lógica de GEX produz um modelo independente de Plotly:
+
+rust
+
+
+pub struct GexChartModel {
+    pub strikes: Vec<f64>,
+    pub net_gex: Vec<f64>,
+    pub spot_price: f64,
+    pub gamma_flip: Option<f64>,
+    pub call_wall: Option<f64>,
+    pub put_wall: Option<f64>,
+}
+Depois o adapter converte isso em traces/layout Plotly.
+
+rust
+
+
+pub struct PlotlyGexChartAdapter;
+
+impl PlotlyGexChartAdapter {
+    pub fn render(
+        container_id: &str,
+        model: &GexChartModel,
+    ) {
+        // Converte GexChartModel para Bar traces + shapes + layout Plotly.
+    }
+}
+A vantagem é importante:
+
+a lógica de GEX não fica acoplada ao formato de plotly::Trace;
+podes testar o GexChartModel;
+se um dia trocares Plotly por ECharts, D3 ou Lightweight Charts, a lógica central fica;
+componentes Leptos não ficam cheios de detalhes de configuração do Plotly.
+Mas, de novo: não precisas de criar uma trait genérica ChartRendererPort logo no primeiro dia. Começa com um módulo adapter:
+
+text
+
+
+shared/infrastructure/plotly.rs
+Só extrai um port formal quando houver necessidade real de trocar, simular ou testar esse renderer.
+
+O contrato entre frontend e backend
+Aqui há uma regra muito importante:
+
+O frontend não deve depender diretamente dos modelos internos do domínio do backend.
+
+Mesmo que ambos estejam em Rust, evita isto como acoplamento normal:
+
+text
+
+
+backend::domain::OptionContract
+        ↑
+frontend importa diretamente
+Porque o backend pode evoluir por razões que não fazem sentido para a UI.
+
+Em vez disso, define contratos de API explícitos:
+
+text
+
+
+backend domain model
+        ↓
+backend response DTO
+        ↓ HTTP JSON
+frontend response DTO
+        ↓
+frontend view/domain model
+        ↓
+Leptos UI
+Exemplo:
+
+rust
+
+
+// Resposta do endpoint
+pub struct AssetSummaryResponse {
+    pub symbol: String,
+    pub name: String,
+    pub last_price: f64,
+    pub change_percent: f64,
+    pub volume: Option<u64>,
+    pub iv_rank: Option<f64>,
+}
+No frontend podes converter para algo mais adequado à apresentação:
+
+rust
+
+
+pub struct AssetHeaderViewModel {
+    pub symbol: String,
+    pub display_name: String,
+    pub formatted_price: String,
+    pub formatted_change: String,
+    pub change_direction: ChangeDirection,
+    pub formatted_volume: String,
+    pub iv_rank_label: String,
+}
+Isto evita colocar formatação financeira e decisões visuais dentro dos componentes.
+
+Um detalhe: frontend não deve recalcular tudo
+Há dois tipos de lógica:
+
+Deve ficar no backend
+preço de mercado;
+normalização dos dados dos providers;
+cálculo de IV;
+Greeks;
+GEX;
+Gamma Flip;
+Call Wall / Put Wall;
+agregações de option chain;
+Monte Carlo pesado;
+autorização e persistência.
+Pode ficar no frontend
+formato de preço ($213.45);
+cor positiva/negativa;
+seleção da expiração;
+estado de tabs;
+filtros;
+ordenação visual da tabela;
+debounce;
+guardar o último ticker visitado;
+converter dados em séries para gráficos;
+pequenos cálculos instantâneos de UI.
+Pode ser híbrido
+A simulação é o caso clássico:
+
+text
+
+
+Backend:
+- modelos complexos
+- dados de mercado
+- cálculo Monte Carlo
+- estratégia persistida
+
+Frontend:
+- sliders Spot / IV / Time
+- atualização visual
+- cálculos rápidos sobre uma grelha já recebida
+- apresentação do P&L
+Para o MVP, podes mandar os parâmetros ao backend a cada alteração com debounce. Mais tarde, para maior fluidez, podes trazer dados suficientes e calcular cenários leves no browser.
+
+Conclusão
+Sim, faz sentido teres um “hexágono frontend”, desde que seja pragmático.
+
+A formulação que eu usaria é:
+
+text
+
+
+Backend:
+Hexagonal architecture completa,
+centrada em domínio e casos de uso.
+
+Frontend:
+Feature-first architecture,
+com ports/adapters para backend HTTP, WebSocket,
+Local Storage e Plotly.
+A estrutura essencial seria:
+
+text
+
+
+Leptos Components
+       ↓
+Frontend Use Cases
+       ↓
+Ports (traits)
+       ↓
+HTTP / WebSocket / LocalStorage / Plotly Adapters
+Começa por aplicar isto a apenas três zonas:
+
+instruments — pesquisa global;
+watchlist — persistência e preço resumido;
+asset_workspace — carregar o resumo comum de AAPL/SPX/etc.
+Quando estas estiverem bem desenhadas, replicar o padrão para options, volatility, gex e simulation será natural, sem tornares o frontend burocrático demais.
+
+sim mas quais sao os objecos do 'core' do frontend ?
+No frontend, o core não é “o domínio financeiro inteiro”. Esse continua a viver principalmente no backend.
+
+O core do frontend representa aquilo que é estável na aplicação cliente e não deve depender diretamente de:
+
+Leptos;
+HTTP / gloo-net;
+WebSocket;
+LocalStorage;
+Plotly;
+DOM;
+rotas concretas;
+DTOs JSON do backend.
+Para a tua aplicação, eu dividiria o core frontend em quatro tipos de objetos.
+
+1. Objetos de contexto e navegação
+O objeto mais importante da tua UI é o contexto do ativo selecionado.
+
+rust
+
+
+pub struct AssetContext {
+    pub instrument: InstrumentRef,
+    pub active_tab: AssetTab,
+}
+rust
+
+
+pub struct InstrumentRef {
+    pub id: InstrumentId,
+    pub symbol: Symbol,
+    pub asset_type: AssetType,
+    pub exchange: Option<String>,
+}
+rust
+
+
+pub enum AssetTab {
+    Overview,
+    Chart,
+    Options,
+    Volatility,
+    Gex,
+    Simulation,
+    News,
+}
+Isto é core porque toda a aplicação se organiza em torno de:
+
+text
+
+
+ativo selecionado + tab ativa
+Por exemplo:
+
+text
+
+
+/assets/AAPL/options
+é convertido pelo adapter de routing para:
+
+rust
+
+
+AssetContext {
+    instrument: InstrumentRef {
+        id: InstrumentId("aapl-us-equity".into()),
+        symbol: Symbol("AAPL".into()),
+        asset_type: AssetType::Equity,
+        exchange: Some("NASDAQ".into()),
+    },
+    active_tab: AssetTab::Options,
+}
+O core não precisa de saber que veio de uma URL.
+
+2. Modelos de apresentação independentes da UI
+Estes são modelos próprios do frontend. Não são necessariamente iguais aos DTOs do backend.
+
+Por exemplo, o backend pode devolver números crus:
+
+json
+
+
+{
+  "symbol": "AAPL",
+  "last_price": 213.45,
+  "change": 2.17,
+  "change_percent": 1.03,
+  "volume": 42394120
+}
+O core do frontend pode transformar isso num modelo adequado à interface:
+
+rust
+
+
+pub struct AssetHeaderModel {
+    pub symbol: String,
+    pub name: String,
+
+    pub price: PriceDisplay,
+    pub daily_change: ChangeDisplay,
+
+    pub volume: MetricDisplay,
+    pub iv_rank: MetricDisplay,
+    pub range_52w: RangeDisplay,
+
+    pub market_state: MarketState,
+}
+rust
+
+
+pub struct PriceDisplay {
+    pub raw: f64,
+    pub formatted: String,
+}
+rust
+
+
+pub struct ChangeDisplay {
+    pub absolute: f64,
+    pub percentage: f64,
+    pub formatted: String,
+    pub direction: ChangeDirection,
+}
+rust
+
+
+pub enum ChangeDirection {
+    Positive,
+    Negative,
+    Neutral,
+}
+rust
+
+
+pub struct MetricDisplay {
+    pub value: Option<f64>,
+    pub formatted: String,
+}
+O componente Leptos fica simples:
+
+rust
+
+
+view! {
+    <span class=move || header.price_class()>
+        {header.price.formatted.clone()}
+    </span>
+}
+Em vez de ter formatação, regras de cor e tratamento de None espalhados por componentes.
+
+3. Estado e intenções da UI
+O core também inclui estados que representam decisões do utilizador.
+
+Por exemplo, na options chain:
+
+rust
+
+
+pub struct OptionsChainQuery {
+    pub symbol: Symbol,
+    pub expiration: Option<Expiration>,
+    pub strike_range: StrikeRange,
+    pub visible_columns: OptionColumns,
+}
+rust
+
+
+pub enum StrikeRange {
+    All,
+    AtTheMoney,
+    NearMoney { percent: f64 },
+    Custom { min: f64, max: f64 },
+}
+rust
+
+
+pub struct OptionColumns {
+    pub last: bool,
+    pub bid_ask: bool,
+    pub implied_volatility: bool,
+    pub delta: bool,
+    pub gamma: bool,
+    pub open_interest: bool,
+    pub volume: bool,
+}
+E o estado de seleção:
+
+rust
+
+
+pub struct SelectedOptionContract {
+    pub contract_id: OptionContractId,
+    pub side: OptionSide,
+}
+rust
+
+
+pub enum OptionSide {
+    Call,
+    Put,
+}
+Na simulação:
+
+rust
+
+
+pub struct SimulationScenario {
+    pub underlying: Symbol,
+    pub spot_price: f64,
+    pub implied_volatility: f64,
+    pub days_to_expiry: u32,
+    pub positions: Vec<SimulatedPosition>,
+}
+rust
+
+
+pub struct SimulatedPosition {
+    pub contract_id: OptionContractId,
+    pub quantity: i32,
+    pub entry_price: f64,
+}
+Estes objetos não são detalhes do Leptos. São o estado funcional da experiência de utilização.
+
+Os RwSignal, Signal, Resource e Action de Leptos são apenas a forma como esse estado é mantido reativo.
+
+Ou seja:
+
+text
+
+
+SimulationScenario        → core
+RwSignal<SimulationScenario> → adapter/framework state
+4. Casos de uso do frontend
+Os casos de uso são a camada que orquestra a UI e os ports.
+
+Não devem saber de componentes Leptos específicos, mas podem saber de regras da experiência do utilizador.
+
+Exemplos relevantes para ti:
+
+text
+
+
+SearchInstruments
+OpenAssetWorkspace
+SwitchAssetTab
+LoadAssetHeader
+LoadOptionsChain
+SelectOptionContract
+LoadVolatilitySurface
+LoadGexLevels
+UpdateSimulationScenario
+RunSimulation
+AddToWatchlist
+RemoveFromWatchlist
+RestoreWorkspace
+PersistUserPreferences
+SubscribeToQuotes
+Por exemplo:
+
+rust
+
+
+pub struct OpenAssetWorkspace<P> {
+    instruments: P,
+}
+
+impl<P> OpenAssetWorkspace<P>
+where
+    P: InstrumentLookupPort,
+{
+    pub async fn execute(
+        &self,
+        symbol: Symbol,
+        active_tab: AssetTab,
+    ) -> Result<AssetContext, AppError> {
+        let instrument = self.instruments.find_by_symbol(&symbol).await?;
+
+        Ok(AssetContext {
+            instrument,
+            active_tab,
+        })
+    }
+}
+Ou na pesquisa:
+
+rust
+
+
+pub struct SearchInstruments<P> {
+    search_port: P,
+}
+
+impl<P> SearchInstruments<P>
+where
+    P: InstrumentSearchPort,
+{
+    pub async fn execute(
+        &self,
+        query: SearchQuery,
+    ) -> Result<SearchResults, AppError> {
+        if query.normalized().len() < 2 {
+            return Ok(SearchResults::empty());
+        }
+
+        let instruments = self.search_port.search(query, 10).await?;
+
+        Ok(SearchResults { instruments })
+    }
+}
+Core específico para o teu produto
+Uma estrutura inicial razoável seria esta:
+
+text
+
+
+src/
+├── core/
+│   ├── asset/
+│   │   ├── asset_context.rs
+│   │   ├── asset_tab.rs
+│   │   ├── instrument.rs
+│   │   ├── asset_header.rs
+│   │   └── market_state.rs
+│   │
+│   ├── search/
+│   │   ├── search_query.rs
+│   │   ├── search_results.rs
+│   │   └── search_instruments.rs
+│   │
+│   ├── watchlist/
+│   │   ├── watchlist.rs
+│   │   ├── watchlist_item.rs
+│   │   └── manage_watchlist.rs
+│   │
+│   ├── options/
+│   │   ├── options_chain.rs
+│   │   ├── option_contract.rs
+│   │   ├── option_filters.rs
+│   │   ├── selected_contract.rs
+│   │   └── load_options_chain.rs
+│   │
+│   ├── volatility/
+│   │   ├── iv_smile.rs
+│   │   ├── term_structure.rs
+│   │   ├── volatility_surface.rs
+│   │   └── load_volatility_analysis.rs
+│   │
+│   ├── gex/
+│   │   ├── gex_profile.rs
+│   │   ├── gex_levels.rs
+│   │   └── load_gex_analysis.rs
+│   │
+│   ├── simulation/
+│   │   ├── scenario.rs
+│   │   ├── position.rs
+│   │   ├── pnl_grid.rs
+│   │   ├── monte_carlo_result.rs
+│   │   └── run_simulation.rs
+│   │
+│   ├── ports/
+│   │   ├── instrument_search_port.rs
+│   │   ├── asset_data_port.rs
+│   │   ├── options_data_port.rs
+│   │   ├── volatility_data_port.rs
+│   │   ├── gex_data_port.rs
+│   │   ├── simulation_port.rs
+│   │   ├── watchlist_port.rs
+│   │   └── quote_stream_port.rs
+│   │
+│   └── common/
+│       ├── ids.rs
+│       ├── symbol.rs
+│       ├── money.rs
+│       ├── percentage.rs
+│       ├── timestamp.rs
+│       └── app_error.rs
+│
+├── adapters/
+│   ├── http/
+│   ├── websocket/
+│   ├── browser_storage/
+│   ├── router/
+│   └── plotly/
+│
+└── ui/
+    ├── app_shell/
+    ├── asset_workspace/
+    ├── options/
+    ├── volatility/
+    ├── gex/
+    └── simulation/
+Objetos core essenciais para começar
+Não tens de construir tudo logo. Para a primeira fase, os objetos core mínimos seriam:
+
+rust
+
+
+InstrumentId
+OptionContractId
+Symbol
+AssetType
+AssetTab
+AssetContext
+InstrumentRef
+AssetHeaderModel
+MarketState
+SearchQuery
+SearchResults
+Watchlist
+WatchlistItem
+E os ports:
+
+rust
+
+
+InstrumentSearchPort
+AssetDataPort
+WatchlistPort
+QuoteStreamPort
+Depois, quando entrares nas páginas analíticas:
+
+rust
+
+
+OptionsChain
+OptionsChainQuery
+VolatilitySurface
+IvSmile
+GexProfile
+GexLevels
+SimulationScenario
+PnlGrid
+MonteCarloResult
+O que não pertence ao core
+Estes são adapters ou UI, não core:
+
+text
+
+
+Leptos Component
+RwSignal<T>
+Resource<T>
+Action<T>
+use_params()
+use_navigate()
+gloo_net::http::Request
+WebSocket API
+window.localStorage
+plotly::Plot
+HTML table
+CSS classes
+Lucide icons
+JSON DTOs
+Por exemplo:
+
+rust
+
+
+#[component]
+pub fn AssetHeader(model: AssetHeaderModel) -> impl IntoView
+AssetHeaderModel pertence ao core.
+#[component], view!, classes CSS e signals pertencem à camada UI/adapter.
+
+Regra simples
+Uma boa pergunta para decidir se um objeto pertence ao core é:
+
+“Se eu substituir Leptos por React, Svelte ou uma app desktop, este tipo e esta regra continuariam a fazer sentido?”
+
+Se sim, é provavelmente core.
+
+Exemplos:
+
+text
+
+
+AssetContext                 → sim
+OptionsChainQuery            → sim
+SimulationScenario           → sim
+GexProfile                   → sim
+SearchQuery                  → sim
+
+LeptosSignal                 → não
+PlotlyTrace                  → não
+HtmlTableElement             → não
+HttpResponse                 → não
+Portanto, no teu caso o core frontend é essencialmente o modelo da workspace de análise financeira, os seus estados, intenções, regras de apresentação e casos de uso — não a renderização Leptos nem os detalhes de comunicação com o backend.
+
+eu tenho a maior parte desse core no backend
+Sim — e isso é o ideal no teu caso.
+
+Se o backend já contém o domínio financeiro e os casos de uso principais, não deves duplicar esse core no frontend.
+
+O frontend não precisa ter OptionContract, cálculo de Greeks, GEX, IV surface, pricing, Monte Carlo, regras de mercado etc. como “domain core” próprio. O backend deve ser a fonte de verdade para isso.
+
+No frontend, o “core” fica bem mais fino: é o core da experiência da aplicação, não o core financeiro.
+
+Separação recomendada
+text
+
+
+Backend
+├── domínio financeiro canónico
+├── instrumentos
+├── opções e contratos
+├── preços, IV, Greeks
+├── GEX
+├── simulações / Monte Carlo
+├── regras de negócio
+├── persistência
+└── APIs / streams
+
+Frontend
+├── estado da navegação
+├── estado temporário da UI
+├── preferências do utilizador
+├── composição de requests
+├── modelos de visualização
+├── mapeamento DTO -> View Model
+└── renderização Leptos / Plotly
+O que continua a ser core no frontend
+O frontend pode ter uma camada core, mas não precisa ser um “segundo backend”.
+
+Ela deve conter apenas objetos que representam o estado e comportamento local da aplicação.
+
+1. Contexto da workspace
+O ativo selecionado e a tab atual são responsabilidade do cliente.
+
+rust
+
+
+pub struct AssetWorkspaceState {
+    pub symbol: String,
+    pub active_tab: AssetTab,
+}
+rust
+
+
+pub enum AssetTab {
+    Overview,
+    Chart,
+    Options,
+    Volatility,
+    Gex,
+    Simulation,
+    News,
+}
+O backend pode saber que existe o símbolo AAPL, mas não deve decidir que o utilizador está atualmente em:
+
+text
+
+
+/assets/AAPL/gex
+Isso é estado de navegação da aplicação frontend.
+
+2. Estado local e filtros da UI
+Por exemplo, a API pode devolver uma options chain completa.
+
+Mas o estado de:
+
+expiração selecionada;
+filtro de strikes;
+colunas visíveis;
+contrato aberto no drawer;
+ordenação atual;
+calls/puts expandidos ou colapsados;
+é local à UI.
+
+rust
+
+
+pub struct OptionsUiState {
+    pub selected_expiration: Option<String>,
+    pub strike_filter: StrikeFilter,
+    pub selected_contract: Option<String>,
+    pub sort: OptionsSort,
+}
+rust
+
+
+pub enum StrikeFilter {
+    All,
+    AtmOnly,
+    NearAtm { percent: f64 },
+    CustomRange { min: f64, max: f64 },
+}
+rust
+
+
+pub struct OptionsSort {
+    pub column: OptionsColumn,
+    pub direction: SortDirection,
+}
+Isto não é domínio financeiro duplicado. É estado de interação.
+
+3. Cenário ainda não enviado ao backend
+Na simulação, o backend calcula o resultado. Mas antes do utilizador clicar em “Run simulation”, o frontend mantém um rascunho.
+
+rust
+
+
+pub struct SimulationDraft {
+    pub symbol: String,
+    pub spot_shift_percent: f64,
+    pub iv_shift_points: f64,
+    pub days_forward: u32,
+    pub positions: Vec<PositionDraft>,
+}
+rust
+
+
+pub struct PositionDraft {
+    pub contract_id: String,
+    pub quantity: i32,
+}
+Depois o frontend converte o draft para um request:
+
+rust
+
+
+pub struct RunSimulationRequest {
+    pub symbol: String,
+    pub scenario: ScenarioInput,
+    pub positions: Vec<SimulationPositionInput>,
+}
+O backend devolve:
+
+rust
+
+
+pub struct SimulationResultDto {
+    pub pnl_heatmap: PnlHeatmapDto,
+    pub probability_of_profit: f64,
+    pub max_profit: Option<f64>,
+    pub max_loss: Option<f64>,
+    pub monte_carlo: MonteCarloDto,
+}
+O frontend não recalcula a simulação. Apenas mantém o draft, envia o pedido e apresenta o resultado.
+
+4. View Models
+Mesmo que uses os DTOs do backend, normalmente vale a pena ter View Models pequenos quando a apresentação o justifica.
+
+Por exemplo, o backend devolve:
+
+rust
+
+
+pub struct QuoteDto {
+    pub last: f64,
+    pub change: f64,
+    pub change_percent: f64,
+    pub volume: Option<u64>,
+    pub iv_rank: Option<f64>,
+}
+A UI pode usar:
+
+rust
+
+
+pub struct AssetQuoteViewModel {
+    pub last_price: String,
+    pub change_label: String,
+    pub change_tone: ChangeTone,
+    pub volume_label: String,
+    pub iv_rank_label: String,
+}
+rust
+
+
+pub enum ChangeTone {
+    Positive,
+    Negative,
+    Neutral,
+}
+Mapeamento:
+
+rust
+
+
+impl From<QuoteDto> for AssetQuoteViewModel {
+    fn from(dto: QuoteDto) -> Self {
+        let change_tone = if dto.change > 0.0 {
+            ChangeTone::Positive
+        } else if dto.change < 0.0 {
+            ChangeTone::Negative
+        } else {
+            ChangeTone::Neutral
+        };
+
+        Self {
+            last_price: format!("${:.2}", dto.last),
+            change_label: format!(
+                "{:+.2} ({:+.2}%)",
+                dto.change,
+                dto.change_percent
+            ),
+            change_tone,
+            volume_label: dto
+                .volume
+                .map(format_compact_number)
+                .unwrap_or_else(|| "—".into()),
+            iv_rank_label: dto
+                .iv_rank
+                .map(|value| format!("{value:.1}%"))
+                .unwrap_or_else(|| "—".into()),
+        }
+    }
+}
+Isto evita colocar lógica de formatação e cor diretamente dentro de cada componente Leptos.
+
+Mas não cries View Models por obrigação. Se um DTO já é adequado para a página, podes utilizá-lo diretamente.
+
+O que não deves duplicar no frontend
+Se já está no backend, evita recriar isto no cliente:
+
+text
+
+
+Instrument
+OptionContract
+OptionChain
+Greeks
+ImpliedVolatility
+VolatilitySurface
+GexProfile
+GexLevels
+MonteCarloSimulation
+Portfolio valuation
+P&L engine
+Market calendar rules
+Trading/session rules
+Pricing models
+Por exemplo, evita isto:
+
+rust
+
+
+// Não recomendado no frontend:
+pub fn calculate_black_scholes(...) -> Greeks { ... }
+
+pub fn calculate_gex(chain: OptionsChain) -> GexProfile { ... }
+
+pub fn run_monte_carlo(scenario: Scenario) -> SimulationResult { ... }
+A menos que exista uma razão explícita, como uma preview instantânea e aproximada no browser. Mesmo nesse caso, deve ser claramente tratada como estimativa de UI, e não como cálculo canónico.
+
+Arquitetura frontend mais pragmática
+Para o teu projeto, eu simplificaria a arquitetura anterior para algo assim:
+
+text
+
+
+src/
+├── app/
+│   ├── router.rs
+│   ├── app_shell.rs
+│   └── app_state.rs
+│
+├── api/
+│   ├── client.rs
+│   ├── instruments_api.rs
+│   ├── assets_api.rs
+│   ├── options_api.rs
+│   ├── volatility_api.rs
+│   ├── gex_api.rs
+│   ├── simulation_api.rs
+│   └── dto/
+│
+├── features/
+│   ├── asset_workspace/
+│   │   ├── state.rs
+│   │   ├── asset_layout.rs
+│   │   └── asset_header.rs
+│   │
+│   ├── search/
+│   │   ├── state.rs
+│   │   ├── search_box.rs
+│   │   └── search_results.rs
+│   │
+│   ├── watchlist/
+│   │   ├── state.rs
+│   │   └── watchlist_panel.rs
+│   │
+│   ├── options/
+│   │   ├── state.rs
+│   │   ├── options_chain.rs
+│   │   ├── options_filters.rs
+│   │   └── contract_drawer.rs
+│   │
+│   ├── volatility/
+│   │   ├── state.rs
+│   │   ├── volatility_surface.rs
+│   │   ├── iv_smile.rs
+│   │   └── term_structure.rs
+│   │
+│   ├── gex/
+│   │   ├── state.rs
+│   │   ├── gex_chart.rs
+│   │   └── gex_levels.rs
+│   │
+│   └── simulation/
+│       ├── state.rs
+│       ├── position_builder.rs
+│       ├── scenario_controls.rs
+│       └── simulation_results.rs
+│
+├── charts/
+│   ├── plotly_adapter.rs
+│   ├── gex_chart.rs
+│   ├── iv_smile_chart.rs
+│   ├── surface_chart.rs
+│   └── pnl_heatmap.rs
+│
+├── shared/
+│   ├── formatting/
+│   ├── components/
+│   ├── types/
+│   └── error.rs
+│
+└── infrastructure/
+    ├── websocket.rs
+    ├── local_storage.rs
+    └── browser.rs
+Aqui, api/dto contém os contratos recebidos do backend, enquanto features/*/state.rs contém o estado local de cada área da UI.
+
+Exemplo: GEX
+O backend entrega algo semelhante a:
+
+rust
+
+
+pub struct GexProfileDto {
+    pub symbol: String,
+    pub spot: f64,
+    pub gamma_flip: Option<f64>,
+    pub call_wall: Option<f64>,
+    pub put_wall: Option<f64>,
+    pub levels: Vec<GexStrikeDto>,
+}
+No frontend, não precisas criar um domínio GEX paralelo.
+
+Podes ter apenas um adaptador para Plotly:
+
+rust
+
+
+pub fn gex_dto_to_chart_model(dto: &GexProfileDto) -> GexChartModel {
+    GexChartModel {
+        strikes: dto.levels.iter().map(|x| x.strike).collect(),
+        net_gex: dto.levels.iter().map(|x| x.net_gex).collect(),
+        gamma_flip: dto.gamma_flip,
+        call_wall: dto.call_wall,
+        put_wall: dto.put_wall,
+    }
+}
+rust
+
+
+pub struct GexChartModel {
+    pub strikes: Vec<f64>,
+    pub net_gex: Vec<f64>,
+    pub gamma_flip: Option<f64>,
+    pub call_wall: Option<f64>,
+    pub put_wall: Option<f64>,
+}
+E depois:
+
+rust
+
+
+pub fn render_gex_chart(model: GexChartModel) -> Plot {
+    // Adapter Plotly.rs
+}
+O GexProfileDto continua a ser a representação dos dados de negócio.
+GexChartModel existe apenas porque Plotly precisa de arrays e anotações específicas.
+
+Quando usar DTOs diretamente
+Podes usar DTOs diretamente no componente quando:
+
+o DTO já tem a forma certa para a UI;
+não há transformação relevante;
+o componente não depende de detalhes de HTTP;
+o objeto não precisa de formatação persistente ou lógica visual complexa.
+Exemplo simples:
+
+rust
+
+
+#[component]
+pub fn ExpirationSelector(
+    expirations: Vec<ExpirationDto>,
+    selected: RwSignal<Option<String>>,
+) -> impl IntoView {
+    // ...
+}
+Não precisas necessariamente inventar ExpirationViewModel.
+
+Quando criar View Model ou estado próprio
+Cria um tipo frontend quando:
+
+precisas de texto já formatado;
+existem regras de cor/estado visual;
+precisas adaptar dados para Plotly;
+a UI combina dados de vários endpoints;
+há filtros, drafts, seleções ou preferências locais;
+queres proteger a UI de mudanças frequentes no contrato da API.
+Exemplos:
+
+text
+
+
+AssetHeaderViewModel
+OptionsUiState
+SimulationDraft
+GexChartModel
+VolatilitySurfaceChartModel
+WatchlistUiState
+SearchUiState
+ToastNotification
+LayoutPreferences
+Regra prática
+Usa esta pergunta:
+
+“Este objeto precisa existir mesmo que o backend não seja alterado e mesmo que os cálculos financeiros continuem todos no servidor?”
+
+Se a resposta for:
+
+“é um cálculo ou regra financeira” → backend;
+“é um contrato de dados da API” → DTO compartilhado ou gerado;
+“é estado de navegação, interação ou apresentação” → frontend;
+“é um objeto exigido por Plotly/Leptos/browser” → adapter/UI.
+Portanto: no teu caso, o frontend não precisa de um grande core/domain. Precisa principalmente de um núcleo pequeno de estado da workspace, estado dos módulos, View Models e adaptadores de apresentação.
