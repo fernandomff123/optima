@@ -1,6 +1,7 @@
 target/
 web/dist/
 web/node_modules/
+web/styles/tailwind.css
 .env
 .env.*
 !.env.example

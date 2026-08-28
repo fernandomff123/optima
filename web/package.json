@@ -1,0 +1,15 @@
+{
+  "name": "optima-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "npm run build:css",
+    "build:css": "tailwindcss -i ./styles/input.css -o ./styles/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./styles/input.css -o ./styles/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "plotly.js-dist-min": "3.0.1",
+    "tailwindcss": "4.3.3"
+  }
+}
