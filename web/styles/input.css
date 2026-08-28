@@ -46,12 +46,43 @@
 @layer utilities {
   .numeric { font-variant-numeric: tabular-nums lining-nums; }
   .dense-scrollbar { scrollbar-color: var(--color-border) transparent; scrollbar-width: thin; }
-  #asset-overview-price-volume .modebar { @apply rounded border border-border bg-surface-elevated p-0.5; }
-  #asset-overview-price-volume .modebar-btn { color: var(--color-text-secondary) !important; }
+  #asset-overview-price-volume .modebar {
+    display: grid !important;
+    grid-template-columns: repeat(2, 30px) !important;
+    gap: 3px !important;
+    width: max-content !important;
+    padding: 3px !important;
+    border: 1px solid var(--color-border) !important;
+    border-radius: var(--radius-panel) !important;
+    background: var(--color-surface-elevated) !important;
+  }
+  #asset-overview-price-volume .modebar.modebar--hover { opacity: 0 !important; pointer-events: none; }
+  #asset-overview-price-volume .modebar-group {
+    display: contents !important;
+    float: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    opacity: 1 !important;
+  }
+  #asset-overview-price-volume .modebar-btn {
+    display: grid !important;
+    width: 30px !important;
+    height: 30px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    place-items: center;
+    color: var(--color-text-secondary) !important;
+    background: transparent !important;
+  }
+  #asset-overview-price-volume .modebar-btn svg { fill: currentColor !important; }
   #asset-overview-price-volume .modebar-btn:hover,
-  #asset-overview-price-volume .modebar-btn:focus { color: var(--color-interactive-text) !important; }
+  #asset-overview-price-volume .modebar-btn:focus { color: var(--color-text-primary) !important; }
+  #asset-overview-price-volume .modebar-btn.active { color: var(--color-interactive-text) !important; background: var(--color-state-selected) !important; }
+  #asset-overview-price-volume .modebar-btn:focus-visible { outline: 2px solid var(--color-state-focus); outline-offset: -2px; }
+  #asset-overview-price-volume:hover .modebar.modebar--hover,
   #asset-overview-price-volume:focus .modebar,
-  #asset-overview-price-volume:focus-within .modebar { opacity: 1 !important; }
+  #asset-overview-price-volume:focus-within .modebar { opacity: 1 !important; pointer-events: auto; }
 }
 
 @layer components {

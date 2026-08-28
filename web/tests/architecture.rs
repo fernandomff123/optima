@@ -106,6 +106,18 @@ fn plotly_is_local_and_cleanup_uses_purge() {
     for preserved in ["Plotly.react", "responsive:true", "purgeOverviewPlot"] {
         assert!(overview.contains(preserved));
     }
+    assert!(overview.contains("toImage"));
+
+    let css = fs::read_to_string(root.join("styles/input.css")).unwrap();
+    assert!(css.contains("#asset-overview-price-volume .modebar"));
+    assert!(css.contains("grid-template-columns: repeat(2, 30px)"));
+    assert!(css.contains("#asset-overview-price-volume .modebar-group"));
+    assert!(css.contains("display: contents"));
+    assert!(css.contains("#asset-overview-price-volume .modebar-btn"));
+    assert!(css.contains("width: 30px") && css.contains("height: 30px"));
+    assert!(css.contains("#asset-overview-price-volume:hover .modebar.modebar--hover"));
+    assert!(css.contains("#asset-overview-price-volume:focus-within .modebar"));
+    assert!(!css.contains("grid-template-columns: repeat(3"));
 }
 
 #[test]
