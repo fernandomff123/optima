@@ -101,15 +101,15 @@ fn OverviewContent(model: AssetOverviewReadModel, partial: bool) -> impl IntoVie
         <MetricStrip metrics />
         {model.is_stale.then(|| view! { <div class="border-b border-level-special/40 bg-level-special/10 px-4 py-2 text-xs text-level-special sm:px-6 lg:px-8" role="status">"Stale mock snapshot · values remain visible for context."</div> })}
         {partial.then(|| view! { <div class="border-b border-interactive-source/50 bg-state-selected/30 px-4 py-2 text-xs text-interactive-text sm:px-6 lg:px-8" role="status">"Partial snapshot · unavailable fields are identified without replacing valid data."</div> })}
-        <div class="space-y-3 p-4 sm:p-6 lg:p-8">
-            <div class="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(18rem,0.9fr)]">
-                <Panel title=format!("{} Price & Volume · 1D", model.symbol) badge="Mock"><AssetOverviewChart chart /></Panel>
-                <Panel title="Key Statistics" badge="Mock"><FactTable metrics=key_statistics /></Panel>
+        <div class="space-y-2 p-3 sm:p-4 lg:p-2">
+            <div class="grid items-stretch gap-2 xl:grid-cols-[minmax(0,1.83fr)_minmax(20rem,1fr)]">
+                <Panel title=format!("{} Price & Volume · 1D", model.symbol) compact=true><AssetOverviewChart chart /></Panel>
+                <Panel title="Key Statistics" compact=true><FactTable metrics=key_statistics /></Panel>
             </div>
-            <div class="grid gap-3 lg:grid-cols-2 2xl:grid-cols-[1.35fr_0.9fr_1fr]">
-                <Panel title="Performance" badge="Mock"><PerformanceTable table=performance /></Panel>
-                <Panel title="Index Facts" badge="Mock"><FactTable metrics=index_facts /></Panel>
-                <Panel title="Options Snapshot" badge="Mock"><FactTable metrics=options_snapshot /></Panel>
+            <div class="grid items-stretch gap-2 lg:grid-cols-2 2xl:grid-cols-[1.28fr_0.92fr_1fr]">
+                <Panel title="Performance" compact=true><PerformanceTable table=performance /></Panel>
+                <Panel title="Index Facts" compact=true><FactTable metrics=index_facts /></Panel>
+                <Panel title="Options Snapshot" compact=true><FactTable metrics=options_snapshot /></Panel>
             </div>
         </div>
     }
@@ -122,8 +122,8 @@ fn ContextState(
     retry: Option<Callback<()>>,
 ) -> impl IntoView {
     view! {
-        <header class="border-b border-border bg-surface px-4 pt-5 sm:px-6 lg:px-8"><h1 class="mb-4 text-2xl font-black numeric">{symbol.clone()}</h1><AssetTabs ticker=symbol /></header>
-        <div class="p-4 sm:p-6 lg:p-8"><Panel title="Asset Overview" badge="Mock">
+        <header class="border-b border-border bg-surface px-4 pt-5 sm:px-6 lg:px-8"><div class="mb-4 flex items-center gap-3"><h1 class="text-2xl font-black numeric">{symbol.clone()}</h1><span class="mock-indicator">"Mock"</span></div><AssetTabs ticker=symbol /></header>
+        <div class="p-4 sm:p-6 lg:p-8"><Panel title="Asset Overview">
             <DataState state />
             {retry.map(|action| view! { <div class="mt-4 text-center"><button type="button" class="min-h-10 rounded border border-interactive-source bg-state-selected px-4 text-xs font-semibold text-interactive-text hover:bg-state-hover" on:click=move |_| action.run(())>"Retry locally"</button></div> })}
         </Panel></div>

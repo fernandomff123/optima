@@ -33,17 +33,19 @@ pub fn build_price_volume_plot(chart: &PriceVolumeChart) -> PlotlySpec {
 export function renderOverviewPlot(id, timesText, ticksText, prices, volumes, themeText) {
   const times = timesText.split('\u001f');
   const tickValues = ticksText.split('\u001f');
-  const [canvas, surface, grid, border, text, muted, blue, green] = themeText.split('\u001f');
+  const [canvas, surface, grid, border, text, muted, blue, green, red] = themeText.split('\u001f');
+  const priceValues = Array.from(prices);
+  const volumeColors = priceValues.map((price, index) => index === 0 || price >= priceValues[index - 1] ? green : red);
   const data = [
-    {type:'scatter', mode:'lines', name:'Price', x:times, y:Array.from(prices),
-     line:{color:blue,width:1.7}, fill:'tozeroy', fillcolor:'rgba(27,93,202,0.16)',
+    {type:'scatter', mode:'lines', name:'Price', x:times, y:priceValues,
+     line:{color:blue,width:1.5}, fill:'tozeroy', fillcolor:'rgba(27,93,202,0.10)',
      hovertemplate:'%{x}<br>Price %{y:,.2f}<extra></extra>'},
-    {type:'bar', name:'Volume', x:times, y:Array.from(volumes), yaxis:'y2', opacity:0.62,
-     marker:{color:green}, hovertemplate:'%{x}<br>Volume %{y:.2f}M<extra></extra>'}
+    {type:'bar', name:'Volume', x:times, y:Array.from(volumes), yaxis:'y2', opacity:0.52,
+     marker:{color:volumeColors}, hovertemplate:'%{x}<br>Volume %{y:.2f}M<extra></extra>'}
   ];
   const axis = {gridcolor:grid, linecolor:border, tickfont:{color:muted}};
   const layout = {paper_bgcolor:surface, plot_bgcolor:canvas, font:{color:text,size:11},
-    showlegend:false, bargap:0.16, margin:{l:48,r:48,t:10,b:36},
+    showlegend:false, bargap:0.18, margin:{l:44,r:44,t:6,b:30},
     xaxis:{...axis,tickmode:'array',tickvals:tickValues,ticktext:tickValues},
     yaxis:{...axis,domain:[0.23,1],range:[5250,5325]}, yaxis2:{...axis,domain:[0,0.17]}};
   Plotly.react(id, data, layout, {responsive:true,displaylogo:false,modeBarButtonsToRemove:['lasso2d','select2d']});
@@ -90,6 +92,7 @@ pub fn AssetOverviewChart(chart: PriceVolumeChart) -> impl IntoView {
         tokens::TEXT_MUTED_READABLE,
         tokens::INTERACTIVE_TEXT,
         tokens::FINANCE_POSITIVE,
+        tokens::FINANCE_NEGATIVE,
     ]
     .join("\u{001f}");
     Effect::new(move |_| {
@@ -103,7 +106,7 @@ pub fn AssetOverviewChart(chart: PriceVolumeChart) -> impl IntoView {
         )
     });
     on_cleanup(move || purge_plot(HOST_ID));
-    view! { <div><div id=HOST_ID class="h-[22rem] min-h-72 w-full bg-canvas" role="img" aria-label=description.clone()></div><p class="sr-only">{description}</p></div> }
+    view! { <div><div id=HOST_ID class="h-72 min-h-72 w-full bg-canvas sm:h-[20.5rem]" role="img" aria-label=description.clone()></div><p class="sr-only">{description}</p></div> }
 }
 
 #[cfg(test)]

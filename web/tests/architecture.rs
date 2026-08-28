@@ -109,6 +109,18 @@ fn asset_overview_respects_hexagonal_boundaries() {
 }
 
 #[test]
+fn asset_overview_has_one_mock_indicator_and_no_panel_badges() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let header =
+        fs::read_to_string(root.join("driving_adapters/ui/components/asset_header.rs")).unwrap();
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
+    assert_eq!(header.matches(">\"Mock\"<").count(), 1);
+    assert!(!page.contains("badge=\"Mock\""));
+    assert!(!header.contains("MockAssetOverviewAdapter"));
+    assert!(!page.contains("MockAssetOverviewAdapter"));
+}
+
+#[test]
 fn overview_has_no_http_or_backend_contract_shortcuts() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
@@ -163,6 +175,41 @@ fn tailwind_contains_every_approved_hex_token() {
             css.contains(color),
             "Tailwind is missing approved token {color}"
         );
+    }
+}
+
+#[test]
+fn asset_overview_uses_only_approved_hex_colors() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let approved = optima_web::design_system::tokens::APPROVED_HEX
+        .into_iter()
+        .map(str::to_ascii_uppercase)
+        .collect::<Vec<_>>();
+    for relative in [
+        "styles/input.css",
+        "src/driving_adapters/ui/pages/asset.rs",
+        "src/driving_adapters/ui/components/asset_header.rs",
+        "src/driving_adapters/ui/components/asset_tabs.rs",
+        "src/driving_adapters/ui/components/overview_metric.rs",
+        "src/driving_adapters/ui/components/fact_table.rs",
+        "src/driving_adapters/ui/components/performance_table.rs",
+        "src/driving_adapters/ui/components/panel.rs",
+        "src/driving_adapters/ui/plotly/asset_overview.rs",
+    ] {
+        let source = fs::read_to_string(root.join(relative)).unwrap();
+        for token in source
+            .split(|character: char| character.is_whitespace() || "();,\"'".contains(character))
+        {
+            if token
+                .strip_prefix('#')
+                .is_some_and(|hex| hex.len() == 6 && hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+            {
+                assert!(
+                    approved.contains(&token.to_ascii_uppercase()),
+                    "{relative} contains unapproved color {token}"
+                );
+            }
+        }
     }
 }
 
