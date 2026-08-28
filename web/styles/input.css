@@ -52,8 +52,8 @@
   .panel-header { @apply flex min-h-10 items-center justify-between border-b border-border px-3; }
   .metric-label { @apply text-xs font-medium text-text-muted-readable; }
   .metric-value { @apply text-sm font-medium text-text-primary; font-variant-numeric: tabular-nums lining-nums; }
-  .fact-row { @apply flex min-h-9 items-center justify-between gap-4 border-b border-border px-3 py-2 text-sm last:border-b-0; }
-  .table-header { @apply border-b border-border px-3 py-2 text-xs font-medium text-text-muted-readable; }
+  .fact-row { @apply flex min-h-[2.375rem] items-center justify-between gap-4 border-b border-border px-3 py-2 text-sm last:border-b-0; }
+  .table-header { @apply border-b border-border px-3 py-2 text-[0.8125rem] font-medium text-text-muted-readable; }
   .mock-indicator { @apply rounded border border-level-special/60 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-wider text-level-special; }
 }
 

@@ -77,7 +77,7 @@ fn aapl_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOverv
         is_mock: true,
         capabilities: capabilities(),
         day_range: Some(m("Day Range", Some("188.74 – 192.05"), Some("USD"))),
-        chart_times: times(2, 106),
+        chart_times: times(1, 211),
         chart_prices: AAPL_PRICES.to_vec(),
         chart_volumes: AAPL_VOLUMES.to_vec(),
         chart_session_end: "16:00",
@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn aapl_chart_is_dense_aligned_positive_and_stops_at_as_of() {
         let s = load("AAPL", OverviewScenario::Normal);
-        assert!(s.chart_times.len() >= 100);
+        assert_eq!(s.chart_times.len(), 211);
         assert_eq!(s.chart_times.len(), s.chart_prices.len());
         assert_eq!(s.chart_times.len(), s.chart_volumes.len());
         assert_eq!(s.chart_times.first().map(String::as_str), Some("09:30"));
@@ -313,7 +313,7 @@ mod tests {
         assert!(
             s.chart_times
                 .windows(2)
-                .all(|p| minutes(&p[1]) > minutes(&p[0]))
+                .all(|p| minutes(&p[1]) - minutes(&p[0]) == 1)
         );
         assert!(
             s.chart_prices

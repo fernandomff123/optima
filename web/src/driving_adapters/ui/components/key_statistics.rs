@@ -23,7 +23,7 @@ pub fn KeyStatistics(
                             <dd class="numeric text-text-primary">{range.minimum} " – " {range.maximum}</dd>
                         </div>
                         <div class="relative h-1 bg-text-muted-source" role="meter" aria-label=range.accessible_value aria-valuemin="0" aria-valuemax="100" aria-valuenow=(range.position * 100.0).round()>
-                            <span class="absolute -top-1 size-2.5 -translate-x-1/2 rotate-45 border border-interactive-text bg-interactive-source" style=marker></span>
+                            <span class="absolute -top-1.5 h-0 w-0 -translate-x-1/2 border-x-[5px] border-b-[8px] border-x-transparent border-b-interactive-text" style=marker></span>
                         </div>
                     </div>
                 }

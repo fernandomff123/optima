@@ -116,15 +116,15 @@ fn OverviewContent(model: AssetOverviewReadModel, partial: bool) -> impl IntoVie
         <AssetHeader model=model.clone() />
         {model.is_stale.then(|| view! { <div class="border-b border-level-special/40 bg-level-special/10 px-4 py-2 text-xs text-level-special sm:px-6 lg:px-8" role="status">"Stale mock snapshot · values remain visible for context."</div> })}
         {partial.then(|| view! { <div class="border-b border-interactive-source/50 bg-state-selected/30 px-4 py-2 text-xs text-interactive-text sm:px-6 lg:px-8" role="status">"Partial snapshot · unavailable fields are identified without replacing valid data."</div> })}
-        <div class="space-y-2 p-2">
-            <div class="grid items-stretch gap-2 xl:grid-cols-[minmax(0,1.83fr)_minmax(20rem,1fr)]">
+        <div class="space-y-2 p-2 2xl:grid 2xl:min-h-[calc(100vh-13.25rem)] 2xl:grid-rows-[minmax(24rem,1.04fr)_minmax(22.5rem,1fr)] 2xl:gap-2 2xl:space-y-0">
+            <div class="grid min-h-[24rem] items-stretch gap-2 xl:grid-cols-[minmax(0,1.83fr)_minmax(20rem,1fr)]">
                 <Panel title=format!("{} Price & Volume · 1D", model.symbol) compact=true>
                     <p class=chart_summary_class>{chart_summary}</p>
                     <AssetOverviewChart chart />
                 </Panel>
                 <Panel title="Key Statistics" compact=true><KeyStatistics metrics=key_statistics year_range /></Panel>
             </div>
-            <div class="grid items-stretch gap-2 lg:grid-cols-2 2xl:grid-cols-[1.22fr_0.86fr_1.02fr_1.12fr]">
+            <div class="grid items-stretch gap-2 lg:grid-cols-2 2xl:h-full 2xl:grid-cols-[1.22fr_0.86fr_1.02fr_1.12fr]">
                 <Panel title="Performance" compact=true><PerformanceTable table=performance /></Panel>
                 {secondary_facts.map(|facts| view! { <Panel title=secondary_title compact=true><FactTable metrics=facts /></Panel> })}
                 <Panel title="Options Snapshot" compact=true><FactTable metrics=options_snapshot /></Panel>
