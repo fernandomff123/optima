@@ -13,12 +13,12 @@ pub fn KeyStatistics(
     let leading = metrics[..split_at].to_vec();
     let trailing = metrics[split_at..].to_vec();
     view! {
-        <dl>
+        <dl class="flex h-full flex-col">
             <MetricRows metrics=leading />
             {year_range.map(|range| {
                 let marker = format!("left: {}%", range.position.clamp(0.0, 1.0) * 100.0);
                 view! {
-                    <div class="border-b border-border px-3 py-2.5 last:border-b-0">
+                    <div class="flex min-h-[3.75rem] max-h-[4.5rem] flex-[1.5] flex-col justify-center border-b border-border px-3 py-2.5 last:border-b-0">
                         <div class="mb-2 flex items-center justify-between gap-4 text-sm">
                             <dt class="text-text-secondary">{range.label}</dt>
                             <dd class="numeric text-text-primary">{range.minimum} " – " {range.maximum}</dd>
@@ -39,7 +39,7 @@ fn MetricRows(metrics: Vec<DisplayMetric>) -> impl IntoView {
     metrics.into_iter().map(|metric| {
         let label = metric.label;
         view! {
-        <div class="fact-row">
+        <div class="fact-row min-h-9 max-h-10 flex-1">
             <dt class="text-text-secondary">{label.clone()}</dt>
             <dd class="ml-auto shrink-0 text-right"><FinancialValue value=metric.value unit=metric.unit tone=metric.tone label /></dd>
         </div>
