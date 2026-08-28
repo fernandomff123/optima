@@ -1,14 +1,31 @@
-use crate::domain::navigation::{ASSET_TABS, asset_tab_path};
+use crate::domain::{asset::AssetCapability, navigation::asset_tab_path};
 use leptos::prelude::*;
 use leptos_router::{components::A, hooks::use_location};
 
 #[component]
-pub fn AssetTabs(#[prop(into)] ticker: String) -> impl IntoView {
+pub fn AssetTabs(
+    #[prop(into)] ticker: String,
+    #[prop(optional)] capabilities: Vec<AssetCapability>,
+) -> impl IntoView {
     let location = use_location();
+    let capabilities = if capabilities.is_empty() {
+        vec![
+            AssetCapability::Overview,
+            AssetCapability::Chart,
+            AssetCapability::Options,
+            AssetCapability::Volatility,
+            AssetCapability::Gex,
+            AssetCapability::Simulation,
+        ]
+    } else {
+        capabilities
+    };
     view! {
         <nav class="dense-scrollbar overflow-x-auto border-b border-border" aria-label="Asset workspace">
             <div class="flex min-w-max px-4 sm:px-6">
-                {ASSET_TABS.into_iter().map(|(label, segment)| {
+                {capabilities.into_iter().map(|capability| {
+                    let label = capability.label();
+                    let segment = capability.segment();
                     let href = asset_tab_path(&ticker, segment);
                     let aria_href = href.clone();
                     let class_href = href.clone();

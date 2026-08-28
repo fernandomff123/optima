@@ -12,7 +12,21 @@ trunk build
 
 Rust dependencies are pinned by the workspace `Cargo.lock`; npm dependencies are pinned by `package-lock.json`.
 
-Plotly.js 3.0.1 is pinned by npm and copied into `dist` by Trunk. The Rust `plotly` crate supplies WASM-compatible models and bindings without embedding a second JavaScript payload in the WASM binary. No CDN or external runtime asset is used. The concrete adapter under `driving_adapters/ui/plotly` owns theme mapping and route-scoped `Plotly.purge` cleanup. Financial trace builders are deliberately deferred.
+Plotly.js 3.0.1 is pinned by npm and copied into `dist` by Trunk. The Rust `plotly` crate supplies WASM-compatible models and bindings without embedding a second JavaScript payload in the WASM binary. No CDN or external runtime asset is used. The concrete adapter under `driving_adapters/ui/plotly` owns theme mapping and route-scoped `Plotly.purge` cleanup.
+
+## Mocked Asset Overview
+
+`/assets/:ticker/overview` is a mocks-first vertical slice. The Leptos page calls
+`AssetOverviewUseCase`, which reads a provider-neutral snapshot through
+`AssetOverviewPort`; `composition.rs` injects `MockAssetOverviewAdapter`. No HTTP
+adapter or backend dependency is part of this slice.
+
+The deterministic scenarios are selected with `?scenario=normal`, `loading`,
+`stale`, `partial`, `unavailable`, `recoverable-error`, or `terminal-error`.
+Unknown values fall back to `normal`. All timestamps and values are fixed visual
+fixtures. In particular, IV Rank, IV Percentile, put-call ratios, Performance,
+Index Facts, and Options Snapshot do not necessarily have backend contracts yet
+and must not be treated as calculated or live financial data.
 
 ## Shell icons
 

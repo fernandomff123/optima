@@ -1,13 +1,21 @@
+mod asset_header;
 mod asset_tabs;
+mod fact_table;
 mod feedback;
 mod icon;
+mod overview_metric;
 mod panel;
+mod performance_table;
 mod sidebar;
 mod topbar;
 
+pub use asset_header::AssetHeader;
 pub use asset_tabs::AssetTabs;
+pub use fact_table::FactTable;
 pub use feedback::DataState;
 pub use icon::{ShellIcon, ShellIconKind};
+pub use overview_metric::{MetricStrip, OverviewMetric};
 pub use panel::Panel;
+pub use performance_table::PerformanceTable;
 pub use sidebar::{MobileNavigation, Sidebar};
 pub use topbar::Topbar;

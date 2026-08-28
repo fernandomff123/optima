@@ -84,6 +84,59 @@ fn plotly_is_local_and_cleanup_uses_purge() {
     assert!(html.contains("src=\"/plotly.min.js\""));
     assert!(host.contains("js_namespace = Plotly"));
     assert!(host.contains("purge(HOST_ID)"));
+    let overview =
+        fs::read_to_string(root.join("src/driving_adapters/ui/plotly/asset_overview.rs"))
+            .expect("overview Plotly adapter must be readable");
+    assert!(overview.contains("purge_plot(HOST_ID)"));
+    assert!(overview.contains("build_price_volume_plot"));
+}
+
+#[test]
+fn asset_overview_respects_hexagonal_boundaries() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
+    let application = fs::read_to_string(root.join("application/asset_overview/mod.rs")).unwrap();
+    let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+    assert!(page.contains("asset_overview_use_case"));
+    assert!(!page.contains("MockAssetOverviewAdapter"));
+    assert!(!page.contains("driven_adapters::mocks"));
+    assert!(application.contains("AssetOverviewPort"));
+    assert!(!application.contains("Plotly"));
+    assert!(!application.contains("leptos"));
+    assert!(composition.contains("MockAssetOverviewAdapter"));
+}
+
+#[test]
+fn overview_has_no_http_or_backend_contract_shortcuts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(!manifest.contains("gloo-net"));
+    for (path, source) in rust_sources(&root.join("src")) {
+        for forbidden in ["api_models", "reqwest", "duckdb"] {
+            assert!(
+                !source.to_lowercase().contains(forbidden),
+                "{path} contains {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
+fn overview_route_and_query_scenarios_are_explicit() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let router = fs::read_to_string(root.join("driving_adapters/ui/router.rs")).unwrap();
+    let scenarios = fs::read_to_string(root.join("ports/asset_overview.rs")).unwrap();
+    assert!(router.contains("assets/:ticker/overview"));
+    for scenario in [
+        "loading",
+        "stale",
+        "partial",
+        "unavailable",
+        "recoverable-error",
+        "terminal-error",
+    ] {
+        assert!(scenarios.contains(scenario));
+    }
 }
 
 #[test]
