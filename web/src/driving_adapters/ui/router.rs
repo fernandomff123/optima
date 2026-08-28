@@ -5,26 +5,95 @@ use super::pages::{
 };
 use leptos::prelude::*;
 use leptos_router::{
-    components::{Route, Routes},
+    PossibleRouteMatch,
+    components::{FlatRoutes, Route},
     path,
 };
+
+fn asset_root_route() -> impl PossibleRouteMatch + Clone {
+    path!("/assets/:ticker")
+}
+
+fn asset_overview_route() -> impl PossibleRouteMatch + Clone {
+    path!("/assets/:ticker/overview")
+}
+
+fn asset_chart_route() -> impl PossibleRouteMatch + Clone {
+    path!("/assets/:ticker/chart")
+}
 
 #[component]
 pub fn AppRoutes() -> impl IntoView {
     view! {
-        <Routes fallback=NotFoundPage>
+        <FlatRoutes fallback=NotFoundPage>
             <Route path=path!("") view=DashboardPage />
             <Route path=path!("markets") view=MarketsPage />
             <Route path=path!("assets") view=AssetsPage />
-            <Route path=path!("assets/:ticker") view=AssetRedirect />
-            <Route path=path!("assets/:ticker/overview") view=AssetOverviewPage />
-            <Route path=path!("assets/:ticker/chart") view=AssetChartPage />
+            <Route path=asset_root_route() view=AssetRedirect />
+            <Route path=asset_overview_route() view=AssetOverviewPage />
+            <Route path=asset_chart_route() view=AssetChartPage />
             <Route path=path!("assets/:ticker/options") view=AssetOptionsPage />
             <Route path=path!("assets/:ticker/volatility") view=AssetVolatilityPage />
             <Route path=path!("assets/:ticker/gex") view=AssetGexPage />
             <Route path=path!("assets/:ticker/simulation") view=AssetSimulationPage />
             <Route path=path!("portfolio") view=PortfolioPage />
             <Route path=path!("settings") view=SettingsPage />
-        </Routes>
+        </FlatRoutes>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use leptos_router::{NestedRoute, PathSegment, RouteDefs};
+
+    fn runtime_asset_routes() -> RouteDefs<impl leptos_router::MatchNestedRoutes> {
+        RouteDefs::new((
+            NestedRoute::new(asset_root_route(), || ()),
+            NestedRoute::new(asset_overview_route(), || ()),
+            NestedRoute::new(asset_chart_route(), || ()),
+        ))
+    }
+
+    #[test]
+    fn runtime_asset_routes_match_paths_and_ignore_query() {
+        let routes = runtime_asset_routes();
+        let base = url::Url::parse(concat!("http", "://127.0.0.1:8080")).unwrap();
+        let overview = base.join("/assets/SPX/overview").unwrap();
+        let with_query = base.join("/assets/SPX/overview?scenario=normal").unwrap();
+        let invalid = base.join("/assets/SPX/not-a-route").unwrap();
+        let (_, generated) = routes.generate_routes();
+        let generated = generated
+            .into_iter()
+            .map(|route| route.segments)
+            .collect::<Vec<_>>();
+
+        assert!(recognizes(&generated, overview.path()));
+        assert!(recognizes(&generated, with_query.path()));
+        assert_eq!(with_query.query(), Some("scenario=normal"));
+        assert!(recognizes(&generated, "/assets/SPX"));
+        assert!(recognizes(&generated, "/assets/SPX/chart"));
+        for scenario in ["partial", "recoverable-error"] {
+            let url = base
+                .join(&format!("/assets/SPX/overview?scenario={scenario}"))
+                .unwrap();
+            assert!(recognizes(&generated, url.path()));
+        }
+        assert!(!recognizes(&generated, invalid.path()));
+    }
+
+    fn recognizes(routes: &[Vec<PathSegment>], path: &str) -> bool {
+        let values = path.trim_matches('/').split('/').collect::<Vec<_>>();
+        routes.iter().any(|segments| {
+            segments.len() == values.len()
+                && segments
+                    .iter()
+                    .zip(&values)
+                    .all(|(segment, value)| match segment {
+                        PathSegment::Static(expected) => expected == value,
+                        PathSegment::Param(_) => !value.is_empty(),
+                        _ => false,
+                    })
+        })
     }
 }

@@ -182,8 +182,10 @@ fn router_declares_the_approved_foundation_routes() {
         "portfolio",
         "settings",
     ] {
+        let relative = format!("path!(\"{route}\")");
+        let absolute = format!("path!(\"/{route}\")");
         assert!(
-            router.contains(&format!("path!(\"{route}\")")),
+            router.contains(&relative) || router.contains(&absolute),
             "router is missing {route}"
         );
     }
