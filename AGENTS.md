@@ -124,54 +124,69 @@ O frontend comunica exclusivamente com o backend Optima.
 
 Os pedidos reais devem ser same-origin e entrar pelas rotas do backend, normalmente sob `/api`.
 
-### 4.1 Organização pretendida
+### 4.1 Organização aprovada
 
-Usar esta estrutura como orientação:
+A organização aprovada combina camadas hexagonais globais, organizadas internamente por feature:
 
 ```text
 web/src/
+├── main.rs
+├── composition.rs
 ├── domain/
-│   ├── assets/
-│   ├── metrics/
-│   ├── charts/
-│   ├── options/
-│   └── portfolio/
-├── application/
-│   ├── asset_explorer/
-│   ├── market_overview/
-│   ├── volatility/
-│   ├── options/
-│   ├── gex/
+│   ├── asset/
+│   ├── navigation/
+│   ├── filters/
 │   └── simulation/
+├── application/
+│   ├── read_models/
+│   ├── asset_workspace/
+│   ├── chart/
+│   ├── options/
+│   ├── volatility/
+│   ├── gex/
+│   ├── simulation/
+│   └── portfolio/
 ├── ports/
 ├── driven_adapters/
-│   ├── http/
-│   └── mocks/
+│   ├── mocks/
+│   └── http/
 ├── driving_adapters/
 │   └── ui/
-│       ├── routes/
+│       ├── router/
 │       ├── layouts/
 │       ├── pages/
-│       └── components/
-├── charting/
-│   └── plotly/
-├── design_system/
-└── main.rs
+│       ├── components/
+│       └── plotly/
+└── design_system/
 ```
 
-A estrutura pode evoluir, mas as fronteiras arquiteturais não podem ser removidas.
+A estrutura pode ser refinada durante a implementação, mas as fronteiras não podem ser removidas.
 
 ### 4.2 Domínio do frontend
 
-O domínio do frontend pode definir:
+O domínio do frontend é fino e contém apenas conceitos próprios da experiência do utilizador:
 
-* identificadores e categorias de ativos;
-* métricas e respetivas unidades;
-* séries, superfícies e perfis financeiros;
-* semântica dos gráficos;
-* tipos abstratos de visualização;
-* intervalos, filtros e seleções válidas;
-* estados e invariantes relevantes para o utilizador.
+* contexto do ativo;
+* identidade apresentada;
+* capacidades disponíveis;
+* tabs e navegação;
+* filtros válidos;
+* seleção;
+* drafts de simulação ainda não enviados;
+* preferências estritamente locais quando autorizadas.
+
+O domínio do frontend não contém um segundo domínio financeiro. Não implementar novamente no frontend:
+
+* pricing;
+* Greeks;
+* Options Chain financeira;
+* GEX;
+* volatilidade implícita;
+* interpolação;
+* Monte Carlo;
+* VaR ou CVaR;
+* convenções financeiras;
+* regras canónicas já pertencentes ao backend.
 
 O domínio do frontend não pode importar ou conhecer:
 
@@ -184,7 +199,7 @@ O domínio do frontend não pode importar ou conhecer:
 * CSS ou Tailwind;
 * tipos específicos de componentes.
 
-Pode existir uma intenção abstrata como série temporal, superfície, distribuição ou perfil por strike. A transformação dessa intenção em traces e layouts Plotly pertence ao adapter de visualização.
+`presentation/` não pertence dentro de `domain/`. `DataState`, freshness, métricas formatadas, modelos de tabela e chart models são read models da application ou modelos de apresentação. Não chamar “domínio” a estruturas criadas apenas para renderização. Chart models permanecem provider-neutral e não conhecem Plotly.
 
 ### 4.3 Application do frontend
 
@@ -199,7 +214,16 @@ A application do frontend:
 * não cria traces ou layouts Plotly;
 * não faz pedidos HTTP diretamente.
 
-### 4.4 UI Leptos
+### 4.4 Ports e abstrações
+
+* Criar um port apenas quando existir uma dependência externa concreta exigida por um caso de uso.
+* Não criar antecipadamente ports para watchlist, realtime, catálogo, storage ou preferências.
+* Mocks e HTTP implementam o mesmo port quando o adapter HTTP existir.
+* Não criar um `ChartRendererPort`.
+* Plotly é um adapter concreto de visualização.
+* Não criar repositories, services, utils ou builders genéricos sem necessidade demonstrada.
+
+### 4.5 UI Leptos
 
 Os componentes Leptos são driving adapters.
 
@@ -216,11 +240,21 @@ Os componentes:
 * devem representar loading, unavailable, stale e error de forma explícita;
 * não devem montar todos os gráficos de todas as rotas simultaneamente.
 
-As tabs visuais que representam módulos diferentes devem corresponder a rotas reais e partilháveis.
+As tabs visuais que representam módulos diferentes devem corresponder a rotas reais e partilháveis. O routing é real e os gráficos são carregados apenas na respetiva rota, com lifecycle Plotly explícito.
 
-### 4.5 HTTP e mocks
+### 4.6 Estratégia mocks-first, HTTP e DTOs
 
-O adapter HTTP e o adapter de mocks devem implementar os mesmos ports.
+A sequência aprovada é:
+
+```text
+fundação
+    → ecrãs com mocks determinísticos
+        → validação visual e funcional
+            → contratos backend em falta
+                → integração HTTP página a página
+```
+
+Durante a primeira fase, os componentes usam casos de uso e ports e os mocks ficam centralizados. O adapter HTTP e o adapter de mocks implementam o mesmo port quando o HTTP existir.
 
 ```text
 Componente Leptos
@@ -234,39 +268,160 @@ Regras:
 * trocar mocks pelo backend não pode obrigar a reescrever os componentes;
 * mocks são centralizados, determinísticos e claramente identificados;
 * não espalhar valores mock diretamente pelos componentes;
+* não ligar prematuramente cada página ao HTTP;
 * mocks podem simular estados disponíveis, stale, indisponíveis e erros;
+* métricas ausentes no backend podem aparecer apenas como mock claramente identificado durante validação visual e nunca como funcionalidades reais;
 * DTOs HTTP são convertidos na fronteira;
 * os componentes nunca recebem diretamente DTOs HTTP;
 * não introduzir chamadas externas no adapter HTTP do frontend;
 * não criar cálculos financeiros falsos apenas para preencher os desenhos.
 
-### 4.6 Plotly
+### 4.7 Plotly
 
 Plotly é um adapter de visualização.
 
 * Manter configuração Plotly fora dos componentes de página.
-* Criar builders ou mappers pequenos por família de gráfico.
+* Criar mappers pequenos por família de gráfico apenas quando houver utilização concreta.
 * Receber modelos provider-neutral da application.
 * Não executar políticas financeiras dentro dos builders Plotly.
 * Preservar unidades, ordenação, escalas e significado dos dados.
 * Evitar configuração Plotly duplicada.
 * Carregar gráficos apenas nas rotas onde são necessários.
 * Testar separadamente transformações relevantes entre read models e traces.
+* Reutilizar os tokens visuais aprovados e não usar cores default do Plotly quando divergirem da baseline.
 
-### 4.7 Tailwind e design system
+### 4.8 Tailwind, design system e componentes
 
 * Usar Tailwind como sistema principal de styling.
 * Evitar CSS global extenso e estilos ad hoc repetidos.
 * Centralizar cores, tipografia, espaçamento, estados e tokens visuais.
-* Criar primitives reutilizáveis apenas quando existirem utilizações concretas.
+* Criar primitives e componentes reutilizáveis apenas quando existirem utilizações concretas.
 * Preservar consistência entre sidebar, headers, tabs, cards, tabelas, filtros e estados.
 * Não codificar arbitrariamente valores visuais repetidos em vários componentes.
 * Manter comportamento responsivo e acessibilidade por teclado.
 * Não sacrificar legibilidade financeira para reproduzir decoração das referências.
 
+A reutilização visual deve acontecer, por esta ordem, através de:
+
+1. tokens Tailwind;
+2. componentes Leptos concretos;
+3. utility classes;
+4. `@layer components` apenas para padrões CSS pequenos e realmente repetidos.
+
+Não recriar CSS tradicional através de uma grande coleção de classes com `@apply`.
+
+Componentes comuns aprovados como direção, apenas quando usados concretamente:
+
+* `AppShell`;
+* `Sidebar`;
+* `GlobalSearch`;
+* `AssetHeader`;
+* `AssetTabs`;
+* `PageToolbar`;
+* `Panel`;
+* `MetricStrip`;
+* `ChartFrame`;
+* `DataTable`;
+* `OptionsChain`;
+* `FilterBar`;
+* `FreshnessBadge`;
+* estados loading, stale, unavailable, empty e error.
+
+### 4.9 Baseline visual e cores
+
+A família de imagens com nomes semânticos em `Bloomberg/v2/` é a baseline visual. As outras imagens podem contribuir com ecrãs ou subvistas ausentes, mas não podem substituir o shell ou a paleta baseline.
+
+As cores observadas e aprovadas, extraídas dessas imagens, são:
+
+```text
+canvas             #030C17
+sidebar            #040E1A
+surface            #08111A
+surface-elevated   #0E1A27
+border             #1C2530
+chart-grid         #212935
+text-primary       #FFFFFF
+text-secondary     #A6AAAF
+text-muted-source  #4F5862
+interactive-source #1B5DCA
+finance-positive   #35A95C
+finance-negative   #DE3436
+level-special      #E38113
+state-hover        #0A1521
+state-selected     #173A6F
+state-focus        #1D62D2
+```
+
+Estas cores não podem ser substituídas por uma paleta arbitrária. Quando a mesma função variar noutra família visual, prevalece a cor da baseline, sem calcular médias.
+
+Para acessibilidade:
+
+* preservar as cores originais em backgrounds, gráficos, linhas, fills e elementos decorativos;
+* não alterar silenciosamente a identidade visual;
+* quando uma cor original falhar contraste como texto, criar um token textual adicional;
+* não substituir globalmente o token original.
+
+Variantes textuais aprovadas para os contextos que exigem contraste adicional:
+
+```text
+text-muted-readable #78828D
+interactive-text    #3B82F6
+negative-text       #EE4547
+```
+
+O tema Plotly deve reutilizar exatamente os mesmos tokens para paper background, plot background, grelha, eixos, labels, traces positivas e negativas, seleção, hover e níveis especiais.
+
+### 4.10 Decisões do MVP
+
+* O frontend é desktop escuro e denso, baseado na família semanticamente nomeada.
+* O ativo é o contexto central.
+* Cada módulo usa uma rota real.
+* Símbolo/ticker é o identificador inicial de rota enquanto o backend não fornecer um ID estável.
+* As tabs iniciais são Overview, Chart, Options, Volatility, GEX e Simulation.
+* O Chart inicial contém OHLC/candlestick e volume, sem RSI, MACD ou drawing tools no MVP.
+* Options Chain é uma tabela HTML, não um gráfico Plotly.
+* Em mobile, Options Chain usa uma apresentação adaptada sem esmagar todas as colunas.
+* Portfolio entra depois dos módulos principais do ativo.
+* News, Alerts e Events ficam fora enquanto não existirem contratos.
+* Monte Carlo, POP, VaR e CVaR ficam fora enquanto não existirem domínio e contratos.
+* Não mostrar Call Wall ou Put Wall sem definição financeira no backend.
+* Não mostrar IV Rank, IV Percentile ou 25-delta skew sem contrato.
+* `nearest_zero_crossing` não pode ser rotulado “Gamma Flip” sem decisão financeira explícita.
+* GEX apresenta exatamente unidades e convenções fornecidas pelo backend.
+* Não inferir regime long/short gamma no frontend.
+* Realtime não pode ser simulado como funcionalidade real sem contrato.
+
+### 4.11 Rotas de referência
+
+A direção atual é:
+
+```text
+/
+/markets
+/assets
+/assets/:ticker/overview
+/assets/:ticker/chart
+/assets/:ticker/options
+/assets/:ticker/volatility
+/assets/:ticker/gex
+/assets/:ticker/simulation
+/portfolio
+/settings
+```
+
+Rotas sem contratos, como News, não entram inicialmente. Subvistas analíticas podem usar query parameters, desde que sejam partilháveis e validadas:
+
+```text
+/assets/:ticker/volatility?view=...
+/assets/:ticker/gex?view=...
+/assets/:ticker/simulation?view=...
+```
+
 ## 5. Referências Bloomberg
 
-As imagens e textos em `Bloomberg/`, especialmente `Bloomberg/v2/`, são referências de produto e de composição visual.
+Apenas `Bloomberg/v2/` é referência ativa. `Bloomberg/v1/` é arquivo histórico e não orienta a implementação.
+
+Os PDFs são material editorial ou financeiro, não especificação de UI. As imagens são referências de produto e composição desktop, não uma especificação pixel-perfect. Os valores apresentados são ilustrativos e não podem ser transformados em regras financeiras.
 
 Antes de construir o frontend:
 
@@ -278,6 +433,8 @@ Antes de construir o frontend:
 * distinguir informação que o backend já fornece da que ainda não existe;
 * ler os textos de apoio antes de propor a implementação;
 * apresentar o inventário e as ambiguidades antes de começar alterações extensas.
+
+Loading, stale, unavailable, empty e error devem ser desenhados mesmo quando não aparecem nas imagens. Acessibilidade e responsividade são obrigatórias; a densidade desktop não deve ser simplesmente comprimida em ecrãs pequenos.
 
 As referências não autorizam a invenção de métricas ou contratos financeiros.
 
