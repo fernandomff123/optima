@@ -2,6 +2,16 @@ use crate::{application::asset_overview::PriceVolumeChart, design_system::tokens
 use leptos::prelude::*;
 
 const HOST_ID: &str = "asset-overview-price-volume";
+#[cfg(test)]
+const OVERVIEW_MODEBAR_BUTTONS: [&str; 7] = [
+    "zoom2d",
+    "pan2d",
+    "zoomIn2d",
+    "zoomOut2d",
+    "autoScale2d",
+    "resetScale2d",
+    "toImage",
+];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlotlySpec {
@@ -64,7 +74,13 @@ export function renderOverviewPlot(id, timesText, ticksText, prices, volumes, se
       {xref:'paper',x:1.008,yref:'y',y:lastPrice,text:lastPriceText,showarrow:false,xanchor:'left',font:{color:text,size:12},bgcolor:blue,borderpad:4},
       {xref:'paper',x:1.008,yref:'y2',y:lastVolume,text:lastVolumeText,showarrow:false,xanchor:'left',font:{color:text,size:11},bgcolor:green,borderpad:3}
     ]};
-  Plotly.react(id, data, layout, {responsive:true,displaylogo:false,displayModeBar:false});
+  Plotly.react(id, data, layout, {
+    responsive:true,
+    displaylogo:false,
+    displayModeBar:'hover',
+    scrollZoom:false,
+    modeBarButtonsToRemove:['select2d','lasso2d','hoverClosestCartesian','hoverCompareCartesian','toggleSpikelines']
+  });
 }
 export function purgeOverviewPlot(id) { Plotly.purge(id); }
 "#)]
@@ -133,7 +149,7 @@ pub fn AssetOverviewChart(chart: PriceVolumeChart) -> impl IntoView {
     });
     on_cleanup(move || purge_plot(HOST_ID));
     let periods = ["1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "5Y", "MAX"];
-    view! { <div class="flex min-h-0 flex-1 flex-col"><div id=HOST_ID class="min-h-64 w-full flex-1 bg-canvas" role="img" aria-label=description.clone()></div><p class="sr-only">{description}</p><div class="dense-scrollbar h-10 shrink-0 overflow-x-auto border-t border-border"><div class="flex h-10 min-w-max items-center gap-7 px-4 text-sm font-medium" aria-label="Chart period"><span class="flex h-10 items-center border-b-2 border-interactive-text text-interactive-text" aria-current="true">"1D"</span>{periods.into_iter().skip(1).map(|period| view! { <span class="text-text-secondary opacity-75" aria-disabled="true">{period}</span> }).collect_view()}</div></div></div> }
+    view! { <div class="flex min-h-0 flex-1 flex-col"><div id=HOST_ID class="min-h-64 w-full flex-1 bg-canvas" role="img" tabindex="0" aria-label=description.clone()></div><p class="sr-only">{description}</p><div class="dense-scrollbar h-10 shrink-0 overflow-x-auto border-t border-border"><div class="flex h-10 min-w-max items-center gap-7 px-4 text-sm font-medium" aria-label="Chart period"><span class="flex h-10 items-center border-b-2 border-interactive-text text-interactive-text" aria-current="true">"1D"</span>{periods.into_iter().skip(1).map(|period| view! { <span class="text-text-secondary opacity-75" aria-disabled="true">{period}</span> }).collect_view()}</div></div></div> }
 }
 
 #[cfg(test)]
@@ -161,5 +177,17 @@ mod tests {
         assert_eq!(spec.volumes, vec![0.8421]);
         assert_eq!(spec.session_end, "16:00");
         assert_eq!(spec.last_price, "5,303.27");
+        assert_eq!(
+            OVERVIEW_MODEBAR_BUTTONS,
+            [
+                "zoom2d",
+                "pan2d",
+                "zoomIn2d",
+                "zoomOut2d",
+                "autoScale2d",
+                "resetScale2d",
+                "toImage"
+            ]
+        );
     }
 }

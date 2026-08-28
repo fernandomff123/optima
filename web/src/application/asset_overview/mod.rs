@@ -11,8 +11,10 @@ use std::rc::Rc;
 pub struct DisplayMetric {
     pub label: String,
     pub value: Option<String>,
+    pub suffix: Option<String>,
     pub unit: Option<String>,
     pub tone: ValueTone,
+    pub numeric: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueTone {
@@ -27,6 +29,7 @@ pub struct DisplayTable {
     pub headings: Vec<String>,
     pub rows: Vec<Vec<Option<String>>>,
     pub tones: Vec<Vec<ValueTone>>,
+    pub suffixes: Vec<Vec<Option<String>>>,
     pub units: Vec<Vec<Option<String>>>,
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -179,8 +182,10 @@ fn metric(value: SnapshotMetric) -> DisplayMetric {
     DisplayMetric {
         label: value.label.into(),
         value: value.value.map(str::to_owned),
+        suffix: value.suffix.map(str::to_owned),
         unit: value.unit.map(str::to_owned),
         tone: tone(value.tone),
+        numeric: value.numeric,
     }
 }
 fn metrics(values: Vec<SnapshotMetric>) -> Vec<DisplayMetric> {
@@ -203,6 +208,15 @@ fn table(value: SnapshotTable) -> DisplayTable {
             .tones
             .into_iter()
             .map(|row| row.into_iter().map(tone).collect())
+            .collect(),
+        suffixes: value
+            .suffixes
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|suffix| suffix.map(str::to_owned))
+                    .collect()
+            })
             .collect(),
         units: value
             .units
@@ -282,6 +296,7 @@ mod tests {
                     headings: vec!["Period"],
                     rows: vec![vec![None]],
                     tones: vec![vec![SnapshotTone::Neutral]],
+                    suffixes: vec![vec![None]],
                     units: vec![vec![None]],
                 },
                 earnings: None,

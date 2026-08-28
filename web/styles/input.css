@@ -46,6 +46,12 @@
 @layer utilities {
   .numeric { font-variant-numeric: tabular-nums lining-nums; }
   .dense-scrollbar { scrollbar-color: var(--color-border) transparent; scrollbar-width: thin; }
+  #asset-overview-price-volume .modebar { @apply rounded border border-border bg-surface-elevated p-0.5; }
+  #asset-overview-price-volume .modebar-btn { color: var(--color-text-secondary) !important; }
+  #asset-overview-price-volume .modebar-btn:hover,
+  #asset-overview-price-volume .modebar-btn:focus { color: var(--color-interactive-text) !important; }
+  #asset-overview-price-volume:focus .modebar,
+  #asset-overview-price-volume:focus-within .modebar { opacity: 1 !important; }
 }
 
 @layer components {

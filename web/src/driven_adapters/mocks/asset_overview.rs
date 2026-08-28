@@ -30,9 +30,21 @@ impl AssetOverviewPort for MockAssetOverviewAdapter {
 }
 
 #[rustfmt::skip]
-fn m(label: &'static str, value: Option<&'static str>, unit: Option<&'static str>) -> SnapshotMetric { SnapshotMetric { label, value, unit, tone: SnapshotTone::Neutral } }
+fn m(label: &'static str, value: Option<&'static str>, unit: Option<&'static str>) -> SnapshotMetric { metric(label, value, None, unit, SnapshotTone::Neutral, true) }
 #[rustfmt::skip]
-fn mt(label: &'static str, value: Option<&'static str>, unit: Option<&'static str>, tone: SnapshotTone) -> SnapshotMetric { SnapshotMetric { label, value, unit, tone } }
+fn ms(label: &'static str, value: Option<&'static str>, suffix: &'static str) -> SnapshotMetric { metric(label, value, Some(suffix), None, SnapshotTone::Neutral, true) }
+fn mts(
+    label: &'static str,
+    value: Option<&'static str>,
+    suffix: &'static str,
+    tone: SnapshotTone,
+) -> SnapshotMetric {
+    metric(label, value, Some(suffix), None, tone, true)
+}
+#[rustfmt::skip]
+fn text(label: &'static str, value: &'static str, tone: SnapshotTone) -> SnapshotMetric { metric(label, Some(value), None, None, tone, false) }
+#[rustfmt::skip]
+fn metric(label: &'static str, value: Option<&'static str>, suffix: Option<&'static str>, unit: Option<&'static str>, tone: SnapshotTone, numeric: bool) -> SnapshotMetric { SnapshotMetric { label, value, suffix, unit, tone, numeric } }
 fn capabilities() -> Vec<AssetCapability> {
     vec![
         AssetCapability::Overview,
@@ -217,52 +229,42 @@ fn performance(symbol: &'static str, daily_change: &'static str) -> SnapshotTabl
             ],
         ],
         tones: performance_tones(),
-        units: vec![vec![None, Some("%"), Some("%"), Some("%")]; 8],
+        suffixes: vec![vec![None, Some("%"), Some("%"), Some("%")]; 8],
+        units: vec![vec![None; 4]; 8],
     }
 }
 fn earnings(partial: bool) -> Vec<SnapshotMetric> {
     vec![
-        mt(
-            "Next Earnings",
-            Some("May 1, 2025"),
-            None,
-            SnapshotTone::Special,
+        text("Next Earnings", "May 1, 2025", SnapshotTone::Special),
+        text(
+            "Expected Session",
+            "After Market Close",
+            SnapshotTone::Neutral,
         ),
-        m("Expected Session", Some("After Market Close"), None),
         m("Consensus EPS", Some("1.62"), Some("USD")),
-        mt("EPS YoY", Some("+5.88"), Some("%"), SnapshotTone::Positive),
+        mts("EPS YoY", Some("+5.88"), "%", SnapshotTone::Positive),
         m(
             "Revenue Estimate",
             if partial { None } else { Some("95.35B") },
             Some("USD"),
         ),
-        mt(
-            "Revenue YoY",
-            Some("+4.15"),
-            Some("%"),
-            SnapshotTone::Positive,
-        ),
-        m("Last Earnings", Some("Jan 30, 2025"), None),
-        mt(
-            "EPS Beat",
-            Some("0.06 (3.85%)"),
-            Some("USD"),
-            SnapshotTone::Positive,
-        ),
-        mt(
+        mts("Revenue YoY", Some("+4.15"), "%", SnapshotTone::Positive),
+        text("Last Earnings", "Jan 30, 2025", SnapshotTone::Neutral),
+        mts("EPS Beat", Some("0.06"), " (3.85%)", SnapshotTone::Positive),
+        mts(
             "Revenue Beat",
-            Some("1.65B (2.09%)"),
-            Some("USD"),
+            Some("1.65B"),
+            " (2.09%)",
             SnapshotTone::Positive,
         ),
     ]
 }
 fn options(partial: bool, include_average: bool) -> Vec<SnapshotMetric> {
     let mut values = vec![
-        m("ATM IV (30D)", Some("25.40"), Some("%")),
-        m("ATM IV (7D)", Some("23.10"), Some("%")),
-        m("IV Rank (1Y)", Some("42.30"), None),
-        m("IV Percentile (1Y)", Some("56.00"), Some("%")),
+        ms("ATM IV (30D)", Some("25.4"), "%"),
+        ms("ATM IV (7D)", Some("23.1"), "%"),
+        m("IV Rank (1Y)", Some("42.3"), None),
+        ms("IV Percentile (1Y)", Some("56"), "%"),
         m("Put-Call Ratio (Volume)", Some("0.68"), None),
         m("Put-Call Ratio (OI)", Some("0.79"), None),
         m(
@@ -311,6 +313,19 @@ mod tests {
         for label in ["EPS YoY", "Revenue YoY", "EPS Beat", "Revenue Beat"] { assert_eq!(earnings.iter().find(|metric| metric.label == label).unwrap().tone, SnapshotTone::Positive); }
         assert!(aapl.key_statistics.iter().all(|metric| metric.tone == SnapshotTone::Neutral));
         assert_eq!(aapl.options_snapshot.iter().find(|metric| metric.label == "Total Open Interest").unwrap().tone, SnapshotTone::Neutral);
+    }
+    #[test]
+    fn financial_fixtures_define_precision_suffixes_units_and_text_explicitly() {
+        let aapl = load("AAPL", OverviewScenario::Normal); let options = &aapl.options_snapshot;
+        for (label, value, suffix) in [("ATM IV (30D)", "25.4", "%"), ("ATM IV (7D)", "23.1", "%"), ("IV Percentile (1Y)", "56", "%")] {
+            let metric = options.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.value, Some(value)); assert_eq!(metric.suffix, Some(suffix)); assert_eq!(metric.unit, None);
+        }
+        for (label, value, unit) in [("Total Open Interest", "7.42M", "contracts"), ("Average Daily Volume (30D)", "55.21M", "shares")] {
+            let metric = options.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.value, Some(value)); assert_eq!(metric.unit, Some(unit)); assert_eq!(metric.suffix, None);
+        }
+        let earnings = aapl.earnings.unwrap();
+        for label in ["Next Earnings", "Expected Session", "Last Earnings"] { assert!(!earnings.iter().find(|metric| metric.label == label).unwrap().numeric); }
+        for label in ["EPS Beat", "Revenue Beat"] { let metric = earnings.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.unit, None); assert!(metric.suffix.unwrap().contains('%')); }
     }
     #[test]
     fn aapl_chart_is_dense_aligned_positive_and_stops_at_as_of() {

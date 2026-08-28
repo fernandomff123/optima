@@ -91,6 +91,21 @@ fn plotly_is_local_and_cleanup_uses_purge() {
     assert!(overview.contains("build_price_volume_plot"));
     assert!(overview.contains("PriceVolumeChart"));
     assert!(!overview.contains("MockAssetOverviewAdapter"));
+    assert!(overview.contains("displayModeBar:'hover'"));
+    assert!(overview.contains("displaylogo:false"));
+    assert!(overview.contains("scrollZoom:false"));
+    for removed in [
+        "select2d",
+        "lasso2d",
+        "hoverClosestCartesian",
+        "hoverCompareCartesian",
+        "toggleSpikelines",
+    ] {
+        assert!(overview.contains(removed));
+    }
+    for preserved in ["Plotly.react", "responsive:true", "purgeOverviewPlot"] {
+        assert!(overview.contains(preserved));
+    }
 }
 
 #[test]
@@ -152,12 +167,21 @@ fn financial_alignment_uses_explicit_tones_and_unit_columns() {
             .unwrap();
     let fixture = fs::read_to_string(root.join("driven_adapters/mocks/asset_overview.rs")).unwrap();
     assert!(value.contains("grid-cols-[minmax(0,1fr)_3.75rem]"));
-    assert!(value.contains("numeric text-right"));
+    assert!(value.contains("numeric whitespace-nowrap text-right"));
+    assert!(value.contains("<span>{value}</span><span>{suffix}</span>"));
+    assert!(value.contains("text-text-muted-readable"));
     assert!(table.contains("table-header text-right"));
     assert!(!table.contains("starts_with"));
     assert!(!table.contains("contains('+')") && !table.contains("contains('-')"));
     assert!(fixture.contains("Total Open Interest"));
     assert!(fixture.contains("Some(\"contracts\")"));
+    assert!(fixture.contains("Some(\"shares\")"));
+    assert!(fixture.contains("Some(\"USD\")"));
+    assert!(!value.contains("starts_with") && !value.contains("contains('%')"));
+    let facts =
+        fs::read_to_string(root.join("driving_adapters/ui/components/fact_table.rs")).unwrap();
+    assert!(facts.contains("if metric.numeric"));
+    assert!(!facts.contains("parse::<") && !facts.contains("starts_with"));
 }
 
 #[test]

@@ -29,8 +29,10 @@ impl OverviewScenario {
 pub struct SnapshotMetric {
     pub label: &'static str,
     pub value: Option<&'static str>,
+    pub suffix: Option<&'static str>,
     pub unit: Option<&'static str>,
     pub tone: SnapshotTone,
+    pub numeric: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +49,7 @@ pub struct SnapshotTable {
     pub headings: Vec<&'static str>,
     pub rows: Vec<Vec<Option<&'static str>>>,
     pub tones: Vec<Vec<SnapshotTone>>,
+    pub suffixes: Vec<Vec<Option<&'static str>>>,
     pub units: Vec<Vec<Option<&'static str>>>,
 }
 
