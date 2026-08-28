@@ -143,6 +143,46 @@ fn optional_content_and_fixtures_do_not_live_in_the_ui() {
 }
 
 #[test]
+fn financial_alignment_uses_explicit_tones_and_unit_columns() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let value =
+        fs::read_to_string(root.join("driving_adapters/ui/components/financial_value.rs")).unwrap();
+    let table =
+        fs::read_to_string(root.join("driving_adapters/ui/components/performance_table.rs"))
+            .unwrap();
+    let fixture = fs::read_to_string(root.join("driven_adapters/mocks/asset_overview.rs")).unwrap();
+    assert!(value.contains("grid-cols-[minmax(0,1fr)_3.75rem]"));
+    assert!(value.contains("numeric text-right"));
+    assert!(table.contains("table-header text-right"));
+    assert!(!table.contains("starts_with"));
+    assert!(!table.contains("contains('+')") && !table.contains("contains('-')"));
+    assert!(fixture.contains("Total Open Interest"));
+    assert!(fixture.contains("Some(\"contracts\")"));
+}
+
+#[test]
+fn global_sidebar_uses_local_lucide_icons_and_real_destinations() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let navigation = fs::read_to_string(root.join("src/domain/navigation.rs")).unwrap();
+    let icons =
+        fs::read_to_string(root.join("src/driving_adapters/ui/components/icon.rs")).unwrap();
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    for (label, route) in [
+        ("Options", "/options"),
+        ("Volatility", "/volatility"),
+        ("GEX / Flow", "/gex"),
+        ("Simulations", "/simulations"),
+    ] {
+        assert!(navigation.contains(label) && navigation.contains(route));
+    }
+    for icon in ["Options", "Volatility", "Gex", "Simulations"] {
+        assert!(icons.contains(&format!("ShellIconKind::{icon}")));
+    }
+    assert!(icons.contains("stroke=\"currentColor\"") && icons.contains("stroke-width=\"1.5\""));
+    assert!(!manifest.contains("lucide") && !manifest.contains("icon"));
+}
+
+#[test]
 fn overview_has_no_http_or_backend_contract_shortcuts() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
@@ -218,6 +258,7 @@ fn asset_overview_uses_only_approved_hex_colors() {
         "src/driving_adapters/ui/components/panel.rs",
         "src/driving_adapters/ui/components/key_statistics.rs",
         "src/driving_adapters/ui/components/latest_news.rs",
+        "src/driving_adapters/ui/components/financial_value.rs",
         "src/driving_adapters/ui/plotly/asset_overview.rs",
     ] {
         let source = fs::read_to_string(root.join(relative)).unwrap();

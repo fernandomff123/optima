@@ -1,7 +1,7 @@
 use super::pages::{
     AssetChartPage, AssetGexPage, AssetOptionsPage, AssetOverviewPage, AssetRedirect,
-    AssetSimulationPage, AssetVolatilityPage, AssetsPage, DashboardPage, MarketsPage, NotFoundPage,
-    PortfolioPage, SettingsPage,
+    AssetSimulationPage, AssetVolatilityPage, AssetsPage, DashboardPage, GexPage, MarketsPage,
+    NotFoundPage, OptionsPage, PortfolioPage, SettingsPage, SimulationsPage, VolatilityPage,
 };
 use leptos::prelude::*;
 use leptos_router::{
@@ -21,6 +21,18 @@ fn asset_overview_route() -> impl PossibleRouteMatch + Clone {
 fn asset_chart_route() -> impl PossibleRouteMatch + Clone {
     path!("/assets/:ticker/chart")
 }
+fn options_route() -> impl PossibleRouteMatch + Clone {
+    path!("/options")
+}
+fn volatility_route() -> impl PossibleRouteMatch + Clone {
+    path!("/volatility")
+}
+fn gex_route() -> impl PossibleRouteMatch + Clone {
+    path!("/gex")
+}
+fn simulations_route() -> impl PossibleRouteMatch + Clone {
+    path!("/simulations")
+}
 
 #[component]
 pub fn AppRoutes() -> impl IntoView {
@@ -29,6 +41,10 @@ pub fn AppRoutes() -> impl IntoView {
             <Route path=path!("") view=DashboardPage />
             <Route path=path!("markets") view=MarketsPage />
             <Route path=path!("assets") view=AssetsPage />
+            <Route path=options_route() view=OptionsPage />
+            <Route path=volatility_route() view=VolatilityPage />
+            <Route path=gex_route() view=GexPage />
+            <Route path=simulations_route() view=SimulationsPage />
             <Route path=asset_root_route() view=AssetRedirect />
             <Route path=asset_overview_route() view=AssetOverviewPage />
             <Route path=asset_chart_route() view=AssetChartPage />
@@ -53,6 +69,29 @@ mod tests {
             NestedRoute::new(asset_overview_route(), || ()),
             NestedRoute::new(asset_chart_route(), || ()),
         ))
+    }
+
+    fn runtime_global_routes() -> RouteDefs<impl leptos_router::MatchNestedRoutes> {
+        RouteDefs::new((
+            NestedRoute::new(options_route(), || ()),
+            NestedRoute::new(volatility_route(), || ()),
+            NestedRoute::new(gex_route(), || ()),
+            NestedRoute::new(simulations_route(), || ()),
+        ))
+    }
+
+    #[test]
+    fn runtime_global_routes_support_direct_deep_links() {
+        let routes = runtime_global_routes();
+        let (_, generated) = routes.generate_routes();
+        let generated = generated
+            .into_iter()
+            .map(|route| route.segments)
+            .collect::<Vec<_>>();
+        for path in ["/options", "/volatility", "/gex", "/simulations"] {
+            assert!(recognizes(&generated, path));
+        }
+        assert!(!recognizes(&generated, "/options/not-a-route"));
     }
 
     #[test]

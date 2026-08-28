@@ -34,9 +34,10 @@ can become a live capability.
 
 ## Shell icons
 
-The five inline shell icons are copied without redrawing from the official
+The nine inline shell icons are copied without redrawing from the official
 [Lucide icon source](https://github.com/lucide-icons/lucide/tree/main/icons):
-`layout-dashboard`, `chart-candlestick`, `search`, `briefcase`, and `settings`.
+`layout-dashboard`, `chart-candlestick`, `search`, `circle-dollar-sign`,
+`activity`, `chart-no-axes-column`, `git-branch`, `briefcase`, and `settings`.
 Lucide is distributed under the ISC license; `search` is derived from Feather
-and retains its MIT license. Only these five local SVG definitions are compiled
+and retains its MIT license. Only these nine local SVG definitions are compiled
 into the application; there is no runtime icon dependency or external request.

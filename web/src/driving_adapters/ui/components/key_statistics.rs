@@ -1,3 +1,4 @@
+use super::FinancialValue;
 use crate::application::asset_overview::{DisplayMetric, DisplayRange};
 use leptos::prelude::*;
 
@@ -35,13 +36,12 @@ pub fn KeyStatistics(
 
 #[component]
 fn MetricRows(metrics: Vec<DisplayMetric>) -> impl IntoView {
-    metrics.into_iter().map(|metric| view! {
+    metrics.into_iter().map(|metric| {
+        let label = metric.label;
+        view! {
         <div class="fact-row">
-            <dt class="text-text-secondary">{metric.label}</dt>
-            <dd class="numeric text-right font-medium text-text-primary">
-                {metric.value.unwrap_or_else(|| "Unavailable".into())}
-                {metric.unit.map(|unit| view! { <span class="ml-1 text-xs font-normal text-text-muted-readable">{unit}</span> })}
-            </dd>
+            <dt class="text-text-secondary">{label.clone()}</dt>
+            <dd class="ml-auto shrink-0 text-right"><FinancialValue value=metric.value unit=metric.unit tone=metric.tone label /></dd>
         </div>
-    }).collect_view()
+    }}).collect_view()
 }

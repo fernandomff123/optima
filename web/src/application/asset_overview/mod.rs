@@ -2,7 +2,7 @@ use crate::{
     domain::asset::{AssetCapability, AssetKind, AssetSymbol},
     ports::asset_overview::{
         AssetOverviewFailure, AssetOverviewPort, AssetOverviewSnapshot, OverviewScenario,
-        SnapshotMetric, SnapshotNewsItem, SnapshotTable,
+        SnapshotMetric, SnapshotNewsItem, SnapshotTable, SnapshotTone,
     },
 };
 use std::rc::Rc;
@@ -12,12 +12,22 @@ pub struct DisplayMetric {
     pub label: String,
     pub value: Option<String>,
     pub unit: Option<String>,
+    pub tone: ValueTone,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ValueTone {
+    Positive,
+    Negative,
+    Neutral,
+    Special,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayTable {
     pub title: String,
     pub headings: Vec<String>,
     pub rows: Vec<Vec<Option<String>>>,
+    pub tones: Vec<Vec<ValueTone>>,
+    pub units: Vec<Vec<Option<String>>>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayRange {
@@ -170,6 +180,7 @@ fn metric(value: SnapshotMetric) -> DisplayMetric {
         label: value.label.into(),
         value: value.value.map(str::to_owned),
         unit: value.unit.map(str::to_owned),
+        tone: tone(value.tone),
     }
 }
 fn metrics(values: Vec<SnapshotMetric>) -> Vec<DisplayMetric> {
@@ -188,6 +199,28 @@ fn table(value: SnapshotTable) -> DisplayTable {
                     .collect()
             })
             .collect(),
+        tones: value
+            .tones
+            .into_iter()
+            .map(|row| row.into_iter().map(tone).collect())
+            .collect(),
+        units: value
+            .units
+            .into_iter()
+            .map(|row| {
+                row.into_iter()
+                    .map(|unit| unit.map(str::to_owned))
+                    .collect()
+            })
+            .collect(),
+    }
+}
+fn tone(value: SnapshotTone) -> ValueTone {
+    match value {
+        SnapshotTone::Positive => ValueTone::Positive,
+        SnapshotTone::Negative => ValueTone::Negative,
+        SnapshotTone::Neutral => ValueTone::Neutral,
+        SnapshotTone::Special => ValueTone::Special,
     }
 }
 fn news(value: SnapshotNewsItem) -> NewsItem {
@@ -248,6 +281,8 @@ mod tests {
                     title: "Performance",
                     headings: vec!["Period"],
                     rows: vec![vec![None]],
+                    tones: vec![vec![SnapshotTone::Neutral]],
+                    units: vec![vec![None]],
                 },
                 earnings: None,
                 index_facts: Some(vec![]),
@@ -278,5 +313,12 @@ mod tests {
             AssetOverviewState::Loading
         );
         assert_eq!(port.0.get(), 0);
+    }
+    #[test]
+    fn provider_neutral_tones_are_preserved_for_the_ui() {
+        assert_eq!(tone(SnapshotTone::Positive), ValueTone::Positive);
+        assert_eq!(tone(SnapshotTone::Negative), ValueTone::Negative);
+        assert_eq!(tone(SnapshotTone::Neutral), ValueTone::Neutral);
+        assert_eq!(tone(SnapshotTone::Special), ValueTone::Special);
     }
 }

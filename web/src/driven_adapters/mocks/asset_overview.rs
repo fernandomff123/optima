@@ -3,7 +3,7 @@ use crate::{
     domain::asset::{AssetCapability, AssetKind, AssetSymbol},
     ports::asset_overview::{
         AssetOverviewFailure, AssetOverviewPort, AssetOverviewSnapshot, OverviewScenario,
-        SnapshotMetric, SnapshotNewsItem, SnapshotRange, SnapshotTable,
+        SnapshotMetric, SnapshotNewsItem, SnapshotRange, SnapshotTable, SnapshotTone,
     },
 };
 
@@ -30,7 +30,9 @@ impl AssetOverviewPort for MockAssetOverviewAdapter {
 }
 
 #[rustfmt::skip]
-fn m(label: &'static str, value: Option<&'static str>, unit: Option<&'static str>) -> SnapshotMetric { SnapshotMetric { label, value, unit } }
+fn m(label: &'static str, value: Option<&'static str>, unit: Option<&'static str>) -> SnapshotMetric { SnapshotMetric { label, value, unit, tone: SnapshotTone::Neutral } }
+#[rustfmt::skip]
+fn mt(label: &'static str, value: Option<&'static str>, unit: Option<&'static str>, tone: SnapshotTone) -> SnapshotMetric { SnapshotMetric { label, value, unit, tone } }
 fn capabilities() -> Vec<AssetCapability> {
     vec![
         AssetCapability::Overview,
@@ -94,8 +96,8 @@ fn aapl_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOverv
             m("P/E (TTM)", Some("29.50"), None),
             m("EPS (TTM)", Some("6.48"), Some("USD")),
             m("Beta (5Y Monthly)", Some("1.23"), None),
-            m("IV Rank (1Y)", Some("42.3"), None),
-            m("IV Percentile (1Y)", Some("56%"), None),
+            m("IV Rank (1Y)", Some("42.30"), None),
+            m("IV Percentile (1Y)", Some("56.00"), Some("%")),
         ],
         year_range: Some(SnapshotRange {
             label: "52W Range",
@@ -105,7 +107,7 @@ fn aapl_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOverv
             insert_after: 6,
             accessible_value: "Current price 191.13 USD within a 52 week range of 164.08 to 199.62 USD",
         }),
-        performance: performance("AAPL", "+1.24%"),
+        performance: performance("AAPL", "+1.24"),
         earnings: Some(earnings(partial)),
         index_facts: None,
         options_snapshot: options(partial, true),
@@ -147,9 +149,9 @@ fn spx_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOvervi
             ),
             m("Components", Some("503"), None),
             m("P/E (TTM)", Some("29.50"), None),
-            m("Dividend Yield", Some("1.31%"), None),
-            m("IV Rank (1Y)", Some("42.3"), None),
-            m("IV Percentile (1Y)", Some("56%"), None),
+            m("Dividend Yield", Some("1.31"), Some("%")),
+            m("IV Rank (1Y)", Some("42.30"), None),
+            m("IV Percentile (1Y)", Some("56.00"), Some("%")),
         ],
         year_range: Some(SnapshotRange {
             label: "52W Range",
@@ -159,7 +161,7 @@ fn spx_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOvervi
             insert_after: 4,
             accessible_value: "Current index level 5,303.27 within a 52 week range of 4,103.78 to 5,669.67",
         }),
-        performance: performance("SPX", "+0.72%"),
+        performance: performance("SPX", "+0.72"),
         earnings: None,
         index_facts: Some(vec![
             m("Index family", Some("S&P U.S. Indices"), None),
@@ -184,70 +186,83 @@ fn fallback_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetO
     snapshot
 }
 
+#[rustfmt::skip]
+fn performance_tones() -> Vec<Vec<SnapshotTone>> {
+    use SnapshotTone::{Negative as N, Neutral as Z, Positive as P};
+    vec![vec![Z,P,P,P],vec![Z,N,P,N],vec![Z,P,P,P],vec![Z,P,P,P],vec![Z,P,P,P],vec![Z,P,P,P],vec![Z,P,P,P],vec![Z,P,P,P]]
+}
+
 fn performance(symbol: &'static str, daily_change: &'static str) -> SnapshotTable {
     SnapshotTable {
         title: "Performance",
         headings: vec!["Period", symbol, "NASDAQ-100", "S&P 500"],
         rows: vec![
-            vec![
-                Some("1D"),
-                Some(daily_change),
-                Some("+0.84%"),
-                Some("+0.72%"),
-            ],
-            vec![Some("5D"), Some("-1.18%"), Some("+0.32%"), Some("-0.04%")],
-            vec![Some("1M"), Some("+4.73%"), Some("+6.21%"), Some("+3.81%")],
-            vec![
-                Some("3M"),
-                Some("+12.58%"),
-                Some("+14.92%"),
-                Some("+10.25%"),
-            ],
-            vec![Some("YTD"), Some("+7.68%"), Some("+9.41%"), Some("+6.15%")],
-            vec![
-                Some("1Y"),
-                Some("+24.63%"),
-                Some("+27.88%"),
-                Some("+18.62%"),
-            ],
+            vec![Some("1D"), Some(daily_change), Some("+0.84"), Some("+0.72")],
+            vec![Some("5D"), Some("-1.18"), Some("+0.32"), Some("-0.04")],
+            vec![Some("1M"), Some("+4.73"), Some("+6.21"), Some("+3.81")],
+            vec![Some("3M"), Some("+12.58"), Some("+14.92"), Some("+10.25")],
+            vec![Some("YTD"), Some("+7.68"), Some("+9.41"), Some("+6.15")],
+            vec![Some("1Y"), Some("+24.63"), Some("+27.88"), Some("+18.62")],
             vec![
                 Some("3Y (Ann.)"),
-                Some("+18.44%"),
-                Some("+16.19%"),
-                Some("+11.49%"),
+                Some("+18.44"),
+                Some("+16.19"),
+                Some("+11.49"),
             ],
             vec![
                 Some("5Y (Ann.)"),
-                Some("+19.87%"),
-                Some("+17.23%"),
-                Some("+15.26%"),
+                Some("+19.87"),
+                Some("+17.23"),
+                Some("+15.26"),
             ],
         ],
+        tones: performance_tones(),
+        units: vec![vec![None, Some("%"), Some("%"), Some("%")]; 8],
     }
 }
 fn earnings(partial: bool) -> Vec<SnapshotMetric> {
     vec![
-        m("Next Earnings", Some("May 1, 2025"), None),
+        mt(
+            "Next Earnings",
+            Some("May 1, 2025"),
+            None,
+            SnapshotTone::Special,
+        ),
         m("Expected Session", Some("After Market Close"), None),
         m("Consensus EPS", Some("1.62"), Some("USD")),
-        m("EPS YoY", Some("+5.88%"), None),
+        mt("EPS YoY", Some("+5.88"), Some("%"), SnapshotTone::Positive),
         m(
             "Revenue Estimate",
             if partial { None } else { Some("95.35B") },
             Some("USD"),
         ),
-        m("Revenue YoY", Some("+4.15%"), None),
+        mt(
+            "Revenue YoY",
+            Some("+4.15"),
+            Some("%"),
+            SnapshotTone::Positive,
+        ),
         m("Last Earnings", Some("Jan 30, 2025"), None),
-        m("EPS Beat", Some("0.06 (3.85%)"), Some("USD")),
-        m("Revenue Beat", Some("1.65B (2.09%)"), Some("USD")),
+        mt(
+            "EPS Beat",
+            Some("0.06 (3.85%)"),
+            Some("USD"),
+            SnapshotTone::Positive,
+        ),
+        mt(
+            "Revenue Beat",
+            Some("1.65B (2.09%)"),
+            Some("USD"),
+            SnapshotTone::Positive,
+        ),
     ]
 }
 fn options(partial: bool, include_average: bool) -> Vec<SnapshotMetric> {
     let mut values = vec![
-        m("ATM IV (30D)", Some("25.4%"), None),
-        m("ATM IV (7D)", Some("23.1%"), None),
-        m("IV Rank (1Y)", Some("42.3"), None),
-        m("IV Percentile (1Y)", Some("56%"), None),
+        m("ATM IV (30D)", Some("25.40"), Some("%")),
+        m("ATM IV (7D)", Some("23.10"), Some("%")),
+        m("IV Rank (1Y)", Some("42.30"), None),
+        m("IV Percentile (1Y)", Some("56.00"), Some("%")),
         m("Put-Call Ratio (Volume)", Some("0.68"), None),
         m("Put-Call Ratio (OI)", Some("0.79"), None),
         m(
@@ -281,68 +296,33 @@ fn index_news() -> Vec<SnapshotNewsItem> { vec![
 ] }
 
 #[cfg(test)]
+#[rustfmt::skip]
 mod tests {
     use super::*;
-    fn load(symbol: &str, scenario: OverviewScenario) -> AssetOverviewSnapshot {
-        MockAssetOverviewAdapter
-            .load(&AssetSymbol::new(symbol), scenario)
-            .unwrap()
-            .unwrap()
-    }
-    fn minutes(time: &str) -> i32 {
-        let (h, m) = time.split_once(':').unwrap();
-        h.parse::<i32>().unwrap() * 60 + m.parse::<i32>().unwrap()
-    }
+    fn load(symbol: &str, scenario: OverviewScenario) -> AssetOverviewSnapshot { MockAssetOverviewAdapter.load(&AssetSymbol::new(symbol), scenario).unwrap().unwrap() }
+    fn minutes(time: &str) -> i32 { let (h, m) = time.split_once(':').unwrap(); h.parse::<i32>().unwrap() * 60 + m.parse::<i32>().unwrap() }
     #[test]
     fn fixtures_select_asset_kind_and_optional_panels() {
-        let aapl = load("AAPL", OverviewScenario::Normal);
-        let spx = load("SPX", OverviewScenario::Normal);
-        assert_eq!(aapl.kind, AssetKind::Equity);
-        assert!(aapl.earnings.is_some() && aapl.index_facts.is_none());
-        assert_eq!(spx.kind, AssetKind::Index);
-        assert!(spx.earnings.is_none() && spx.index_facts.is_some());
+        let aapl = load("AAPL", OverviewScenario::Normal); let spx = load("SPX", OverviewScenario::Normal);
+        assert_eq!(aapl.kind, AssetKind::Equity); assert!(aapl.earnings.is_some() && aapl.index_facts.is_none());
+        assert_eq!(spx.kind, AssetKind::Index); assert!(spx.earnings.is_none() && spx.index_facts.is_some());
+        let earnings = aapl.earnings.unwrap();
+        assert_eq!(earnings.iter().find(|metric| metric.label == "Next Earnings").unwrap().tone, SnapshotTone::Special);
+        for label in ["EPS YoY", "Revenue YoY", "EPS Beat", "Revenue Beat"] { assert_eq!(earnings.iter().find(|metric| metric.label == label).unwrap().tone, SnapshotTone::Positive); }
+        assert!(aapl.key_statistics.iter().all(|metric| metric.tone == SnapshotTone::Neutral));
+        assert_eq!(aapl.options_snapshot.iter().find(|metric| metric.label == "Total Open Interest").unwrap().tone, SnapshotTone::Neutral);
     }
     #[test]
     fn aapl_chart_is_dense_aligned_positive_and_stops_at_as_of() {
-        let s = load("AAPL", OverviewScenario::Normal);
-        assert_eq!(s.chart_times.len(), 211);
-        assert_eq!(s.chart_times.len(), s.chart_prices.len());
-        assert_eq!(s.chart_times.len(), s.chart_volumes.len());
-        assert_eq!(s.chart_times.first().map(String::as_str), Some("09:30"));
-        assert_eq!(s.chart_times.last().map(String::as_str), Some("13:00"));
-        assert!(
-            s.chart_times
-                .windows(2)
-                .all(|p| minutes(&p[1]) - minutes(&p[0]) == 1)
-        );
-        assert!(
-            s.chart_prices
-                .iter()
-                .chain(s.chart_volumes.iter())
-                .all(|v| v.is_finite() && *v > 0.0)
-        );
-        assert!(minutes(s.chart_times.last().unwrap()) <= minutes(&s.observed_at[..5]));
-        assert_eq!(s.chart_session_end, "16:00");
+        let s = load("AAPL", OverviewScenario::Normal); assert_eq!(s.chart_times.len(), 211);
+        assert_eq!(s.chart_times.len(), s.chart_prices.len()); assert_eq!(s.chart_times.len(), s.chart_volumes.len());
+        assert_eq!(s.chart_times.first().map(String::as_str), Some("09:30")); assert_eq!(s.chart_times.last().map(String::as_str), Some("13:00"));
+        assert!(s.chart_times.windows(2).all(|p| minutes(&p[1]) - minutes(&p[0]) == 1));
+        assert!(s.chart_prices.iter().chain(s.chart_volumes.iter()).all(|v| v.is_finite() && *v > 0.0));
+        assert!(minutes(s.chart_times.last().unwrap()) <= minutes(&s.observed_at[..5])); assert_eq!(s.chart_session_end, "16:00");
     }
     #[test]
-    fn scenarios_and_fallback_are_deterministic() {
-        assert_eq!(
-            load("AAPL", OverviewScenario::Normal),
-            load("AAPL", OverviewScenario::Normal)
-        );
-        assert_eq!(load("XYZ", OverviewScenario::Normal).name, "Mock Equity");
-        assert_eq!(
-            OverviewScenario::from_query(Some("other")),
-            OverviewScenario::Normal
-        );
-    }
+    fn scenarios_and_fallback_are_deterministic() { assert_eq!(load("AAPL", OverviewScenario::Normal), load("AAPL", OverviewScenario::Normal)); assert_eq!(load("XYZ", OverviewScenario::Normal).name, "Mock Equity"); assert_eq!(OverviewScenario::from_query(Some("other")), OverviewScenario::Normal); }
     #[test]
-    fn partial_preserves_chart_and_missing_is_not_zero() {
-        let normal = load("SPX", OverviewScenario::Normal);
-        let partial = load("SPX", OverviewScenario::Partial);
-        assert_eq!(normal.chart_times, partial.chart_times);
-        assert_eq!(normal.chart_prices, partial.chart_prices);
-        assert_eq!(normal.chart_volumes, partial.chart_volumes);
-        assert!(partial.key_statistics[0].value.is_none());
-    }
+    fn partial_preserves_chart_and_missing_is_not_zero() { let normal = load("SPX", OverviewScenario::Normal); let partial = load("SPX", OverviewScenario::Partial); assert_eq!(normal.chart_times, partial.chart_times); assert_eq!(normal.chart_prices, partial.chart_prices); assert_eq!(normal.chart_volumes, partial.chart_volumes); assert!(partial.key_statistics[0].value.is_none()); }
 }

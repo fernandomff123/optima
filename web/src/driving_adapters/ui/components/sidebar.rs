@@ -10,6 +10,10 @@ fn navigation_icon(href: &str) -> AnyView {
         "/" => ShellIconKind::Dashboard,
         "/markets" => ShellIconKind::Markets,
         "/assets" => ShellIconKind::Search,
+        "/options" => ShellIconKind::Options,
+        "/volatility" => ShellIconKind::Volatility,
+        "/gex" => ShellIconKind::Gex,
+        "/simulations" => ShellIconKind::Simulations,
         "/portfolio" => ShellIconKind::Portfolio,
         "/settings" => ShellIconKind::Settings,
         _ => return ().into_any(),
@@ -31,6 +35,7 @@ pub fn Sidebar() -> impl IntoView {
                     let aria_location = location.clone();
                     let class_location = location.clone();
                     view! {
+                        {item.separator_before.then(|| view! { <div class="my-3 border-t border-border" aria-hidden="true"></div> })}
                         <A href=item.href
                             attr:aria-label=item.label
                             attr:title=item.label
@@ -63,6 +68,7 @@ pub fn MobileNavigation() -> impl IntoView {
                 let aria_location = location.clone();
                 let class_location = location.clone();
                 view! {
+                    {item.separator_before.then(|| view! { <span class="my-2 border-l border-border" aria-hidden="true"></span> })}
                     <A href=item.href
                         attr:aria-current=move || item.is_current(&aria_location.pathname.get()).then_some("page")
                         attr:class=move || if item.is_current(&class_location.pathname.get()) {
