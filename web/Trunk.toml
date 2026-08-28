@@ -1,17 +1,13 @@
 [build]
 target = "index.html"
 dist = "dist"
+public_url = "/"
 
-[serve]
-addresses = ["127.0.0.1"]
-port = 8180
-open = false
+[watch]
+watch = ["src", "styles", "index.html"]
+ignore = ["styles/tailwind.css"]
 
-[[proxy]]
-backend = "ws://127.0.0.1:3100/api/assets/live"
-rewrite = "/api/assets/live"
-ws = true
-
-[[proxy]]
-backend = "http://127.0.0.1:3100/api/"
-rewrite = "/api/"
+[[hooks]]
+stage = "pre_build"
+command = "npm"
+command_arguments = ["run", "build:css"]
