@@ -7,7 +7,8 @@ use crate::{
     domain::navigation::asset_overview_path,
     driving_adapters::ui::{
         components::{
-            AssetHeader, AssetTabs, DataState, FactTable, MetricStrip, Panel, PerformanceTable,
+            AssetHeader, AssetTabs, DataState, FactTable, KeyStatistics, LatestNews, Panel,
+            PerformanceTable,
         },
         plotly::{AssetOverviewChart, PlotlyHost},
     },
@@ -90,26 +91,44 @@ pub fn AssetOverviewPage() -> impl IntoView {
 
 #[component]
 fn OverviewContent(model: AssetOverviewReadModel, partial: bool) -> impl IntoView {
-    let metrics = model.metrics.clone();
     let chart = model.chart.clone();
     let key_statistics = model.key_statistics.clone();
     let performance = model.performance.clone();
-    let index_facts = model.index_facts.clone();
+    let secondary_facts = model.earnings.clone().or(model.index_facts.clone());
+    let secondary_title = if model.earnings.is_some() {
+        "Earnings"
+    } else {
+        "Index Facts"
+    };
     let options_snapshot = model.options_snapshot.clone();
+    let latest_news = model.latest_news.clone();
+    let year_range = model.year_range.clone();
+    let chart_summary = format!(
+        "{}  {} ({})",
+        model.price, model.absolute_change, model.percentage_change
+    );
+    let chart_summary_class = if model.change_positive {
+        "numeric px-3 pt-2 text-sm font-medium text-finance-positive"
+    } else {
+        "numeric px-3 pt-2 text-sm font-medium text-negative-text"
+    };
     view! {
         <AssetHeader model=model.clone() />
-        <MetricStrip metrics />
         {model.is_stale.then(|| view! { <div class="border-b border-level-special/40 bg-level-special/10 px-4 py-2 text-xs text-level-special sm:px-6 lg:px-8" role="status">"Stale mock snapshot · values remain visible for context."</div> })}
         {partial.then(|| view! { <div class="border-b border-interactive-source/50 bg-state-selected/30 px-4 py-2 text-xs text-interactive-text sm:px-6 lg:px-8" role="status">"Partial snapshot · unavailable fields are identified without replacing valid data."</div> })}
-        <div class="space-y-2 p-3 sm:p-4 lg:p-2">
+        <div class="space-y-2 p-2">
             <div class="grid items-stretch gap-2 xl:grid-cols-[minmax(0,1.83fr)_minmax(20rem,1fr)]">
-                <Panel title=format!("{} Price & Volume · 1D", model.symbol) compact=true><AssetOverviewChart chart /></Panel>
-                <Panel title="Key Statistics" compact=true><FactTable metrics=key_statistics /></Panel>
+                <Panel title=format!("{} Price & Volume · 1D", model.symbol) compact=true>
+                    <p class=chart_summary_class>{chart_summary}</p>
+                    <AssetOverviewChart chart />
+                </Panel>
+                <Panel title="Key Statistics" compact=true><KeyStatistics metrics=key_statistics year_range /></Panel>
             </div>
-            <div class="grid items-stretch gap-2 lg:grid-cols-2 2xl:grid-cols-[1.28fr_0.92fr_1fr]">
+            <div class="grid items-stretch gap-2 lg:grid-cols-2 2xl:grid-cols-[1.22fr_0.86fr_1.02fr_1.12fr]">
                 <Panel title="Performance" compact=true><PerformanceTable table=performance /></Panel>
-                <Panel title="Index Facts" compact=true><FactTable metrics=index_facts /></Panel>
+                {secondary_facts.map(|facts| view! { <Panel title=secondary_title compact=true><FactTable metrics=facts /></Panel> })}
                 <Panel title="Options Snapshot" compact=true><FactTable metrics=options_snapshot /></Panel>
+                {latest_news.map(|items| view! { <Panel title="Latest News" compact=true><LatestNews items /></Panel> })}
             </div>
         </div>
     }

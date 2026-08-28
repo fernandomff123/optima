@@ -14,8 +14,13 @@ pub fn Panel(
         "flex min-h-14 items-center justify-between border-b border-border px-4 sm:px-5"
     };
     let body_class = if compact { "p-0" } else { "p-4 sm:p-5" };
+    let section_class = if compact {
+        "border border-border bg-surface"
+    } else {
+        "rounded-panel border border-border bg-surface shadow-panel"
+    };
     view! {
-        <section class="rounded-panel border border-border bg-surface shadow-panel">
+        <section class=section_class>
             <header class=header_class>
                 <div>
                     {eyebrow.map(|value| view! { <p class="mb-1 text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-text-muted-readable">{value}</p> })}

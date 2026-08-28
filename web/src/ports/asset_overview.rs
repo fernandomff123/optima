@@ -1,4 +1,4 @@
-use crate::domain::asset::{AssetCapability, AssetSymbol};
+use crate::domain::asset::{AssetCapability, AssetKind, AssetSymbol};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OverviewScenario {
@@ -40,8 +40,26 @@ pub struct SnapshotTable {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct SnapshotRange {
+    pub label: &'static str,
+    pub minimum: &'static str,
+    pub maximum: &'static str,
+    pub position: f64,
+    pub insert_after: usize,
+    pub accessible_value: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SnapshotNewsItem {
+    pub headline: &'static str,
+    pub source: &'static str,
+    pub age: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetOverviewSnapshot {
     pub symbol: AssetSymbol,
+    pub kind: AssetKind,
     pub name: &'static str,
     pub venue: &'static str,
     pub price: &'static str,
@@ -56,14 +74,20 @@ pub struct AssetOverviewSnapshot {
     pub is_stale: bool,
     pub is_mock: bool,
     pub capabilities: Vec<AssetCapability>,
-    pub metrics: Vec<SnapshotMetric>,
-    pub chart_times: Vec<&'static str>,
+    pub day_range: Option<SnapshotMetric>,
+    pub chart_times: Vec<String>,
     pub chart_prices: Vec<f64>,
     pub chart_volumes: Vec<f64>,
+    pub chart_session_end: &'static str,
+    pub chart_last_price: &'static str,
+    pub chart_last_volume: &'static str,
     pub key_statistics: Vec<SnapshotMetric>,
+    pub year_range: Option<SnapshotRange>,
     pub performance: SnapshotTable,
-    pub index_facts: Vec<SnapshotMetric>,
+    pub earnings: Option<Vec<SnapshotMetric>>,
+    pub index_facts: Option<Vec<SnapshotMetric>>,
     pub options_snapshot: Vec<SnapshotMetric>,
+    pub latest_news: Option<Vec<SnapshotNewsItem>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

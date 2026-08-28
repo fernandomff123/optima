@@ -28,6 +28,10 @@ fixtures. In particular, IV Rank, IV Percentile, put-call ratios, Performance,
 Index Facts, and Options Snapshot do not necessarily have backend contracts yet
 and must not be treated as calculated or live financial data.
 
+The optional Latest News panel is also a deterministic visual fixture. It has no
+links or external requests and requires a dedicated backend contract before it
+can become a live capability.
+
 ## Shell icons
 
 The five inline shell icons are copied without redrawing from the official

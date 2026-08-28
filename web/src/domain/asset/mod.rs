@@ -26,6 +26,12 @@ pub enum AssetCapability {
     Simulation,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AssetKind {
+    Equity,
+    Index,
+}
+
 impl AssetCapability {
     pub const fn segment(self) -> &'static str {
         match self {

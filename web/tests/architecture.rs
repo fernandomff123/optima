@@ -121,6 +121,28 @@ fn asset_overview_has_one_mock_indicator_and_no_panel_badges() {
 }
 
 #[test]
+fn optional_content_and_fixtures_do_not_live_in_the_ui() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for (path, source) in rust_sources(&root.join("driving_adapters/ui")) {
+        for forbidden in [
+            "Apple Services revenue reaches",
+            "May 1, 2025",
+            "AAPL_PRICES",
+            "MockAssetOverviewAdapter",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} contains fixture {forbidden}"
+            );
+        }
+    }
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
+    assert!(page.contains("model.earnings"));
+    assert!(page.contains("model.index_facts"));
+    assert!(!page.contains("model.symbol =="));
+}
+
+#[test]
 fn overview_has_no_http_or_backend_contract_shortcuts() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let manifest = fs::read_to_string(root.join("Cargo.toml")).unwrap();
@@ -194,6 +216,8 @@ fn asset_overview_uses_only_approved_hex_colors() {
         "src/driving_adapters/ui/components/fact_table.rs",
         "src/driving_adapters/ui/components/performance_table.rs",
         "src/driving_adapters/ui/components/panel.rs",
+        "src/driving_adapters/ui/components/key_statistics.rs",
+        "src/driving_adapters/ui/components/latest_news.rs",
         "src/driving_adapters/ui/plotly/asset_overview.rs",
     ] {
         let source = fs::read_to_string(root.join(relative)).unwrap();
