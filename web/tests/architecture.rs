@@ -89,6 +89,8 @@ fn plotly_is_local_and_cleanup_uses_purge() {
             .expect("overview Plotly adapter must be readable");
     assert!(overview.contains("purge_plot(HOST_ID)"));
     assert!(overview.contains("build_price_volume_plot"));
+    assert!(overview.contains("PriceVolumeChart"));
+    assert!(!overview.contains("MockAssetOverviewAdapter"));
 }
 
 #[test]

@@ -52,8 +52,8 @@ fn snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOverviewSn
         change_positive: true,
         currency: "USD",
         market_status: "MARKET OPEN",
-        observed_at: "09:45:31 ET",
-        datetime: "2026-08-28T09:45:31-04:00",
+        observed_at: "13:00:00 ET",
+        datetime: "2026-08-28T13:00:00-04:00",
         freshness: if scenario == OverviewScenario::Stale {
             "Updated 18 min ago"
         } else {
@@ -76,12 +76,25 @@ fn snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOverviewSn
             m("Currency", Some("USD"), None),
         ],
         chart_times: vec![
-            "09:30", "09:45", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00",
+            "09:30", "09:35", "09:40", "09:45", "09:50", "09:55", "10:00", "10:05", "10:10",
+            "10:15", "10:20", "10:25", "10:30", "10:35", "10:40", "10:45", "10:50", "10:55",
+            "11:00", "11:05", "11:10", "11:15", "11:20", "11:25", "11:30", "11:35", "11:40",
+            "11:45", "11:50", "11:55", "12:00", "12:05", "12:10", "12:15", "12:20", "12:25",
+            "12:30", "12:35", "12:40", "12:45", "12:50", "12:55", "13:00",
         ],
         chart_prices: vec![
-            5278.4, 5265.8, 5286.2, 5291.7, 5284.9, 5298.5, 5306.1, 5314.8, 5303.27,
+            5278.40, 5271.85, 5265.80, 5270.25, 5276.90, 5274.10, 5280.65, 5286.20, 5283.75,
+            5288.40, 5291.70, 5289.30, 5293.15, 5287.80, 5284.90, 5289.55, 5294.20, 5291.85,
+            5296.70, 5298.50, 5301.10, 5299.40, 5303.65, 5306.10, 5304.35, 5308.80, 5306.55,
+            5310.20, 5308.10, 5312.45, 5314.80, 5311.60, 5309.25, 5313.40, 5310.75, 5307.90,
+            5305.60, 5308.35, 5306.15, 5304.70, 5307.25, 5305.10, 5303.27,
         ],
-        chart_volumes: vec![3.1, 2.4, 1.8, 1.2, 0.9, 1.1, 1.3, 1.0, 0.8421],
+        chart_volumes: vec![
+            3.10, 2.85, 2.62, 2.40, 2.18, 2.02, 1.88, 1.76, 1.65, 1.57, 1.49, 1.42, 1.36, 1.31,
+            1.26, 1.22, 1.18, 1.15, 1.12, 1.10, 1.08, 1.06, 1.04, 1.28, 1.02, 1.00, 0.98, 0.96,
+            0.94, 1.16, 0.92, 0.90, 0.88, 0.86, 1.05, 0.84, 0.82, 0.80, 0.92, 0.78, 0.76, 0.74,
+            0.8421,
+        ],
         key_statistics: vec![
             m(
                 "Market Cap",
@@ -177,7 +190,55 @@ mod tests {
             .load(&AssetSymbol::new("SPX"), OverviewScenario::Normal)
             .unwrap()
             .unwrap();
-        assert_eq!(snapshot.datetime, "2026-08-28T09:45:31-04:00");
+        assert_eq!(snapshot.datetime, "2026-08-28T13:00:00-04:00");
+        assert_eq!(snapshot.observed_at, "13:00:00 ET");
         assert_eq!(snapshot.currency, "USD");
+    }
+
+    #[test]
+    fn chart_fixture_has_aligned_five_minute_observations_through_as_of() {
+        let adapter = MockAssetOverviewAdapter;
+        let symbol = AssetSymbol::new("SPX");
+        let normal = adapter
+            .load(&symbol, OverviewScenario::Normal)
+            .unwrap()
+            .unwrap();
+        let partial = adapter
+            .load(&symbol, OverviewScenario::Partial)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(normal.chart_times.len(), 43);
+        assert_eq!(normal.chart_prices.len(), 43);
+        assert_eq!(normal.chart_volumes.len(), 43);
+        assert_eq!(normal.chart_times.first(), Some(&"09:30"));
+        assert_eq!(normal.chart_times.last(), Some(&"13:00"));
+        assert!(
+            normal
+                .chart_times
+                .windows(2)
+                .all(|pair| { minutes(pair[1]) - minutes(pair[0]) == 5 })
+        );
+        assert!(minutes(normal.chart_times.last().unwrap()) <= minutes(&normal.observed_at[..5]));
+        assert!(
+            normal
+                .chart_prices
+                .iter()
+                .all(|value| value.is_finite() && *value > 0.0)
+        );
+        assert!(
+            normal
+                .chart_volumes
+                .iter()
+                .all(|value| value.is_finite() && *value > 0.0)
+        );
+        assert_eq!(normal.chart_times, partial.chart_times);
+        assert_eq!(normal.chart_prices, partial.chart_prices);
+        assert_eq!(normal.chart_volumes, partial.chart_volumes);
+    }
+
+    fn minutes(time: &str) -> i32 {
+        let (hours, minutes) = time.split_once(':').unwrap();
+        hours.parse::<i32>().unwrap() * 60 + minutes.parse::<i32>().unwrap()
     }
 }
