@@ -3,14 +3,19 @@ pub struct NavItem {
     pub label: &'static str,
     pub href: &'static str,
     pub match_prefix: &'static str,
+    pub separator_before: bool,
 }
 
-pub const GLOBAL_NAV: [NavItem; 5] = [
-    NavItem::new("Dashboard", "/", "/"),
-    NavItem::new("Markets", "/markets", "/markets"),
-    NavItem::new("Assets", "/assets", "/assets"),
-    NavItem::new("Portfolio", "/portfolio", "/portfolio"),
-    NavItem::new("Settings", "/settings", "/settings"),
+pub const GLOBAL_NAV: [NavItem; 9] = [
+    NavItem::new("Dashboard", "/", "/", false),
+    NavItem::new("Markets", "/markets", "/markets", false),
+    NavItem::new("Assets", "/assets", "/assets", false),
+    NavItem::new("Options", "/options", "/options", false),
+    NavItem::new("Volatility", "/volatility", "/volatility", false),
+    NavItem::new("GEX / Flow", "/gex", "/gex", false),
+    NavItem::new("Simulations", "/simulations", "/simulations", false),
+    NavItem::new("Portfolio", "/portfolio", "/portfolio", true),
+    NavItem::new("Settings", "/settings", "/settings", false),
 ];
 
 pub const ASSET_TABS: [(&str, &str); 6] = [
@@ -23,11 +28,17 @@ pub const ASSET_TABS: [(&str, &str); 6] = [
 ];
 
 impl NavItem {
-    const fn new(label: &'static str, href: &'static str, match_prefix: &'static str) -> Self {
+    const fn new(
+        label: &'static str,
+        href: &'static str,
+        match_prefix: &'static str,
+        separator_before: bool,
+    ) -> Self {
         Self {
             label,
             href,
             match_prefix,
+            separator_before,
         }
     }
 
@@ -72,5 +83,49 @@ mod tests {
         let assets = GLOBAL_NAV[2];
         assert!(assets.is_current("/assets/SPX/chart"));
         assert!(!assets.is_current("/asset-prices"));
+    }
+
+    #[test]
+    fn global_navigation_has_approved_order_destinations_and_separator() {
+        assert_eq!(
+            GLOBAL_NAV.map(|item| item.label),
+            [
+                "Dashboard",
+                "Markets",
+                "Assets",
+                "Options",
+                "Volatility",
+                "GEX / Flow",
+                "Simulations",
+                "Portfolio",
+                "Settings"
+            ]
+        );
+        assert_eq!(
+            GLOBAL_NAV.map(|item| item.href),
+            [
+                "/",
+                "/markets",
+                "/assets",
+                "/options",
+                "/volatility",
+                "/gex",
+                "/simulations",
+                "/portfolio",
+                "/settings"
+            ]
+        );
+        assert!(GLOBAL_NAV[7].separator_before);
+        assert_eq!(
+            GLOBAL_NAV
+                .iter()
+                .filter(|item| item.separator_before)
+                .count(),
+            1
+        );
+        assert_eq!(GLOBAL_NAV.len() + 1, 10);
+        for item in GLOBAL_NAV {
+            assert!(item.is_current(item.href));
+        }
     }
 }

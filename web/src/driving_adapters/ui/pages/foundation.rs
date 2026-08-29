@@ -48,6 +48,22 @@ pub fn AssetsPage() -> impl IntoView {
     view! { <FoundationPage title="Assets" description="Open /assets/SPX to verify route-based asset navigation." state=FeedbackState::empty() /> }
 }
 #[component]
+pub fn OptionsPage() -> impl IntoView {
+    view! { <FoundationPage title="Options" description="The global options workspace is structural and contains no real market data." state=FeedbackState::unavailable() /> }
+}
+#[component]
+pub fn VolatilityPage() -> impl IntoView {
+    view! { <FoundationPage title="Volatility" description="The global volatility workspace is structural and contains no real market data." state=FeedbackState::unavailable() /> }
+}
+#[component]
+pub fn GexPage() -> impl IntoView {
+    view! { <FoundationPage title="GEX / Flow" description="The global flow workspace is structural and contains no real market data." state=FeedbackState::unavailable() /> }
+}
+#[component]
+pub fn SimulationsPage() -> impl IntoView {
+    view! { <FoundationPage title="Simulations" description="The global simulations workspace is structural and contains no real market data." state=FeedbackState::unavailable() /> }
+}
+#[component]
 pub fn PortfolioPage() -> impl IntoView {
     view! { <FoundationPage title="Portfolio" description="Portfolio remains structural until its backend contract is approved." state=FeedbackState::unavailable() /> }
 }

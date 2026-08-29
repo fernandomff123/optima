@@ -10,4 +10,5 @@ plotly = "=0.14.1"
 wasm-bindgen = "=0.2.126"
 
 [dev-dependencies]
+url = "=2.5.8"
 walkdir = "=2.5.0"

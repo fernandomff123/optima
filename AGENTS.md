@@ -405,6 +405,10 @@ A direção atual é:
 /assets/:ticker/volatility
 /assets/:ticker/gex
 /assets/:ticker/simulation
+/options
+/volatility
+/gex
+/simulations
 /portfolio
 /settings
 ```
