@@ -32,6 +32,20 @@ The optional Latest News panel is also a deterministic visual fixture. It has no
 links or external requests and requires a dedicated backend contract before it
 can become a live capability.
 
+## Mocked Asset Options
+
+`/assets/AAPL/options` is a separate mocks-first vertical slice based on the
+active `Bloomberg/v2/assets-options.png` reference. The options page calls
+`AssetOptionsUseCase` through `AssetOptionsPort`; `composition.rs` injects
+`MockAssetOptionsAdapter`. The chain is an accessible HTML table and the IV
+smile is rendered by the local Plotly adapter. No backend, HTTP adapter, DuckDB,
+or external runtime asset is involved.
+
+The fixed controls, option values, IV smile, and selected contract are visual
+fixtures, not live prices or frontend financial calculations. Deterministic
+states are available with `?scenario=loading`, `unavailable`, and
+`recoverable-error`.
+
 ## Shell icons
 
 The nine inline shell icons are copied without redrawing from the official
