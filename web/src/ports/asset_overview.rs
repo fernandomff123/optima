@@ -33,6 +33,7 @@ pub struct SnapshotMetric {
     pub unit: Option<&'static str>,
     pub tone: SnapshotTone,
     pub numeric: bool,
+    pub starts_group: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

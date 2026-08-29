@@ -129,7 +129,7 @@ fn OverviewContent(model: AssetOverviewReadModel, partial: bool) -> impl IntoVie
             <div class="grid min-h-0 items-stretch gap-[7px] lg:grid-cols-2 2xl:h-full 2xl:min-h-[23.5625rem] 2xl:grid-cols-[1.23fr_0.88fr_1.04fr_1.12fr]">
                 <Panel title="Performance" compact=true><PerformanceTable table=performance /></Panel>
                 {secondary_facts.map(|facts| view! { <Panel title=secondary_title compact=true><FactTable metrics=facts /></Panel> })}
-                <Panel title="Options Snapshot" compact=true><FactTable metrics=options_snapshot /></Panel>
+                <Panel title="Options Snapshot" compact=true><FactTable metrics=options_snapshot constrained=true /></Panel>
                 {latest_news.map(|items| view! { <Panel title="Latest News" compact=true><LatestNews items /></Panel> })}
             </div>
         </div>

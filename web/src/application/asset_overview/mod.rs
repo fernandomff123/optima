@@ -15,6 +15,7 @@ pub struct DisplayMetric {
     pub unit: Option<String>,
     pub tone: ValueTone,
     pub numeric: bool,
+    pub starts_group: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ValueTone {
@@ -186,6 +187,7 @@ fn metric(value: SnapshotMetric) -> DisplayMetric {
         unit: value.unit.map(str::to_owned),
         tone: tone(value.tone),
         numeric: value.numeric,
+        starts_group: value.starts_group,
     }
 }
 fn metrics(values: Vec<SnapshotMetric>) -> Vec<DisplayMetric> {

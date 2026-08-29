@@ -46,7 +46,9 @@ fn text_with_suffix(label: &'static str, value: &'static str, suffix: &'static s
 #[rustfmt::skip]
 fn section(label: &'static str) -> SnapshotMetric { metric(label, None, None, None, SnapshotTone::Neutral, false) }
 #[rustfmt::skip]
-fn metric(label: &'static str, value: Option<&'static str>, suffix: Option<&'static str>, unit: Option<&'static str>, tone: SnapshotTone, numeric: bool) -> SnapshotMetric { SnapshotMetric { label, value, suffix, unit, tone, numeric } }
+fn metric(label: &'static str, value: Option<&'static str>, suffix: Option<&'static str>, unit: Option<&'static str>, tone: SnapshotTone, numeric: bool) -> SnapshotMetric { SnapshotMetric { label, value, suffix, unit, tone, numeric, starts_group: false } }
+#[rustfmt::skip]
+fn starts_group(mut metric: SnapshotMetric) -> SnapshotMetric { metric.starts_group = true; metric }
 fn capabilities() -> Vec<AssetCapability> {
     vec![
         AssetCapability::Overview,
@@ -267,13 +269,13 @@ fn options(partial: bool, include_average: bool) -> Vec<SnapshotMetric> {
         ms("ATM IV (7D)", Some("23.1"), "%"),
         m("IV Rank (1Y)", Some("42.3"), None),
         ms("IV Percentile (1Y)", Some("56"), "%"),
-        m("Put-Call Ratio (Volume)", Some("0.68"), None),
+        starts_group(m("Put-Call Ratio (Volume)", Some("0.68"), None)),
         m("Put-Call Ratio (OI)", Some("0.79"), None),
-        m(
+        starts_group(m(
             "Total Open Interest",
             if partial { None } else { Some("7.42M") },
             Some("contracts"),
-        ),
+        )),
     ];
     if include_average {
         values.push(m("Avg. Daily Volume (30D)", Some("55.21M"), Some("shares")));
@@ -321,6 +323,7 @@ mod tests {
         for (label, value, unit) in [("Total Open Interest", "7.42M", "contracts"), ("Avg. Daily Volume (30D)", "55.21M", "shares")] {
             let metric = options.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.value, Some(value)); assert_eq!(metric.unit, Some(unit)); assert_eq!(metric.suffix, None);
         }
+        let group_starts: Vec<_> = options.iter().filter(|metric| metric.starts_group).map(|metric| metric.label).collect(); assert_eq!(group_starts, ["Put-Call Ratio (Volume)", "Total Open Interest"]);
         let earnings = aapl.earnings.unwrap();
         assert_eq!(earnings.len(), 8); assert!(!earnings.iter().any(|metric| metric.label == "Expected Session"));
         let next = earnings.iter().find(|metric| metric.label == "Next Earnings").unwrap(); assert_eq!(next.value, Some("May 1, 2025")); assert_eq!(next.suffix, Some("After Market Close")); assert_eq!(next.tone, SnapshotTone::Special);
