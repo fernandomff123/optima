@@ -130,6 +130,40 @@ fn asset_overview_respects_hexagonal_boundaries() {
 }
 
 #[test]
+fn asset_options_respects_hexagonal_boundaries_and_keeps_fixtures_in_mock_adapter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset_options.rs")).unwrap();
+    let application = fs::read_to_string(root.join("application/asset_options/mod.rs")).unwrap();
+    let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_options.rs")).unwrap();
+    let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+    assert!(page.contains("asset_options_use_case"));
+    assert!(!page.contains("MockAssetOptionsAdapter"));
+    assert!(!page.contains("191.13"));
+    assert!(application.contains("AssetOptionsPort"));
+    assert!(!application.contains("Plotly"));
+    assert!(!application.contains("leptos"));
+    assert!(mock.contains("191.13"));
+    assert!(mock.contains("MockAssetOptionsAdapter"));
+    assert!(composition.contains("MockAssetOptionsAdapter"));
+}
+
+#[test]
+fn options_chain_is_html_and_options_plotly_has_explicit_lifecycle() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let chain =
+        fs::read_to_string(root.join("driving_adapters/ui/components/options_chain.rs")).unwrap();
+    let plot =
+        fs::read_to_string(root.join("driving_adapters/ui/plotly/asset_options.rs")).unwrap();
+    assert!(chain.contains("<table"));
+    assert!(!chain.contains("Plotly"));
+    assert!(plot.contains("Plotly.react"));
+    assert!(plot.contains("purge_plot(HOST_ID)"));
+    assert!(plot.contains("displayModeBar:false"));
+    assert!(!plot.to_lowercase().contains("echarts"));
+    assert!(!plot.contains("MockAssetOptionsAdapter"));
+}
+
+#[test]
 fn asset_overview_has_no_mock_badges_in_the_approved_header() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let header =

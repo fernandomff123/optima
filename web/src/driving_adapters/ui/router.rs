@@ -21,6 +21,9 @@ fn asset_overview_route() -> impl PossibleRouteMatch + Clone {
 fn asset_chart_route() -> impl PossibleRouteMatch + Clone {
     path!("/assets/:ticker/chart")
 }
+fn asset_options_route() -> impl PossibleRouteMatch + Clone {
+    path!("/assets/:ticker/options")
+}
 fn options_route() -> impl PossibleRouteMatch + Clone {
     path!("/options")
 }
@@ -48,7 +51,7 @@ pub fn AppRoutes() -> impl IntoView {
             <Route path=asset_root_route() view=AssetRedirect />
             <Route path=asset_overview_route() view=AssetOverviewPage />
             <Route path=asset_chart_route() view=AssetChartPage />
-            <Route path=path!("assets/:ticker/options") view=AssetOptionsPage />
+            <Route path=asset_options_route() view=AssetOptionsPage />
             <Route path=path!("assets/:ticker/volatility") view=AssetVolatilityPage />
             <Route path=path!("assets/:ticker/gex") view=AssetGexPage />
             <Route path=path!("assets/:ticker/simulation") view=AssetSimulationPage />
@@ -68,6 +71,7 @@ mod tests {
             NestedRoute::new(asset_root_route(), || ()),
             NestedRoute::new(asset_overview_route(), || ()),
             NestedRoute::new(asset_chart_route(), || ()),
+            NestedRoute::new(asset_options_route(), || ()),
         ))
     }
 
@@ -112,6 +116,7 @@ mod tests {
         assert_eq!(with_query.query(), Some("scenario=normal"));
         assert!(recognizes(&generated, "/assets/SPX"));
         assert!(recognizes(&generated, "/assets/SPX/chart"));
+        assert!(recognizes(&generated, "/assets/AAPL/options"));
         for scenario in ["partial", "recoverable-error"] {
             let url = base
                 .join(&format!("/assets/SPX/overview?scenario={scenario}"))
