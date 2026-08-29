@@ -164,6 +164,26 @@ fn options_chain_is_html_and_options_plotly_has_explicit_lifecycle() {
 }
 
 #[test]
+fn asset_chart_uses_local_echarts_with_hexagonal_boundaries_and_cleanup() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let page =
+        fs::read_to_string(root.join("src/driving_adapters/ui/pages/asset_chart.rs")).unwrap();
+    let application = fs::read_to_string(root.join("src/application/asset_chart/mod.rs")).unwrap();
+    let adapter =
+        fs::read_to_string(root.join("src/driving_adapters/ui/echarts/asset_chart.rs")).unwrap();
+    let html = fs::read_to_string(root.join("index.html")).unwrap();
+    assert!(page.contains("asset_chart_use_case"));
+    assert!(!page.contains("MockAssetChartAdapter"));
+    assert!(application.contains("AssetChartPort"));
+    assert!(!application.to_lowercase().contains("echarts"));
+    assert!(html.contains("node_modules/echarts/dist/echarts.min.js"));
+    assert!(adapter.contains("globalThis.echarts.init"));
+    assert!(adapter.contains("on_cleanup"));
+    assert!(adapter.contains("observer.disconnect()"));
+    assert!(adapter.contains("chart.dispose()"));
+}
+
+#[test]
 fn asset_overview_has_no_mock_badges_in_the_approved_header() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let header =

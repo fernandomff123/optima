@@ -2,6 +2,9 @@
   "name": "optima-web",
   "version": "0.1.0",
   "private": true,
+  "dependencies": {
+    "echarts": "6.0.0"
+  },
   "scripts": {
     "build": "npm run build:css",
     "build:css": "tailwindcss -i ./styles/input.css -o ./styles/tailwind.css --minify",

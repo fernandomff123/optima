@@ -46,6 +46,18 @@ fixtures, not live prices or frontend financial calculations. Deterministic
 states are available with `?scenario=loading`, `unavailable`, and
 `recoverable-error`.
 
+## Mocked Asset Chart
+
+`/assets/AAPL/chart` follows the active candlestick workspace reference named
+`ChatGPT Image Aug 26, 2026, 04_13_20 PM (1).png`. It loads provider-neutral
+daily OHLC and volume fixtures through `AssetChartPort` and renders them with the
+locally packaged Apache ECharts runtime. The adapter explicitly disconnects its
+resize observer and disposes ECharts during route cleanup.
+
+Use `?scenario=loading`, `unavailable`, or `recoverable-error` to inspect the
+deterministic states. These values are visual fixtures; no HTTP, backend,
+database, or external data source participates in the screen.
+
 ## Shell icons
 
 The nine inline shell icons are copied without redrawing from the official
