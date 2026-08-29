@@ -22,7 +22,7 @@ pub fn AssetTabs(
     };
     view! {
         <nav class="dense-scrollbar overflow-x-auto border-b border-border" aria-label="Asset workspace">
-            <div class="flex min-w-max">
+            <div class="flex min-w-max gap-2">
                 {capabilities.into_iter().map(|capability| {
                     let label = capability.label();
                     let segment = capability.segment();
@@ -35,12 +35,13 @@ pub fn AssetTabs(
                         <A href=href
                             attr:aria-current=move || (aria_location.pathname.get() == aria_href).then_some("page")
                             attr:class=move || if class_location.pathname.get() == class_href {
-                                "border-b-2 border-interactive-text px-4 py-3.5 text-sm font-semibold text-text-primary"
+                                "border-b-2 border-interactive-text px-4 py-3 text-sm font-semibold text-text-primary"
                             } else {
-                                "border-b-2 border-transparent px-4 py-3.5 text-sm font-medium text-text-secondary hover:text-text-primary"
+                                "border-b-2 border-transparent px-4 py-3 text-sm font-medium text-text-secondary hover:text-text-primary"
                             }>{label}</A>
                     }
                 }).collect_view()}
+                <span class="cursor-not-allowed border-b-2 border-transparent px-4 py-3 text-sm font-medium text-text-secondary opacity-60" aria-disabled="true" title="News unavailable">"News"</span>
             </div>
         </nav>
     }

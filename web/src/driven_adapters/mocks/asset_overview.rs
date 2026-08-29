@@ -42,7 +42,9 @@ fn mts(
     metric(label, value, Some(suffix), None, tone, true)
 }
 #[rustfmt::skip]
-fn text(label: &'static str, value: &'static str, tone: SnapshotTone) -> SnapshotMetric { metric(label, Some(value), None, None, tone, false) }
+fn text_with_suffix(label: &'static str, value: &'static str, suffix: &'static str, tone: SnapshotTone) -> SnapshotMetric { metric(label, Some(value), Some(suffix), None, tone, false) }
+#[rustfmt::skip]
+fn section(label: &'static str) -> SnapshotMetric { metric(label, None, None, None, SnapshotTone::Neutral, false) }
 #[rustfmt::skip]
 fn metric(label: &'static str, value: Option<&'static str>, suffix: Option<&'static str>, unit: Option<&'static str>, tone: SnapshotTone, numeric: bool) -> SnapshotMetric { SnapshotMetric { label, value, suffix, unit, tone, numeric } }
 fn capabilities() -> Vec<AssetCapability> {
@@ -108,8 +110,8 @@ fn aapl_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOverv
             m("P/E (TTM)", Some("29.50"), None),
             m("EPS (TTM)", Some("6.48"), Some("USD")),
             m("Beta (5Y Monthly)", Some("1.23"), None),
-            m("IV Rank (1Y)", Some("42.30"), None),
-            m("IV Percentile (1Y)", Some("56.00"), Some("%")),
+            m("IV Rank (1Y)", Some("42.3"), None),
+            ms("IV Percentile (1Y)", Some("56"), "%"),
         ],
         year_range: Some(SnapshotRange {
             label: "52W Range",
@@ -162,8 +164,8 @@ fn spx_snapshot(symbol: &AssetSymbol, scenario: OverviewScenario) -> AssetOvervi
             m("Components", Some("503"), None),
             m("P/E (TTM)", Some("29.50"), None),
             m("Dividend Yield", Some("1.31"), Some("%")),
-            m("IV Rank (1Y)", Some("42.30"), None),
-            m("IV Percentile (1Y)", Some("56.00"), Some("%")),
+            m("IV Rank (1Y)", Some("42.3"), None),
+            ms("IV Percentile (1Y)", Some("56"), "%"),
         ],
         year_range: Some(SnapshotRange {
             label: "52W Range",
@@ -235,21 +237,21 @@ fn performance(symbol: &'static str, daily_change: &'static str) -> SnapshotTabl
 }
 fn earnings(partial: bool) -> Vec<SnapshotMetric> {
     vec![
-        text("Next Earnings", "May 1, 2025", SnapshotTone::Special),
-        text(
-            "Expected Session",
+        text_with_suffix(
+            "Next Earnings",
+            "May 1, 2025",
             "After Market Close",
-            SnapshotTone::Neutral,
+            SnapshotTone::Special,
         ),
         m("Consensus EPS", Some("1.62"), Some("USD")),
         mts("EPS YoY", Some("+5.88"), "%", SnapshotTone::Positive),
         m(
-            "Revenue Estimate",
+            "Revenue Est.",
             if partial { None } else { Some("95.35B") },
             Some("USD"),
         ),
         mts("Revenue YoY", Some("+4.15"), "%", SnapshotTone::Positive),
-        text("Last Earnings", "Jan 30, 2025", SnapshotTone::Neutral),
+        section("Last Earnings (Jan 30, 2025)"),
         mts("EPS Beat", Some("0.06"), " (3.85%)", SnapshotTone::Positive),
         mts(
             "Revenue Beat",
@@ -274,20 +276,16 @@ fn options(partial: bool, include_average: bool) -> Vec<SnapshotMetric> {
         ),
     ];
     if include_average {
-        values.push(m(
-            "Average Daily Volume (30D)",
-            Some("55.21M"),
-            Some("shares"),
-        ));
+        values.push(m("Avg. Daily Volume (30D)", Some("55.21M"), Some("shares")));
     }
     values
 }
 #[rustfmt::skip]
 fn equity_news() -> Vec<SnapshotNewsItem> { vec![
-    SnapshotNewsItem { headline: "Apple Services revenue reaches a new quarterly high", source: "Optima Wire", age: "1h ago" },
-    SnapshotNewsItem { headline: "Company outlines expanded on-device intelligence roadmap", source: "Business Desk", age: "2h ago" },
-    SnapshotNewsItem { headline: "Supply chain checks point to stable device demand", source: "Markets Desk", age: "3h ago" },
-    SnapshotNewsItem { headline: "Digital payments availability expands in Europe", source: "Optima Wire", age: "4h ago" },
+    SnapshotNewsItem { headline: "Apple Services revenue hits all-time high in fiscal Q2, grows 11% YoY", source: "CNBC", age: "1h ago" },
+    SnapshotNewsItem { headline: "Apple reportedly in talks to add Gemini to iPhones", source: "Bloomberg", age: "2h ago" },
+    SnapshotNewsItem { headline: "iPhone 17 Pro expected to feature 12GB RAM, per supply chain report", source: "The Verge", age: "3h ago" },
+    SnapshotNewsItem { headline: "Apple expands tap-to-pay on iPhone to more European markets", source: "Reuters", age: "4h ago" },
 ] }
 #[rustfmt::skip]
 fn index_news() -> Vec<SnapshotNewsItem> { vec![
@@ -320,11 +318,13 @@ mod tests {
         for (label, value, suffix) in [("ATM IV (30D)", "25.4", "%"), ("ATM IV (7D)", "23.1", "%"), ("IV Percentile (1Y)", "56", "%")] {
             let metric = options.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.value, Some(value)); assert_eq!(metric.suffix, Some(suffix)); assert_eq!(metric.unit, None);
         }
-        for (label, value, unit) in [("Total Open Interest", "7.42M", "contracts"), ("Average Daily Volume (30D)", "55.21M", "shares")] {
+        for (label, value, unit) in [("Total Open Interest", "7.42M", "contracts"), ("Avg. Daily Volume (30D)", "55.21M", "shares")] {
             let metric = options.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.value, Some(value)); assert_eq!(metric.unit, Some(unit)); assert_eq!(metric.suffix, None);
         }
         let earnings = aapl.earnings.unwrap();
-        for label in ["Next Earnings", "Expected Session", "Last Earnings"] { assert!(!earnings.iter().find(|metric| metric.label == label).unwrap().numeric); }
+        assert_eq!(earnings.len(), 8); assert!(!earnings.iter().any(|metric| metric.label == "Expected Session"));
+        let next = earnings.iter().find(|metric| metric.label == "Next Earnings").unwrap(); assert_eq!(next.value, Some("May 1, 2025")); assert_eq!(next.suffix, Some("After Market Close")); assert_eq!(next.tone, SnapshotTone::Special);
+        let section = earnings.iter().find(|metric| metric.label == "Last Earnings (Jan 30, 2025)").unwrap(); assert_eq!(section.value, None); assert!(!section.numeric);
         for label in ["EPS Beat", "Revenue Beat"] { let metric = earnings.iter().find(|metric| metric.label == label).unwrap(); assert_eq!(metric.unit, None); assert!(metric.suffix.unwrap().contains('%')); }
     }
     #[test]
@@ -335,6 +335,9 @@ mod tests {
         assert!(s.chart_times.windows(2).all(|p| minutes(&p[1]) - minutes(&p[0]) == 1));
         assert!(s.chart_prices.iter().chain(s.chart_volumes.iter()).all(|v| v.is_finite() && *v > 0.0));
         assert!(minutes(s.chart_times.last().unwrap()) <= minutes(&s.observed_at[..5])); assert_eq!(s.chart_session_end, "16:00");
+        assert_eq!(s.chart_prices.first(), Some(&190.60)); assert_eq!(s.chart_prices[7], 188.70);
+        assert_eq!(s.chart_prices.iter().copied().reduce(f64::max), Some(191.72)); assert_eq!(s.chart_prices[185], 191.72);
+        assert_eq!(s.chart_prices.last(), Some(&191.13)); assert_eq!(s.chart_volumes.first(), Some(&2.780)); assert_eq!(s.chart_volumes.last(), Some(&0.842));
     }
     #[test]
     fn scenarios_and_fallback_are_deterministic() { assert_eq!(load("AAPL", OverviewScenario::Normal), load("AAPL", OverviewScenario::Normal)); assert_eq!(load("XYZ", OverviewScenario::Normal).name, "Mock Equity"); assert_eq!(OverviewScenario::from_query(Some("other")), OverviewScenario::Normal); }

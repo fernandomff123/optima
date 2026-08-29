@@ -15,6 +15,12 @@ pub enum ShellIconKind {
     Simulations,
     Portfolio,
     Settings,
+    Menu,
+    Bell,
+    Launcher,
+    Star,
+    More,
+    Collapse,
 }
 
 #[component]
@@ -43,6 +49,20 @@ pub fn ShellIcon(kind: ShellIconKind, #[prop(optional, into)] class: String) -> 
         ShellIconKind::Settings => {
             r#"<path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/>"#
         }
+        ShellIconKind::Menu => r#"<path d="M4 6h16M4 12h16M4 18h16"/>"#,
+        ShellIconKind::Bell => {
+            r#"<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>"#
+        }
+        ShellIconKind::Launcher => {
+            r#"<rect width="3" height="3" x="4" y="4"/><rect width="3" height="3" x="10.5" y="4"/><rect width="3" height="3" x="17" y="4"/><rect width="3" height="3" x="4" y="10.5"/><rect width="3" height="3" x="10.5" y="10.5"/><rect width="3" height="3" x="17" y="10.5"/><rect width="3" height="3" x="4" y="17"/><rect width="3" height="3" x="10.5" y="17"/><rect width="3" height="3" x="17" y="17"/>"#
+        }
+        ShellIconKind::Star => {
+            r#"<path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>"#
+        }
+        ShellIconKind::More => {
+            r#"<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/>"#
+        }
+        ShellIconKind::Collapse => r#"<path d="m11 17-5-5 5-5M18 17l-5-5 5-5"/>"#,
     };
 
     view! {

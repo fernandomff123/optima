@@ -91,33 +91,27 @@ fn plotly_is_local_and_cleanup_uses_purge() {
     assert!(overview.contains("build_price_volume_plot"));
     assert!(overview.contains("PriceVolumeChart"));
     assert!(!overview.contains("MockAssetOverviewAdapter"));
-    assert!(overview.contains("displayModeBar:'hover'"));
+    assert!(overview.contains("displayModeBar:false"));
     assert!(overview.contains("displaylogo:false"));
     assert!(overview.contains("scrollZoom:false"));
-    for removed in [
-        "select2d",
-        "lasso2d",
-        "hoverClosestCartesian",
-        "hoverCompareCartesian",
-        "toggleSpikelines",
-    ] {
-        assert!(overview.contains(removed));
-    }
     for preserved in ["Plotly.react", "responsive:true", "purgeOverviewPlot"] {
         assert!(overview.contains(preserved));
     }
-    assert!(overview.contains("toImage"));
+    let traces = overview
+        .split_once("const data = [")
+        .and_then(|(_, source)| source.split_once("];"))
+        .map(|(traces, _)| traces)
+        .expect("Plotly trace array must be explicit");
+    assert_eq!(traces.matches("{type:'").count(), 2);
+    assert!(overview.contains("name:'Price', x:minutes, y:priceValues"));
+    assert!(overview.contains("name:'Volume', x:minutes, y:Array.from(volumes)"));
+    assert!(overview.contains("yaxis:'y2'"));
+    assert!(!overview.contains("visible:false"));
+    assert!(!overview.contains("modeBarButtons"));
+    assert!(!overview.contains("toImage"));
 
     let css = fs::read_to_string(root.join("styles/input.css")).unwrap();
-    assert!(css.contains("#asset-overview-price-volume .modebar"));
-    assert!(css.contains("grid-template-columns: repeat(2, 30px)"));
-    assert!(css.contains("#asset-overview-price-volume .modebar-group"));
-    assert!(css.contains("display: contents"));
-    assert!(css.contains("#asset-overview-price-volume .modebar-btn"));
-    assert!(css.contains("width: 30px") && css.contains("height: 30px"));
-    assert!(css.contains("#asset-overview-price-volume:hover .modebar.modebar--hover"));
-    assert!(css.contains("#asset-overview-price-volume:focus-within .modebar"));
-    assert!(!css.contains("grid-template-columns: repeat(3"));
+    assert!(!css.contains(".modebar"));
 }
 
 #[test]
@@ -136,12 +130,12 @@ fn asset_overview_respects_hexagonal_boundaries() {
 }
 
 #[test]
-fn asset_overview_has_one_mock_indicator_and_no_panel_badges() {
+fn asset_overview_has_no_mock_badges_in_the_approved_header() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let header =
         fs::read_to_string(root.join("driving_adapters/ui/components/asset_header.rs")).unwrap();
     let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
-    assert_eq!(header.matches(">\"Mock\"<").count(), 1);
+    assert_eq!(header.matches(">\"Mock\"<").count(), 0);
     assert!(!page.contains("badge=\"Mock\""));
     assert!(!header.contains("MockAssetOverviewAdapter"));
     assert!(!page.contains("MockAssetOverviewAdapter"));
@@ -170,7 +164,7 @@ fn optional_content_and_fixtures_do_not_live_in_the_ui() {
 }
 
 #[test]
-fn financial_alignment_uses_explicit_tones_and_unit_columns() {
+fn financial_alignment_uses_explicit_tones_and_complete_values() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let value =
         fs::read_to_string(root.join("driving_adapters/ui/components/financial_value.rs")).unwrap();
@@ -178,10 +172,10 @@ fn financial_alignment_uses_explicit_tones_and_unit_columns() {
         fs::read_to_string(root.join("driving_adapters/ui/components/performance_table.rs"))
             .unwrap();
     let fixture = fs::read_to_string(root.join("driven_adapters/mocks/asset_overview.rs")).unwrap();
-    assert!(value.contains("grid-cols-[minmax(0,1fr)_3.75rem]"));
-    assert!(value.contains("numeric whitespace-nowrap text-right"));
-    assert!(value.contains("<span>{value}</span><span>{suffix}</span>"));
-    assert!(value.contains("text-text-muted-readable"));
+    assert!(!value.contains("grid-cols-"));
+    assert!(value.contains("numeric inline-block whitespace-nowrap text-right"));
+    assert!(value.contains("{value}{suffix}"));
+    assert!(!value.contains("{unit.unwrap_or_default()}"));
     assert!(table.contains("table-header text-right"));
     assert!(!table.contains("starts_with"));
     assert!(!table.contains("contains('+')") && !table.contains("contains('-')"));
@@ -194,6 +188,30 @@ fn financial_alignment_uses_explicit_tones_and_unit_columns() {
         fs::read_to_string(root.join("driving_adapters/ui/components/fact_table.rs")).unwrap();
     assert!(facts.contains("if metric.numeric"));
     assert!(!facts.contains("parse::<") && !facts.contains("starts_with"));
+}
+
+#[test]
+fn lower_panels_keep_fixed_vertical_rhythm() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
+    let performance =
+        fs::read_to_string(root.join("driving_adapters/ui/components/performance_table.rs"))
+            .unwrap();
+    let facts =
+        fs::read_to_string(root.join("driving_adapters/ui/components/fact_table.rs")).unwrap();
+    let news =
+        fs::read_to_string(root.join("driving_adapters/ui/components/latest_news.rs")).unwrap();
+
+    assert!(page.contains("2xl:h-[calc(100vh-13.125rem)]"));
+    assert!(page.contains("2xl:min-h-[48.75rem]"));
+    assert!(page.contains("2xl:grid-rows-[minmax(24.25rem,1fr)_minmax(23.5625rem,1fr)]"));
+    assert!(page.contains("min-h-[24.25rem]"));
+    assert!(page.contains("2xl:min-h-[23.5625rem]"));
+    assert!(page.matches("2xl:h-full").count() >= 2);
+    assert!(!performance.contains("h-full"));
+    assert!(performance.contains("py-1.5"));
+    assert!(!facts.contains("flex-1") && facts.contains("h-[2.375rem]"));
+    assert!(!news.contains("flex-1") && news.contains("h-17"));
 }
 
 #[test]

@@ -16,7 +16,7 @@ pub fn KeyStatistics(
         <dl class="flex h-full flex-col">
             <MetricRows metrics=leading />
             {year_range.map(|range| {
-                let marker = format!("left: {}%", range.position.clamp(0.0, 1.0) * 100.0);
+                let marker = format!("left: {}%", range.position.clamp(0.02, 0.98) * 100.0);
                 view! {
                     <div class="flex min-h-[3.75rem] max-h-[4.5rem] flex-[1.5] flex-col justify-center border-b border-border px-3 py-2.5 last:border-b-0">
                         <div class="mb-2 flex items-center justify-between gap-4 text-sm">
@@ -41,7 +41,7 @@ fn MetricRows(metrics: Vec<DisplayMetric>) -> impl IntoView {
         view! {
         <div class="fact-row min-h-9 max-h-10 flex-1">
             <dt class="text-text-secondary">{label.clone()}</dt>
-            <dd class="ml-auto shrink-0 text-right"><FinancialValue value=metric.value unit=metric.unit tone=metric.tone label /></dd>
+            <dd class="ml-auto shrink-0 text-right"><FinancialValue value=metric.value suffix=metric.suffix unit=metric.unit tone=metric.tone label /></dd>
         </div>
     }}).collect_view()
 }
