@@ -552,3 +552,23 @@ fn router_declares_the_approved_foundation_routes() {
         );
     }
 }
+
+#[test]
+fn asset_volatility_keeps_the_shared_grid_behind_its_port() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let application = fs::read_to_string(root.join("application/asset_volatility/mod.rs")).unwrap();
+    let port = fs::read_to_string(root.join("ports/asset_volatility.rs")).unwrap();
+    let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_volatility.rs")).unwrap();
+
+    assert!(application.contains("AssetVolatilityPort"));
+    assert!(!application.contains("MockAssetVolatilityAdapter"));
+    assert!(!port.contains("leptos"));
+    assert!(!port.contains("echarts"));
+    assert!(!port.contains("plotly"));
+    assert!(mock.contains("31.6"));
+    assert!(mock.contains("Deterministic illustrative fixture"));
+    for source in [application, port] {
+        assert!(!source.contains("31.6"));
+        assert!(!source.contains("24.4%"));
+    }
+}
