@@ -3,6 +3,18 @@ use leptos::prelude::*;
 
 #[component]
 pub fn VolatilityHeatmap(grid: VolatilityGrid) -> impl IntoView {
+    let minimum = grid
+        .implied_volatility_percent
+        .iter()
+        .flatten()
+        .copied()
+        .fold(f64::INFINITY, f64::min);
+    let maximum = grid
+        .implied_volatility_percent
+        .iter()
+        .flatten()
+        .copied()
+        .fold(f64::NEG_INFINITY, f64::max);
     let days = grid.days_to_expiry.clone();
     let rows = grid
         .moneyness
@@ -29,12 +41,18 @@ pub fn VolatilityHeatmap(grid: VolatilityGrid) -> impl IntoView {
                                 <th class="px-2 py-3 text-left text-sm font-medium text-text-primary">{format!("{moneyness:.2}")}</th>
                                 {values.into_iter().enumerate().map(|(column_index, value)| {
                                     let selected = row_index == selected_row && column_index == selected_column;
-                                    let cell_class = if selected { "border border-interactive-text px-2 py-3 text-sm text-text-primary outline outline-1 outline-interactive-text" } else { "border border-border px-2 py-3 text-sm text-text-primary" };
-                                    let intensity = ((value - 18.0) / 16.0).clamp(0.0, 1.0);
-                                    let strength = 35.0 + intensity * 55.0;
-                                    let style = format!("background: color-mix(in srgb, #3B82F6 {strength:.0}%, #173A6F);");
+                                    let tone = match value {
+                                        value if value < 21.0 => "bg-state-selected/35",
+                                        value if value < 23.0 => "bg-state-selected/55",
+                                        value if value < 25.0 => "bg-interactive-source/45",
+                                        value if value < 27.0 => "bg-interactive-source/65",
+                                        value if value < 29.0 => "bg-state-focus/75",
+                                        _ => "bg-state-focus",
+                                    };
+                                    let selection = if selected { "border-interactive-text outline outline-1 outline-interactive-text" } else { "border-border" };
+                                    let cell_class = format!("border px-2 py-3 text-sm text-text-primary {tone} {selection}");
                                     view! {
-                                        <td class=cell_class style=style>
+                                        <td class=cell_class>
                                             {format!("{value:.1}%")}
                                         </td>
                                     }
@@ -44,7 +62,7 @@ pub fn VolatilityHeatmap(grid: VolatilityGrid) -> impl IntoView {
                     }).collect_view()}
                 </tbody>
             </table>
-            <div class="mx-auto mt-5 flex max-w-sm items-center gap-3 text-xs text-text-secondary"><span>"18%"</span><span class="h-2 flex-1 bg-gradient-to-r from-[#173A6F] to-[#3B82F6]"></span><span>"34%"</span></div>
+            <div class="mx-auto mt-5 flex max-w-sm items-center gap-3 text-xs text-text-secondary"><span>{format!("{minimum:.1}%")}</span><span class="h-2 flex-1 bg-gradient-to-r from-state-selected via-interactive-source to-state-focus"></span><span>{format!("{maximum:.1}%")}</span></div>
         </div>
     }
 }

@@ -2,8 +2,8 @@ use crate::{
     domain::asset::{AssetCapability, AssetSymbol},
     ports::asset_volatility::{
         AssetVolatilityFailure, AssetVolatilityPort, AssetVolatilitySnapshot,
-        VolatilityGridSnapshot, VolatilityMetricSnapshot, VolatilityScenario,
-        VolatilitySmileSnapshot, VolatilityTermPointSnapshot,
+        VolatilityGridSnapshot, VolatilityHistoryPointSnapshot, VolatilityMetricSnapshot,
+        VolatilityScenario, VolatilitySmileSnapshot, VolatilityTermPointSnapshot,
     },
 };
 
@@ -55,6 +55,7 @@ fn aapl_snapshot(symbol: AssetSymbol) -> AssetVolatilitySnapshot {
         grid: grid_fixture(),
         smiles: smile_fixture(),
         term_structure: term_structure_fixture(),
+        history: history_fixture(),
         snapshot_metrics: vec![
             metric("ATM IV", "23.8%"),
             metric("30D IV", "24.4%"),
@@ -131,6 +132,40 @@ fn metric(label: &'static str, value: &'static str) -> VolatilityMetricSnapshot 
     VolatilityMetricSnapshot { label, value }
 }
 
+fn history_fixture() -> Vec<VolatilityHistoryPointSnapshot> {
+    [
+        ("Jun '23", 24.8, 18.6, 16.9, false),
+        ("Jul '23", 27.2, 12.5, 15.0, true),
+        ("Aug '23", 24.9, 18.4, 17.5, false),
+        ("Sep '23", 31.0, 21.5, 19.0, false),
+        ("Oct '23", 27.5, 17.7, 18.2, true),
+        ("Nov '23", 21.2, 14.1, 15.0, false),
+        ("Dec '23", 19.0, 10.2, 12.8, false),
+        ("Jan '24", 30.1, 19.2, 16.5, true),
+        ("Feb '24", 23.5, 15.8, 14.2, false),
+        ("Mar '24", 21.4, 11.0, 12.2, false),
+        ("Apr '24", 18.9, 10.8, 11.6, false),
+        ("May '24", 24.4, 19.2, 20.1, true),
+    ]
+    .into_iter()
+    .map(
+        |(
+            label,
+            atm_iv_30d_percent,
+            realized_volatility_20d_percent,
+            realized_volatility_60d_percent,
+            earnings,
+        )| VolatilityHistoryPointSnapshot {
+            label,
+            atm_iv_30d_percent,
+            realized_volatility_20d_percent,
+            realized_volatility_60d_percent,
+            earnings,
+        },
+    )
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +185,8 @@ mod tests {
         );
         assert_eq!(grid.implied_volatility_percent[3][2], 24.4);
         assert_eq!(snapshot.snapshot_metrics[1].value, "24.4%");
+        assert_eq!(snapshot.history.last().unwrap().atm_iv_30d_percent, 24.4);
+        assert!(snapshot.history.last().unwrap().earnings);
 
         for smile in &snapshot.smiles {
             let column = grid

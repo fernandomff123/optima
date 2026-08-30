@@ -6,7 +6,7 @@ use crate::{
     composition::asset_volatility_use_case,
     driving_adapters::ui::{
         components::{AssetTabs, DataState, Panel, VolatilityHeatmap, VolatilitySnapshot},
-        plotly::{VolatilityAnalytics, VolatilitySurfaceChart},
+        plotly::{VolatilityAnalytics, VolatilityHistoryChart, VolatilitySurfaceChart},
     },
     ports::asset_volatility::VolatilityScenario,
 };
@@ -52,6 +52,9 @@ fn VolatilityContent(model: AssetVolatilityReadModel) -> impl IntoView {
     let surface_grid = grid.clone();
     let heatmap_grid = grid.clone();
     let analytics_moneyness = grid.moneyness.clone();
+    let smiles = model.smiles.clone();
+    let term_structure = model.term_structure.clone();
+    let history = model.history.clone();
     view! {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <VolatilityHeader model=model.clone() />
@@ -63,7 +66,7 @@ fn VolatilityContent(model: AssetVolatilityReadModel) -> impl IntoView {
                         {move || if selected_view.get()==VolatilityView::Surface { view! { <VolatilitySurfaceChart grid=surface_grid.clone() /> }.into_any() } else { view! { <VolatilityHeatmap grid=heatmap_grid.clone() /> }.into_any() }}
                     </section>
                     <VolatilitySnapshot metrics=model.snapshot_metrics.clone() as_of=model.as_of.clone() />
-                    <div class="min-h-0 xl:col-span-2"><VolatilityAnalytics moneyness=analytics_moneyness smiles=model.smiles.clone() term_structure=model.term_structure.clone() /></div>
+                    <div class="min-h-0 xl:col-span-2">{move || if selected_view.get()==VolatilityView::Surface { view! { <VolatilityAnalytics moneyness=analytics_moneyness.clone() smiles=smiles.clone() term_structure=term_structure.clone() /> }.into_any() } else { view! { <VolatilityHistoryChart history=history.clone() /> }.into_any() }}</div>
                 </div>
             </main>
         </div>
@@ -82,7 +85,7 @@ fn VolatilityHeader(model: AssetVolatilityReadModel) -> impl IntoView {
 
 #[component]
 fn VolatilityFilters(model: AssetVolatilityReadModel) -> impl IntoView {
-    view! { <section class="dense-scrollbar flex shrink-0 gap-3 overflow-x-auto border border-border bg-surface p-2" aria-label="Volatility filters">{[("Metric",model.metric),("Type",model.option_type),("Expirations",model.expiration_filter),("Normalization",model.normalization)].into_iter().map(|(label,value)| view! { <label class="block min-w-48 flex-1 text-[0.6875rem] text-text-secondary"><span class="mb-1 block">{label}</span><select class="min-h-10 w-full border border-border bg-canvas px-3 text-sm font-medium text-text-primary" aria-label=label><option>{value}</option></select></label> }).collect_view()}</section> }
+    view! { <section class="dense-scrollbar flex shrink-0 items-end gap-3 overflow-x-auto border border-border bg-surface p-2" aria-label="Volatility filters">{[("Metric",model.metric,"w-52"),("Type",model.option_type,"w-40"),("Expirations",model.expiration_filter,"w-36"),("Normalization",model.normalization,"w-40")].into_iter().map(|(label,value,width)| view! { <label class=format!("block shrink-0 text-[0.6875rem] text-text-secondary {width}")><span class="mb-1 block">{label}</span><select class="min-h-9 w-full border border-border bg-canvas px-3 text-sm font-medium text-text-primary" aria-label=label><option>{value}</option></select></label> }).collect_view()}<span class="ml-auto hidden pb-2 text-[0.6875rem] text-text-secondary xl:block">"Fixed 3D perspective · shared illustrative grid"</span></section> }
 }
 
 #[component]

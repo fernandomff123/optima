@@ -588,7 +588,10 @@ fn asset_volatility_has_two_views_and_explicit_plotly_lifecycle() {
     assert!(page.contains("asset_volatility_use_case"));
     assert!(surface.contains("Plotly.react"));
     assert!(surface.contains("Plotly.purge"));
+    assert!(surface.contains("dragmode:false"));
     assert!(heatmap.contains("<table"));
+    assert!(!heatmap.contains("color-mix"));
+    assert!(page.contains("VolatilityHistoryChart"));
     assert!(!page.contains("31.6"));
     assert!(!surface.contains("31.6"));
 }

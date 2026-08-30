@@ -49,9 +49,9 @@ export function renderVolatilitySurface(id, moneynessValues, expiryValues, flatV
   ];
   const axis = {gridcolor:grid,linecolor:border,zerolinecolor:border,tickfont:{color:muted,size:10},titlefont:{color:text,size:11}};
   const layout = {paper_bgcolor:surface,plot_bgcolor:canvas,font:{color:text,size:11},showlegend:false,
-    margin:{l:0,r:0,t:8,b:0},scene:{bgcolor:canvas,aspectratio:{x:1.35,y:1.15,z:0.72},camera:{eye:{x:1.55,y:1.55,z:0.85}},
+    margin:{l:0,r:0,t:8,b:0},scene:{bgcolor:canvas,dragmode:false,aspectratio:{x:1.35,y:1.15,z:0.72},camera:{eye:{x:1.65,y:-1.85,z:0.9},center:{x:0,y:0,z:-0.08},up:{x:0,y:0,z:1}},
       xaxis:{...axis,title:'Moneyness'},yaxis:{...axis,title:'Days to Expiry'},zaxis:{...axis,title:'Implied Volatility (%)'}}};
-  Plotly.react(id,data,layout,{responsive:true,displaylogo:false,displayModeBar:false,scrollZoom:true});
+  Plotly.react(id,data,layout,{responsive:true,displaylogo:false,displayModeBar:false,scrollZoom:false,doubleClick:false});
 }
 export function purgeVolatilitySurface(id) { Plotly.purge(id); }
 "#)]

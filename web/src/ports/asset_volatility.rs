@@ -48,6 +48,15 @@ pub struct VolatilityMetricSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct VolatilityHistoryPointSnapshot {
+    pub label: &'static str,
+    pub atm_iv_30d_percent: f64,
+    pub realized_volatility_20d_percent: f64,
+    pub realized_volatility_60d_percent: f64,
+    pub earnings: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetVolatilitySnapshot {
     pub symbol: AssetSymbol,
     pub name: &'static str,
@@ -64,6 +73,7 @@ pub struct AssetVolatilitySnapshot {
     pub grid: VolatilityGridSnapshot,
     pub smiles: Vec<VolatilitySmileSnapshot>,
     pub term_structure: Vec<VolatilityTermPointSnapshot>,
+    pub history: Vec<VolatilityHistoryPointSnapshot>,
     pub snapshot_metrics: Vec<VolatilityMetricSnapshot>,
 }
 

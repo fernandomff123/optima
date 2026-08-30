@@ -2,8 +2,8 @@ use crate::{
     domain::asset::{AssetCapability, AssetSymbol},
     ports::asset_volatility::{
         AssetVolatilityFailure, AssetVolatilityPort, AssetVolatilitySnapshot,
-        VolatilityGridSnapshot, VolatilityMetricSnapshot, VolatilityScenario,
-        VolatilitySmileSnapshot, VolatilityTermPointSnapshot,
+        VolatilityGridSnapshot, VolatilityHistoryPointSnapshot, VolatilityMetricSnapshot,
+        VolatilityScenario, VolatilitySmileSnapshot, VolatilityTermPointSnapshot,
     },
 };
 use std::rc::Rc;
@@ -37,6 +37,15 @@ pub struct VolatilityMetric {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct VolatilityHistoryPoint {
+    pub label: String,
+    pub atm_iv_30d_percent: f64,
+    pub realized_volatility_20d_percent: f64,
+    pub realized_volatility_60d_percent: f64,
+    pub earnings: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetVolatilityReadModel {
     pub symbol: String,
     pub name: String,
@@ -53,6 +62,7 @@ pub struct AssetVolatilityReadModel {
     pub grid: VolatilityGrid,
     pub smiles: Vec<VolatilitySmile>,
     pub term_structure: Vec<VolatilityTermPoint>,
+    pub history: Vec<VolatilityHistoryPoint>,
     pub snapshot_metrics: Vec<VolatilityMetric>,
 }
 
@@ -112,6 +122,7 @@ fn to_read_model(snapshot: AssetVolatilitySnapshot) -> AssetVolatilityReadModel 
             .into_iter()
             .map(term_point)
             .collect(),
+        history: snapshot.history.into_iter().map(history_point).collect(),
         snapshot_metrics: snapshot.snapshot_metrics.into_iter().map(metric).collect(),
     }
 }
@@ -145,6 +156,16 @@ fn metric(value: VolatilityMetricSnapshot) -> VolatilityMetric {
     VolatilityMetric {
         label: value.label.into(),
         value: value.value.into(),
+    }
+}
+
+fn history_point(value: VolatilityHistoryPointSnapshot) -> VolatilityHistoryPoint {
+    VolatilityHistoryPoint {
+        label: value.label.into(),
+        atm_iv_30d_percent: value.atm_iv_30d_percent,
+        realized_volatility_20d_percent: value.realized_volatility_20d_percent,
+        realized_volatility_60d_percent: value.realized_volatility_60d_percent,
+        earnings: value.earnings,
     }
 }
 
@@ -209,6 +230,7 @@ mod tests {
             },
             smiles: vec![],
             term_structure: vec![],
+            history: vec![],
             snapshot_metrics: vec![],
         };
         let use_case = AssetVolatilityUseCase::new(Rc::new(StubPort {
