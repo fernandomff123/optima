@@ -51,7 +51,10 @@ provider-neutral snapshot. `/assets/AAPL/simulation` renders the approved
 desktop composition with a deterministic position, ECharts payoff, scenario
 fixture, summary strip, accessible HTML P&L heatmap, and Greeks table.
 Alternative result tabs remain visibly unavailable until dedicated result
-contracts exist; scenario controls never reprice in the browser.
+contracts exist. Spot, IV, and time sliders select coordinates in the explicit
+mock grid and update the payoff marker and heatmap selection without repricing
+in the browser. Chart and Options `Add to Simulation` actions share a local
+browser draft with Position; `Add leg` routes back to those instrument pickers.
 
 ## Mocked Asset Overview
 

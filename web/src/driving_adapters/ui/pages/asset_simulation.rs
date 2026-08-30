@@ -6,8 +6,9 @@ use crate::{
     composition::asset_simulation_use_case,
     driving_adapters::ui::{
         components::{
-            AssetTabs, DataState, Panel, SimulationGreeks, SimulationMetricStrip,
-            SimulationPnlHeatmap, SimulationPosition, SimulationScenarioPanel,
+            AssetTabs, DataState, Panel, ScenarioSelection, SimulationGreeks,
+            SimulationMetricStrip, SimulationPnlHeatmap, SimulationPosition,
+            SimulationScenarioPanel,
         },
         echarts::SimulationPayoffChart,
     },
@@ -51,11 +52,14 @@ pub fn AssetSimulationPage() -> impl IntoView {
 fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
     let position_strategy = model.strategy_name.clone();
     let position_legs = model.legs.clone();
+    let position_symbol = model.symbol.clone();
     let payoff_model = model.clone();
     let scenario_preset = model.preset.clone();
     let scenario_controls = model.controls.clone();
+    let scenario_selection = RwSignal::new(ScenarioSelection::from_controls(&scenario_controls));
     let metrics = model.metrics.clone();
     let heatmap = model.heatmap.clone();
+    let result_heatmap = heatmap.clone();
     let greeks = model.greeks.clone();
     let probability_low = model.probability_low.clone();
     let probability_high = model.probability_high.clone();
@@ -63,20 +67,45 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <SimulationHeader model=model />
             <main class="grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(25rem,1fr)_4.375rem_minmax(15rem,0.72fr)] xl:overflow-hidden">
-                <SimulationPosition strategy_name=position_strategy legs=position_legs />
+                <SimulationPosition symbol=position_symbol strategy_name=position_strategy legs=position_legs />
                 <section class="flex min-h-0 flex-col border border-border bg-surface xl:col-start-2" aria-label="Simulation result">
-                    <div class="panel-header"><h2 class="text-sm font-semibold">"Result"</h2><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock snapshot"</span></div>
+                    <div class="panel-header"><h2 class="text-sm font-semibold">"Result"</h2><div class="flex items-center gap-3"><span class="numeric text-[0.6875rem] text-text-secondary">{move || { let selected = scenario_selection.get(); let pnl = selected_fixture_pnl(&result_heatmap, selected); format!("Spot {:.2} · IV {:.1}% · +{:.0}d · Fixture P&L ${pnl:.0}", selected.spot, selected.implied_volatility, selected.time_days) }}</span><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock snapshot"</span></div></div>
                     <ResultTabs />
-                    <SimulationPayoffChart model=payoff_model />
+                    <SimulationPayoffChart model=payoff_model selection=scenario_selection />
                     <div class="flex shrink-0 items-center gap-3 border-t border-border px-6 py-2 text-[0.6875rem] text-text-secondary numeric"><span>{probability_low}</span><span class="h-px flex-1 bg-border"></span><span>"68% Probability"</span><span class="h-px flex-1 bg-border"></span><span>{probability_high}</span></div>
                 </section>
-                <div class="min-h-0 xl:col-start-3 xl:row-span-2"><SimulationScenarioPanel preset=scenario_preset controls=scenario_controls /></div>
+                <div class="min-h-0 xl:col-start-3 xl:row-span-2"><SimulationScenarioPanel preset=scenario_preset controls=scenario_controls selection=scenario_selection /></div>
                 <div class="xl:col-span-2 xl:row-start-2"><SimulationMetricStrip metrics /></div>
-                <div class="min-h-0 xl:col-span-2 xl:row-start-3"><SimulationPnlHeatmap heatmap /></div>
+                <div class="min-h-0 xl:col-span-2 xl:row-start-3"><SimulationPnlHeatmap heatmap selection=scenario_selection /></div>
                 <div class="min-h-0 xl:col-start-3 xl:row-start-3"><SimulationGreeks greeks /></div>
             </main>
         </div>
     }
+}
+
+fn selected_fixture_pnl(
+    heatmap: &crate::application::asset_simulation::PnlHeatmap,
+    selection: ScenarioSelection,
+) -> f64 {
+    let row = nearest(&heatmap.implied_volatilities, selection.implied_volatility);
+    let column = nearest(&heatmap.spot_prices, selection.spot);
+    heatmap
+        .values
+        .get(row)
+        .and_then(|values| values.get(column))
+        .copied()
+        .unwrap_or_default()
+}
+
+fn nearest(values: &[f64], target: f64) -> usize {
+    values
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            (**left - target).abs().total_cmp(&(**right - target).abs())
+        })
+        .map(|(index, _)| index)
+        .unwrap_or_default()
 }
 
 #[component]

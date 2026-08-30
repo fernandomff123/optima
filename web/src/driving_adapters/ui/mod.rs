@@ -4,3 +4,4 @@ pub mod layout;
 pub mod pages;
 pub mod plotly;
 pub mod router;
+pub(crate) mod simulation_draft;

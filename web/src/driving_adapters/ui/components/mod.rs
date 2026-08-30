@@ -45,5 +45,5 @@ pub use simulation_greeks::SimulationGreeks;
 pub use simulation_heatmap::SimulationPnlHeatmap;
 pub use simulation_metrics::SimulationMetricStrip;
 pub use simulation_position::SimulationPosition;
-pub use simulation_scenario::SimulationScenarioPanel;
+pub use simulation_scenario::{ScenarioSelection, SimulationScenarioPanel};
 pub use topbar::Topbar;

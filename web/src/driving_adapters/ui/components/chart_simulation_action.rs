@@ -1,10 +1,14 @@
+use crate::driving_adapters::ui::simulation_draft::{
+    contains_draft_leg, underlying_draft_leg, upsert_draft_leg,
+};
 use leptos::prelude::*;
 
 #[component]
 pub fn ChartSimulationAction(symbol: String) -> impl IntoView {
     let (quantity, set_quantity) = signal(100_u32);
     let (long_position, set_long_position) = signal(true);
-    let (added, set_added) = signal(false);
+    let draft_key = underlying_draft_leg(&symbol, 100).key;
+    let (added, set_added) = signal(contains_draft_leg(&draft_key));
     let direction_button = move |label: &'static str, long: bool| {
         view! {
             <button
@@ -22,7 +26,9 @@ pub fn ChartSimulationAction(symbol: String) -> impl IntoView {
             >{label}</button>
         }
     };
+    let storage_symbol = symbol.clone();
     let confirmation_symbol = symbol.clone();
+    let simulation_path = format!("/assets/{symbol}/simulation");
     view! {
         <section class="mt-2 border-t border-border p-3" aria-label="Underlying simulation draft">
             <div class="flex items-start justify-between gap-3">
@@ -67,7 +73,18 @@ pub fn ChartSimulationAction(symbol: String) -> impl IntoView {
                 }
                 aria-label="Add underlying to Simulation"
                 aria-pressed=move || added.get()
-                on:click=move |_| set_added.set(true)
+                disabled=move || added.get()
+                on:click=move |_| {
+                    let magnitude = i32::try_from(quantity.get()).unwrap_or(i32::MAX);
+                    let signed_quantity = if long_position.get() {
+                        magnitude
+                    } else {
+                        -magnitude
+                    };
+                    if upsert_draft_leg(underlying_draft_leg(&storage_symbol, signed_quantity)) {
+                        set_added.set(true);
+                    }
+                }
             >
                 {move || if added.get() {
                     "Added to Simulation".to_owned()
@@ -83,6 +100,7 @@ pub fn ChartSimulationAction(symbol: String) -> impl IntoView {
                     confirmation_symbol,
                 ))}
             </p>
+            <a class=move || if added.get() { "mt-2 block min-h-9 rounded border border-border px-3 py-2 text-center text-xs font-semibold text-interactive-text hover:bg-state-hover" } else { "hidden" } href=simulation_path>"Open Simulation"</a>
         </section>
     }
 }

@@ -259,6 +259,19 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     let heatmap =
         fs::read_to_string(root.join("driving_adapters/ui/components/simulation_heatmap.rs"))
             .unwrap();
+    let scenario =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_scenario.rs"))
+            .unwrap();
+    let position =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_position.rs"))
+            .unwrap();
+    let draft = fs::read_to_string(root.join("driving_adapters/ui/simulation_draft.rs")).unwrap();
+    let options =
+        fs::read_to_string(root.join("driving_adapters/ui/components/options_contract.rs"))
+            .unwrap();
+    let chart_action =
+        fs::read_to_string(root.join("driving_adapters/ui/components/chart_simulation_action.rs"))
+            .unwrap();
 
     assert!(application.contains("AssetSimulationPort"));
     assert!(!application.contains("leptos"));
@@ -279,6 +292,15 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(!payoff.contains("MockAssetSimulationAdapter"));
     assert!(heatmap.contains("<table"));
     assert!(!heatmap.to_lowercase().contains("echarts"));
+    assert!(scenario.contains("type=\"range\""));
+    assert!(scenario.contains("ScenarioSelection"));
+    assert!(position.contains("Edit Position"));
+    assert!(position.contains("/options") && position.contains("/chart"));
+    assert!(draft.contains("localStorage"));
+    assert!(draft.contains("optima.simulation-draft.v1"));
+    assert!(options.contains("upsert_draft_leg"));
+    assert!(chart_action.contains("upsert_draft_leg"));
+    assert!(!draft.contains("AssetSimulationPort"));
 }
 
 #[test]

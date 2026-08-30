@@ -1,4 +1,7 @@
-use crate::{application::asset_simulation::AssetSimulationReadModel, design_system::tokens};
+use crate::{
+    application::asset_simulation::AssetSimulationReadModel, design_system::tokens,
+    driving_adapters::ui::components::ScenarioSelection,
+};
 use leptos::prelude::*;
 use serde_json::{Value, json};
 
@@ -7,10 +10,16 @@ use super::{EChartsHost, render_chart};
 const HOST_ID: &str = "asset-simulation-payoff-echarts";
 
 #[component]
-pub fn SimulationPayoffChart(model: AssetSimulationReadModel) -> impl IntoView {
+pub fn SimulationPayoffChart(
+    model: AssetSimulationReadModel,
+    selection: RwSignal<ScenarioSelection>,
+) -> impl IntoView {
     let render_model = model.clone();
     Effect::new(move |_| {
-        render_chart(HOST_ID, &build_payoff_option(&render_model));
+        render_chart(
+            HOST_ID,
+            &build_payoff_option(&render_model, selection.get().spot),
+        );
     });
     view! {
         <EChartsHost
@@ -21,7 +30,7 @@ pub fn SimulationPayoffChart(model: AssetSimulationReadModel) -> impl IntoView {
     }
 }
 
-pub fn build_payoff_option(model: &AssetSimulationReadModel) -> String {
+pub fn build_payoff_option(model: &AssetSimulationReadModel, scenario_spot: f64) -> String {
     let current = model
         .payoff
         .iter()
@@ -79,6 +88,7 @@ pub fn build_payoff_option(model: &AssetSimulationReadModel) -> String {
                 tokens::INTERACTIVE_TEXT,
                 false,
                 model,
+                scenario_spot,
             ),
             payoff_series(
                 &format!("At Expiration ({})", model.expiration_date),
@@ -86,6 +96,7 @@ pub fn build_payoff_option(model: &AssetSimulationReadModel) -> String {
                 tokens::TEXT_PRIMARY,
                 true,
                 model,
+                scenario_spot,
             )
         ]
     })
@@ -98,6 +109,7 @@ fn payoff_series(
     color: &str,
     dashed: bool,
     model: &AssetSimulationReadModel,
+    scenario_spot: f64,
 ) -> Value {
     json!({
         "name": name,
@@ -116,6 +128,7 @@ fn payoff_series(
             "silent": true,
             "data": [
                 marker("Spot", model.current_spot, tokens::INTERACTIVE_TEXT),
+                marker("Scenario", scenario_spot, tokens::FINANCE_POSITIVE),
                 marker("Breakeven", model.breakeven, tokens::LEVEL_SPECIAL)
             ]
         }) }
