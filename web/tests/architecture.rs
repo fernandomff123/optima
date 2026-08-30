@@ -148,6 +148,25 @@ fn asset_options_respects_hexagonal_boundaries_and_keeps_fixtures_in_mock_adapte
 }
 
 #[test]
+fn yata_is_isolated_behind_the_technical_indicator_port() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let application =
+        fs::read_to_string(root.join("application/technical_indicators/mod.rs")).unwrap();
+    let port = fs::read_to_string(root.join("ports/technical_indicators.rs")).unwrap();
+    let adapter =
+        fs::read_to_string(root.join("driven_adapters/technical_indicators/yata.rs")).unwrap();
+
+    assert!(application.contains("TechnicalIndicatorPort"));
+    assert!(!application.contains("yata::"));
+    assert!(!port.contains("yata::"));
+    assert!(adapter.contains("YataTechnicalIndicatorAdapter"));
+    assert!(adapter.contains("yata::"));
+    assert!(adapter.contains("BollingerBands"));
+    assert!(adapter.contains("RelativeStrengthIndex"));
+    assert!(adapter.contains("MACD"));
+}
+
+#[test]
 fn options_chain_is_html_and_options_plotly_has_explicit_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let chain =
