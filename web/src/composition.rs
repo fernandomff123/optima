@@ -6,10 +6,11 @@ use crate::{
     application::asset_chart::AssetChartUseCase,
     application::asset_options::AssetOptionsUseCase,
     application::asset_overview::AssetOverviewUseCase,
+    application::asset_simulation::AssetSimulationUseCase,
     application::technical_indicators::TechnicalIndicatorsUseCase,
     driven_adapters::mocks::{
         asset_chart::MockAssetChartAdapter, asset_options::MockAssetOptionsAdapter,
-        asset_overview::MockAssetOverviewAdapter,
+        asset_overview::MockAssetOverviewAdapter, asset_simulation::MockAssetSimulationAdapter,
     },
     driven_adapters::technical_indicators::yata::YataTechnicalIndicatorAdapter,
     driving_adapters::ui::{layout::AppShell, router::AppRoutes},
@@ -28,6 +29,10 @@ pub fn asset_chart_use_case() -> AssetChartUseCase {
         Rc::new(MockAssetChartAdapter),
         TechnicalIndicatorsUseCase::new(Rc::new(YataTechnicalIndicatorAdapter)),
     )
+}
+
+pub fn asset_simulation_use_case() -> AssetSimulationUseCase {
+    AssetSimulationUseCase::new(Rc::new(MockAssetSimulationAdapter))
 }
 
 #[component]

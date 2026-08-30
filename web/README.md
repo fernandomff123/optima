@@ -41,6 +41,15 @@ visibly unavailable until their interactions have real contracts. Loading,
 unavailable, and recoverable-error states use the same `?scenario=` values as
 other slices.
 
+## Mocked Asset Simulation
+
+The simulation foundation keeps the reference position, payoff curves, scenario
+controls, P&L heatmap, summary metrics, and Greeks in a deterministic driven
+adapter behind `AssetSimulationPort`. These values are illustrative fixtures,
+not browser-side pricing or risk calculations. The application only maps the
+provider-neutral snapshot; a later UI patch will render it on
+`/assets/AAPL/simulation`.
+
 ## Mocked Asset Overview
 
 `/assets/:ticker/overview` is a mocks-first vertical slice. The Leptos page calls

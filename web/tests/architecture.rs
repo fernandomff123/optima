@@ -246,6 +246,26 @@ fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
 }
 
 #[test]
+fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let application = fs::read_to_string(root.join("application/asset_simulation/mod.rs")).unwrap();
+    let port = fs::read_to_string(root.join("ports/asset_simulation.rs")).unwrap();
+    let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_simulation.rs")).unwrap();
+    let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+
+    assert!(application.contains("AssetSimulationPort"));
+    assert!(!application.contains("leptos"));
+    assert!(!application.to_lowercase().contains("echarts"));
+    assert!(!port.contains("leptos"));
+    assert!(mock.contains("Long Call Spread"));
+    assert!(mock.contains("heatmap_fixture"));
+    assert!(mock.contains("PayoffPointSnapshot"));
+    assert!(mock.contains("MetricSentiment"));
+    assert!(composition.contains("MockAssetSimulationAdapter"));
+    assert!(!composition.contains("asset_simulation::AssetSimulationSnapshot"));
+}
+
+#[test]
 fn options_chain_is_html_and_options_plotly_has_explicit_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let chain =
