@@ -280,6 +280,7 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(mock.contains("Long Call Spread"));
     assert!(mock.contains("heatmap_fixture"));
     assert!(mock.contains("PayoffPointSnapshot"));
+    assert!(mock.contains("time_payoff_fixture"));
     assert!(mock.contains("MetricSentiment"));
     assert!(composition.contains("MockAssetSimulationAdapter"));
     assert!(!composition.contains("asset_simulation::AssetSimulationSnapshot"));
@@ -289,6 +290,9 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(payoff.contains("render_chart"));
     assert!(payoff.contains("current_pnl"));
     assert!(payoff.contains("expiration_pnl"));
+    assert!(payoff.contains("time_payoffs"));
+    assert!(payoff.contains("at_expiration"));
+    assert!(payoff.contains("0.22"));
     assert!(!payoff.contains("MockAssetSimulationAdapter"));
     assert!(heatmap.contains("<table"));
     assert!(!heatmap.to_lowercase().contains("echarts"));

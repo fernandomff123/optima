@@ -12,11 +12,20 @@ pub fn SimulationPosition(
     strategy_name: String,
     legs: Vec<SimulationLeg>,
 ) -> impl IntoView {
+    let base = base_draft_legs(&legs);
     let stored = read_draft_legs();
     let initial = if stored.is_empty() {
-        base_draft_legs(&legs)
+        base.clone()
     } else {
         stored
+            .into_iter()
+            .map(|stored_leg| {
+                base.iter()
+                    .find(|base_leg| base_leg.key == stored_leg.key)
+                    .cloned()
+                    .unwrap_or(stored_leg)
+            })
+            .collect()
     };
     write_draft_legs(&initial);
     let rows = RwSignal::new(initial);

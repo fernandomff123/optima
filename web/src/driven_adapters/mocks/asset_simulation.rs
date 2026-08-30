@@ -4,6 +4,7 @@ use crate::{
         AssetSimulationFailure, AssetSimulationPort, AssetSimulationSnapshot, GreekSnapshot,
         MetricSentiment, PayoffPointSnapshot, PnlHeatmapSnapshot, ScenarioControlSnapshot,
         SimulationLegSnapshot, SimulationMetricSnapshot, SimulationScenario,
+        TimePayoffCurveSnapshot,
     },
 };
 
@@ -53,18 +54,19 @@ fn aapl_snapshot(symbol: AssetSymbol) -> AssetSimulationSnapshot {
                 quantity: 1,
                 option_type: "CALL",
                 strike: "190",
-                expiration: "MAY 17",
+                expiration: "17 May 2024",
                 price: "2.80",
             },
             SimulationLegSnapshot {
                 quantity: -1,
                 option_type: "CALL",
                 strike: "200",
-                expiration: "MAY 17",
+                expiration: "17 May 2024",
                 price: "0.80",
             },
         ],
         payoff: payoff_fixture(),
+        time_payoffs: time_payoff_fixture(),
         current_spot: 191.13,
         breakeven: 192.80,
         current_date: "May 10, 2024",
@@ -90,7 +92,7 @@ fn aapl_snapshot(symbol: AssetSymbol) -> AssetSimulationSnapshot {
         controls: vec![
             control("Spot", "191.13", "198.00", "160.00", "220.00", 40),
             control("Implied Volatility", "23.8%", "28.0%", "10.0%", "60.0%", 35),
-            control("Time", "Today", "+7 days", "Today", "+30 days", 62),
+            control("Time", "Today", "+7 days", "Today", "+7 days", 0),
         ],
     }
 }
@@ -119,6 +121,87 @@ fn payoff_fixture() -> Vec<PayoffPointSnapshot> {
         },
     )
     .collect()
+}
+
+fn time_payoff_fixture() -> Vec<TimePayoffCurveSnapshot> {
+    vec![
+        time_curve(
+            0,
+            "Today",
+            [
+                -450.0, -450.0, -450.0, -445.0, -390.0, -170.0, 0.0, 260.0, 610.0, 690.0, 690.0,
+                690.0,
+            ],
+        ),
+        time_curve(
+            1,
+            "+1 day",
+            [
+                -470.0, -470.0, -470.0, -465.0, -410.0, -182.0, -5.0, 272.0, 625.0, 698.0, 698.0,
+                698.0,
+            ],
+        ),
+        time_curve(
+            2,
+            "+2 days",
+            [
+                -490.0, -490.0, -490.0, -485.0, -430.0, -195.0, -10.0, 285.0, 640.0, 705.0, 705.0,
+                705.0,
+            ],
+        ),
+        time_curve(
+            3,
+            "+3 days",
+            [
+                -510.0, -510.0, -510.0, -505.0, -455.0, -210.0, -9.0, 292.0, 660.0, 710.0, 710.0,
+                710.0,
+            ],
+        ),
+        time_curve(
+            4,
+            "+4 days",
+            [
+                -530.0, -530.0, -530.0, -525.0, -480.0, -225.0, -8.0, 300.0, 680.0, 715.0, 715.0,
+                715.0,
+            ],
+        ),
+        time_curve(
+            5,
+            "+5 days",
+            [
+                -550.0, -550.0, -550.0, -545.0, -510.0, -245.0, -5.0, 308.0, 698.0, 718.0, 718.0,
+                718.0,
+            ],
+        ),
+        time_curve(
+            6,
+            "+6 days",
+            [
+                -575.0, -575.0, -575.0, -570.0, -540.0, -265.0, -3.0, 315.0, 715.0, 720.0, 720.0,
+                720.0,
+            ],
+        ),
+        time_curve(
+            7,
+            "At Expiration",
+            [
+                -600.0, -600.0, -600.0, -600.0, -600.0, -280.0, 0.0, 320.0, 720.0, 720.0, 720.0,
+                720.0,
+            ],
+        ),
+    ]
+}
+
+fn time_curve(
+    elapsed_days: u8,
+    label: &'static str,
+    pnl_values: [f64; 12],
+) -> TimePayoffCurveSnapshot {
+    TimePayoffCurveSnapshot {
+        elapsed_days,
+        label,
+        pnl_values: pnl_values.into(),
+    }
 }
 
 fn heatmap_fixture() -> PnlHeatmapSnapshot {
@@ -201,6 +284,25 @@ mod tests {
                 .all(|row| row.len() == snapshot.heatmap.spot_prices.len())
         );
         assert_eq!(snapshot.payoff.last().unwrap().expiration_pnl, 720.0);
+        assert_eq!(snapshot.legs[0].expiration, "17 May 2024");
+        assert_eq!(snapshot.time_payoffs.first().unwrap().elapsed_days, 0);
+        assert_eq!(snapshot.time_payoffs.last().unwrap().elapsed_days, 7);
+        assert_eq!(
+            snapshot.time_payoffs.first().unwrap().pnl_values,
+            snapshot
+                .payoff
+                .iter()
+                .map(|point| point.current_pnl)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            snapshot.time_payoffs.last().unwrap().pnl_values,
+            snapshot
+                .payoff
+                .iter()
+                .map(|point| point.expiration_pnl)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

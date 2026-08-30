@@ -3,7 +3,7 @@ use crate::{
     ports::asset_simulation::{
         AssetSimulationFailure, AssetSimulationPort, AssetSimulationSnapshot, GreekSnapshot,
         MetricSentiment, PayoffPointSnapshot, PnlHeatmapSnapshot, ScenarioControlSnapshot,
-        SimulationLegSnapshot, SimulationScenario,
+        SimulationLegSnapshot, SimulationScenario, TimePayoffCurveSnapshot,
     },
 };
 use std::rc::Rc;
@@ -22,6 +22,13 @@ pub struct PayoffPoint {
     pub underlying_price: f64,
     pub current_pnl: f64,
     pub expiration_pnl: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimePayoffCurve {
+    pub elapsed_days: u8,
+    pub label: String,
+    pub pnl_values: Vec<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -69,6 +76,7 @@ pub struct AssetSimulationReadModel {
     pub strategy_name: String,
     pub legs: Vec<SimulationLeg>,
     pub payoff: Vec<PayoffPoint>,
+    pub time_payoffs: Vec<TimePayoffCurve>,
     pub current_spot: f64,
     pub breakeven: f64,
     pub current_date: String,
@@ -129,6 +137,11 @@ fn to_read_model(snapshot: AssetSimulationSnapshot) -> AssetSimulationReadModel 
         strategy_name: snapshot.strategy_name.into(),
         legs: snapshot.legs.into_iter().map(leg).collect(),
         payoff: snapshot.payoff.into_iter().map(payoff_point).collect(),
+        time_payoffs: snapshot
+            .time_payoffs
+            .into_iter()
+            .map(time_payoff_curve)
+            .collect(),
         current_spot: snapshot.current_spot,
         breakeven: snapshot.breakeven,
         current_date: snapshot.current_date.into(),
@@ -169,6 +182,14 @@ fn payoff_point(value: PayoffPointSnapshot) -> PayoffPoint {
     }
 }
 
+fn time_payoff_curve(value: TimePayoffCurveSnapshot) -> TimePayoffCurve {
+    TimePayoffCurve {
+        elapsed_days: value.elapsed_days,
+        label: value.label.into(),
+        pnl_values: value.pnl_values,
+    }
+}
+
 fn heatmap(value: PnlHeatmapSnapshot) -> PnlHeatmap {
     PnlHeatmap {
         spot_prices: value.spot_prices,
@@ -203,6 +224,7 @@ mod tests {
     use super::*;
     use crate::ports::asset_simulation::{
         AssetSimulationSnapshot, PnlHeatmapSnapshot, SimulationMetricSnapshot,
+        TimePayoffCurveSnapshot,
     };
     use std::cell::Cell;
 
@@ -229,6 +251,11 @@ mod tests {
                     underlying_price: 191.13,
                     current_pnl: 225.0,
                     expiration_pnl: 0.0,
+                }],
+                time_payoffs: vec![TimePayoffCurveSnapshot {
+                    elapsed_days: 0,
+                    label: "Today",
+                    pnl_values: vec![225.0],
                 }],
                 current_spot: 191.13,
                 breakeven: 192.8,
@@ -266,6 +293,7 @@ mod tests {
         assert_eq!(port.0.get(), 1);
         assert_eq!(model.symbol, "AAPL");
         assert_eq!(model.payoff[0].current_pnl, 225.0);
+        assert_eq!(model.time_payoffs[0].pnl_values, vec![225.0]);
         assert_eq!(model.heatmap.values, vec![vec![225.0]]);
     }
 

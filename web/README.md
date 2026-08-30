@@ -53,7 +53,9 @@ fixture, summary strip, accessible HTML P&L heatmap, and Greeks table.
 Alternative result tabs remain visibly unavailable until dedicated result
 contracts exist. Spot, IV, and time sliders select coordinates in the explicit
 mock grid and update the payoff marker and heatmap selection without repricing
-in the browser. Chart and Options `Add to Simulation` actions share a local
+in the browser. The Time slider selects one of eight explicit daily payoff
+fixtures; the final curve is unsmoothed and exactly matches the piecewise-linear
+expiration payoff. Chart and Options `Add to Simulation` actions share a local
 browser draft with Position; `Add leg` routes back to those instrument pickers.
 
 ## Mocked Asset Overview

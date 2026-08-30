@@ -13,7 +13,7 @@ impl ScenarioSelection {
         Self {
             spot: target(controls, "Spot", 191.13),
             implied_volatility: target(controls, "Implied Volatility", 23.8),
-            time_days: target(controls, "Time", 0.0),
+            time_days: current(controls, "Time", 0.0),
         }
     }
 }
@@ -111,6 +111,14 @@ fn target(controls: &[ScenarioControl], label: &str, fallback: f64) -> f64 {
         .iter()
         .find(|control| control.label == label)
         .and_then(|control| numeric(&control.target))
+        .unwrap_or(fallback)
+}
+
+fn current(controls: &[ScenarioControl], label: &str, fallback: f64) -> f64 {
+    controls
+        .iter()
+        .find(|control| control.label == label)
+        .and_then(|control| numeric(&control.current))
         .unwrap_or(fallback)
 }
 

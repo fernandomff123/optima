@@ -36,6 +36,13 @@ pub struct PayoffPointSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct TimePayoffCurveSnapshot {
+    pub elapsed_days: u8,
+    pub label: &'static str,
+    pub pnl_values: Vec<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct SimulationMetricSnapshot {
     pub label: &'static str,
     pub value: &'static str,
@@ -88,6 +95,7 @@ pub struct AssetSimulationSnapshot {
     pub strategy_name: &'static str,
     pub legs: Vec<SimulationLegSnapshot>,
     pub payoff: Vec<PayoffPointSnapshot>,
+    pub time_payoffs: Vec<TimePayoffCurveSnapshot>,
     pub current_spot: f64,
     pub breakeven: f64,
     pub current_date: &'static str,
