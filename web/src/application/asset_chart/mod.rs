@@ -6,7 +6,7 @@ use crate::{
     ports::{
         asset_chart::{
             AssetChartFailure, AssetChartPort, AssetChartSnapshot, ChartCandleSnapshot,
-            ChartScenario,
+            ChartScenario, GexLevelKind,
         },
         technical_indicators::{
             IndicatorPlacement, IndicatorRequest, MovingAverageKind, TechnicalCandle,
@@ -49,6 +49,13 @@ pub struct ChartIndicator {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct GexLevel {
+    pub label: String,
+    pub value: f64,
+    pub tone: ChartTone,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetChartReadModel {
     pub symbol: String,
     pub name: String,
@@ -62,6 +69,7 @@ pub struct AssetChartReadModel {
     pub candles: Vec<ChartCandle>,
     pub indicators: Vec<ChartIndicator>,
     pub average_volume: f64,
+    pub gex_levels: Vec<GexLevel>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,7 +118,7 @@ impl AssetChartUseCase {
             .iter()
             .map(technical_candle)
             .collect::<Vec<_>>();
-        let mut indicators = Vec::with_capacity(5);
+        let mut indicators = Vec::with_capacity(6);
         for (id, label, request, tones) in indicator_requests() {
             let series = self.indicators.calculate(&technical, request).ok()?;
             let lines = series
@@ -143,6 +151,19 @@ impl AssetChartUseCase {
             candles: snapshot.candles.into_iter().map(chart_candle).collect(),
             indicators,
             average_volume: snapshot.average_volume,
+            gex_levels: snapshot
+                .gex_levels
+                .into_iter()
+                .map(|level| GexLevel {
+                    label: level.label.into(),
+                    value: level.value,
+                    tone: match level.kind {
+                        GexLevelKind::CallWall => ChartTone::Blue,
+                        GexLevelKind::GammaFlip => ChartTone::Green,
+                        GexLevelKind::PutWall => ChartTone::Red,
+                    },
+                })
+                .collect(),
         })
     }
 }
@@ -155,6 +176,15 @@ fn indicator_requests() -> Vec<IndicatorSpec> {
         ("ma-20", "MA (20)", moving_average(20), vec![Blue]),
         ("ma-50", "MA (50)", moving_average(50), vec![Orange]),
         ("ma-200", "MA (200)", moving_average(200), vec![Purple]),
+        (
+            "bollinger-bands",
+            "Bollinger Bands (20, 2)",
+            IndicatorRequest::BollingerBands {
+                period: 20,
+                sigma: 2.0,
+            },
+            vec![Blue, Blue, Blue],
+        ),
         (
             "rsi",
             "RSI (14)",

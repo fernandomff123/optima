@@ -29,6 +29,20 @@ pub struct ChartCandleSnapshot {
     pub volume: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GexLevelKind {
+    CallWall,
+    GammaFlip,
+    PutWall,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct GexLevelSnapshot {
+    pub kind: GexLevelKind,
+    pub label: &'static str,
+    pub value: f64,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AssetChartSnapshot {
     pub symbol: AssetSymbol,
@@ -42,6 +56,7 @@ pub struct AssetChartSnapshot {
     pub capabilities: Vec<AssetCapability>,
     pub candles: Vec<ChartCandleSnapshot>,
     pub average_volume: f64,
+    pub gex_levels: Vec<GexLevelSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

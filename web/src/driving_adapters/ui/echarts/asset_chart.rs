@@ -1,11 +1,17 @@
 use crate::{
-    application::asset_chart::{AssetChartReadModel, ChartIndicator, ChartTone},
+    application::asset_chart::{AssetChartReadModel, ChartIndicator},
     design_system::tokens,
 };
 use leptos::prelude::*;
 use serde_json::{Value, json};
 
-use super::{EChartsHost, render_chart};
+use super::{
+    EChartsHost,
+    asset_chart_series::{
+        candlestick_series, line_series, macd_series, multi_line_series, rsi_series, volume_series,
+    },
+    render_chart,
+};
 
 const HOST_ID: &str = "asset-chart-echarts";
 
@@ -14,6 +20,7 @@ pub struct ChartVisibility {
     pub ma20: bool,
     pub ma50: bool,
     pub ma200: bool,
+    pub bollinger: bool,
     pub rsi: bool,
     pub macd: bool,
 }
@@ -66,7 +73,7 @@ pub fn build_asset_chart_option(
         })
         .collect::<Vec<_>>();
     let mut series = vec![
-        candlestick_series(candles, &model.price),
+        candlestick_series(candles, &model.price, &model.gex_levels),
         volume_series(volumes),
     ];
     for (id, visible) in [
@@ -78,6 +85,11 @@ pub fn build_asset_chart_option(
             if let Some(indicator) = indicator(model, id) {
                 series.push(line_series(indicator, 0, 0, false));
             }
+        }
+    }
+    if visibility.bollinger {
+        if let Some(indicator) = indicator(model, "bollinger-bands") {
+            series.extend(multi_line_series(indicator, 0, 0));
         }
     }
     if visibility.rsi {
@@ -93,17 +105,20 @@ pub fn build_asset_chart_option(
     let x_axes = (0..4)
         .map(|index| x_axis(&categories, index, index == 3))
         .collect::<Vec<_>>();
+    let mut titles = vec![panel_title("Volume", "47%")];
+    if visibility.rsi {
+        titles.push(panel_title("RSI (14)", "63%"));
+    }
+    if visibility.macd {
+        titles.push(panel_title("MACD (12, 26, close)", "78%"));
+    }
     json!({
         "animation": false,
         "backgroundColor": tokens::CANVAS,
         "textStyle": { "color": tokens::TEXT_SECONDARY, "fontSize": 11 },
         "axisPointer": { "link": [{ "xAxisIndex": "all" }] },
         "tooltip": { "trigger": "axis", "axisPointer": { "type": "cross" } },
-        "title": [
-            panel_title("Volume", "47%"),
-            panel_title("RSI (14)", "63%"),
-            panel_title("MACD (12, 26, close)", "78%")
-        ],
+        "title": titles,
         "grid": [
             { "left": 12, "right": 62, "top": "2%", "height": "45%" },
             { "left": 12, "right": 62, "top": "49%", "height": "13%" },
@@ -168,117 +183,8 @@ fn y_axis(grid_index: usize, range: Option<(f64, f64)>) -> Value {
     axis
 }
 
-fn candlestick_series(data: Vec<Vec<f64>>, price: &str) -> Value {
-    let last_price = price.parse::<f64>().unwrap_or(0.0);
-    json!({
-        "name": "Price",
-        "type": "candlestick",
-        "xAxisIndex": 0,
-        "yAxisIndex": 0,
-        "data": data,
-        "itemStyle": {
-            "color": tokens::FINANCE_POSITIVE,
-            "color0": tokens::FINANCE_NEGATIVE,
-            "borderColor": tokens::FINANCE_POSITIVE,
-            "borderColor0": tokens::FINANCE_NEGATIVE
-        },
-        "markLine": {
-            "symbol": "none",
-            "silent": true,
-            "label": {
-                "show": true, "position": "end", "formatter": price,
-                "color": tokens::TEXT_PRIMARY, "backgroundColor": tokens::FINANCE_POSITIVE,
-                "padding": [3, 5]
-            },
-            "lineStyle": { "color": tokens::FINANCE_POSITIVE, "type": "dashed", "width": 1 },
-            "data": [{ "yAxis": last_price }]
-        }
-    })
-}
-
-fn volume_series(data: Vec<Value>) -> Value {
-    json!({
-        "name": "Volume", "type": "bar", "xAxisIndex": 1, "yAxisIndex": 1,
-        "data": data, "barMaxWidth": 8
-    })
-}
-
-fn line_series(indicator: &ChartIndicator, x_axis: usize, y_axis: usize, smooth: bool) -> Value {
-    let line = &indicator.lines[0];
-    json!({
-        "name": indicator.label,
-        "type": "line",
-        "xAxisIndex": x_axis,
-        "yAxisIndex": y_axis,
-        "data": line.values,
-        "showSymbol": false,
-        "smooth": smooth,
-        "connectNulls": true,
-        "lineStyle": { "color": tone_color(line.tone), "width": 1.25 },
-        "itemStyle": { "color": tone_color(line.tone) }
-    })
-}
-
-fn rsi_series(indicator: &ChartIndicator) -> Value {
-    let mut series = line_series(indicator, 2, 2, true);
-    series["markLine"] = json!({
-        "symbol": "none",
-        "silent": true,
-        "label": { "show": false },
-        "lineStyle": { "color": tokens::TEXT_MUTED_READABLE, "type": "dashed" },
-        "data": [{ "yAxis": 30 }, { "yAxis": 70 }]
-    });
-    series
-}
-
-fn macd_series(indicator: &ChartIndicator) -> Vec<Value> {
-    indicator
-        .lines
-        .iter()
-        .enumerate()
-        .map(|(index, line)| {
-            if index == 2 {
-                let data = line
-                    .values
-                    .iter()
-                    .map(|value| {
-                        json!({
-                            "value": value,
-                            "itemStyle": { "color": if *value >= 0.0 {
-                                tokens::FINANCE_POSITIVE
-                            } else {
-                                tokens::FINANCE_NEGATIVE
-                            }}
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                json!({
-                    "name": "Histogram", "type": "bar", "xAxisIndex": 3, "yAxisIndex": 3,
-                    "data": data, "barMaxWidth": 7
-                })
-            } else {
-                json!({
-                    "name": line.label, "type": "line", "xAxisIndex": 3, "yAxisIndex": 3,
-                    "data": line.values, "showSymbol": false,
-                    "lineStyle": { "color": tone_color(line.tone), "width": 1.2 }
-                })
-            }
-        })
-        .collect()
-}
-
 fn indicator<'a>(model: &'a AssetChartReadModel, id: &str) -> Option<&'a ChartIndicator> {
     model.indicators.iter().find(|indicator| indicator.id == id)
-}
-
-fn tone_color(tone: ChartTone) -> &'static str {
-    match tone {
-        ChartTone::Blue => tokens::INTERACTIVE_TEXT,
-        ChartTone::Orange => tokens::LEVEL_SPECIAL,
-        ChartTone::Purple => tokens::INTERACTIVE_SOURCE,
-        ChartTone::Green => tokens::FINANCE_POSITIVE,
-        ChartTone::Red => tokens::FINANCE_NEGATIVE,
-    }
 }
 
 #[cfg(test)]
@@ -291,6 +197,7 @@ mod tests {
             ma20: true,
             ma50: false,
             ma200: false,
+            bollinger: false,
             rsi: true,
             macd: true,
         };

@@ -1,4 +1,5 @@
 mod asset_chart;
+mod asset_chart_series;
 mod host;
 mod runtime;
 

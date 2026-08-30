@@ -2,6 +2,7 @@ use crate::{
     domain::asset::{AssetCapability, AssetSymbol},
     ports::asset_chart::{
         AssetChartFailure, AssetChartPort, AssetChartSnapshot, ChartCandleSnapshot, ChartScenario,
+        GexLevelKind, GexLevelSnapshot,
     },
 };
 
@@ -44,6 +45,23 @@ fn aapl_snapshot() -> AssetChartSnapshot {
         ],
         candles: aapl_candles(),
         average_volume: 48_670_000.0,
+        gex_levels: vec![
+            GexLevelSnapshot {
+                kind: GexLevelKind::CallWall,
+                label: "Call Wall",
+                value: 195.0,
+            },
+            GexLevelSnapshot {
+                kind: GexLevelKind::GammaFlip,
+                label: "Gamma Flip",
+                value: 187.5,
+            },
+            GexLevelSnapshot {
+                kind: GexLevelKind::PutWall,
+                label: "Put Wall",
+                value: 175.0,
+            },
+        ],
     }
 }
 
@@ -119,6 +137,9 @@ mod tests {
         assert!(high - low > 20.0);
         assert_eq!(candles.last().unwrap().close, 191.13);
         assert_eq!(candles.last().unwrap().volume, 55_210_000.0);
+        let snapshot = aapl_snapshot();
+        assert_eq!(snapshot.gex_levels.len(), 3);
+        assert_eq!(snapshot.gex_levels[1].value, 187.5);
     }
 
     #[test]

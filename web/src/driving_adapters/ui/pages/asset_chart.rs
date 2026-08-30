@@ -5,7 +5,7 @@ use crate::{
     },
     composition::asset_chart_use_case,
     driving_adapters::ui::{
-        components::{AssetTabs, DataState, Panel},
+        components::{AssetTabs, ChartIndicatorCatalog, DataState, Panel},
         echarts::{AssetChartCanvas, ChartVisibility},
     },
     ports::asset_chart::ChartScenario,
@@ -51,26 +51,37 @@ fn ChartContent(model: AssetChartReadModel) -> impl IntoView {
     let (ma20, set_ma20) = signal(true);
     let (ma50, set_ma50) = signal(true);
     let (ma200, set_ma200) = signal(true);
+    let (bollinger, set_bollinger) = signal(false);
     let (rsi, set_rsi) = signal(true);
     let (macd, set_macd) = signal(true);
+    let (catalog_open, set_catalog_open) = signal(false);
     let visibility = Signal::derive(move || ChartVisibility {
         ma20: ma20.get(),
         ma50: ma50.get(),
         ma200: ma200.get(),
+        bollinger: bollinger.get(),
         rsi: rsi.get(),
         macd: macd.get(),
     });
     let canvas_model = model.clone();
     let sidebar_model = model.clone();
     view! {
-        <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
+        <div class="relative xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <div class="xl:shrink-0"><ChartHeader model=model.clone() /></div>
             <div class="xl:shrink-0">
-                <ChartToolbar on_reset=Callback::new(move |_| {
+                <ChartToolbar catalog_open on_indicators=Callback::new(move |_| set_catalog_open.update(|open| *open = !*open)) on_reset=Callback::new(move |_| {
                     set_ma20.set(true); set_ma50.set(true); set_ma200.set(true);
-                    set_rsi.set(true); set_macd.set(true);
+                    set_bollinger.set(false); set_rsi.set(true); set_macd.set(true);
+                    set_catalog_open.set(false);
                 }) />
             </div>
+            {move || catalog_open.get().then(|| view! {
+                <ChartIndicatorCatalog
+                    ma20 set_ma20 ma50 set_ma50 ma200 set_ma200 bollinger set_bollinger
+                    rsi set_rsi macd set_macd
+                    on_close=Callback::new(move |_| set_catalog_open.set(false))
+                />
+            })}
             <main class="grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_17.5rem]">
                 <section class="flex min-h-0 flex-col overflow-hidden border border-border bg-surface" aria-label="AAPL technical chart">
                     <ChartSummary model=model />
@@ -78,7 +89,8 @@ fn ChartContent(model: AssetChartReadModel) -> impl IntoView {
                 </section>
                 <ChartSidebar
                     model=sidebar_model
-                    ma20 set_ma20 ma50 set_ma50 ma200 set_ma200 rsi set_rsi macd set_macd
+                    ma20 set_ma20 ma50 set_ma50 ma200 set_ma200 bollinger set_bollinger
+                    rsi set_rsi macd set_macd
                 />
             </main>
         </div>
@@ -120,7 +132,11 @@ fn ChartHeader(model: AssetChartReadModel) -> impl IntoView {
 }
 
 #[component]
-fn ChartToolbar(on_reset: Callback<()>) -> impl IntoView {
+fn ChartToolbar(
+    catalog_open: ReadSignal<bool>,
+    on_indicators: Callback<()>,
+    on_reset: Callback<()>,
+) -> impl IntoView {
     view! {
         <div class="dense-scrollbar overflow-x-auto border-b border-border bg-surface">
             <div class="flex h-11 min-w-max items-center gap-1 px-3 text-xs">
@@ -129,7 +145,7 @@ fn ChartToolbar(on_reset: Callback<()>) -> impl IntoView {
                 {time_buttons(["1m", "5m", "15m", "1h", "1D"], "1D")}
                 <span class="mx-2 h-6 border-l border-border"></span>
                 <button type="button" class="h-8 rounded px-3 font-medium text-text-primary hover:bg-state-hover">"▥  Candles  ▾"</button>
-                <button type="button" class="h-8 rounded bg-state-selected px-3 font-medium text-interactive-text">"ƒx  Indicators"</button>
+                <button type="button" class=move || if catalog_open.get() { "h-8 rounded bg-state-selected px-3 font-medium text-interactive-text" } else { "h-8 rounded px-3 font-medium text-text-primary hover:bg-state-hover" } aria-expanded=move || catalog_open.get() on:click=move |_| on_indicators.run(())>"ƒx  Indicators"</button>
                 <button type="button" class="h-8 cursor-not-allowed rounded px-3 text-text-secondary opacity-60" disabled>"⊕  Compare"</button>
                 <button type="button" class="h-8 cursor-not-allowed rounded px-3 text-text-secondary opacity-60" disabled>"✎  Drawings"</button>
                 <button type="button" class="h-8 rounded px-3 text-text-secondary hover:bg-state-hover hover:text-text-primary" on:click=move |_| on_reset.run(())>"↻  Reset"</button>
@@ -181,6 +197,8 @@ fn ChartSidebar(
     set_ma50: WriteSignal<bool>,
     ma200: ReadSignal<bool>,
     set_ma200: WriteSignal<bool>,
+    bollinger: ReadSignal<bool>,
+    set_bollinger: WriteSignal<bool>,
     rsi: ReadSignal<bool>,
     set_rsi: WriteSignal<bool>,
     macd: ReadSignal<bool>,
@@ -190,8 +208,10 @@ fn ChartSidebar(
     let ma20_value = indicator_value(&model, "ma-20", 0);
     let ma50_value = indicator_value(&model, "ma-50", 0);
     let ma200_value = indicator_value(&model, "ma-200", 0);
+    let bollinger_value = indicator_value(&model, "bollinger-bands", 1);
     let rsi_value = indicator_value(&model, "rsi", 0);
     let macd_value = indicator_value(&model, "macd", 0);
+    let gex_levels = model.gex_levels.clone();
     view! {
         <aside class="dense-scrollbar min-h-0 overflow-y-auto border border-border bg-surface" aria-label="Indicators and price details">
             <div class="panel-header"><h2 class="text-sm font-semibold">"Indicators"</h2><span class="text-text-secondary">"⚙"</span></div>
@@ -199,9 +219,22 @@ fn ChartSidebar(
                 <IndicatorToggle label="MA (20)" value=ma20_value tone="text-interactive-text" enabled=ma20 set_enabled=set_ma20 />
                 <IndicatorToggle label="MA (50)" value=ma50_value tone="text-level-special" enabled=ma50 set_enabled=set_ma50 />
                 <IndicatorToggle label="MA (200)" value=ma200_value tone="text-interactive-source" enabled=ma200 set_enabled=set_ma200 />
+                <IndicatorToggle label="Bollinger (20, 2)" value=bollinger_value tone="text-interactive-text" enabled=bollinger set_enabled=set_bollinger />
                 <IndicatorToggle label="RSI (14)" value=rsi_value tone="text-interactive-text" enabled=rsi set_enabled=set_rsi />
                 <IndicatorToggle label="MACD (12, 26)" value=macd_value tone="text-finance-positive" enabled=macd set_enabled=set_macd />
             </div>
+            <div class="panel-header mt-2"><div><h2 class="text-sm font-semibold">"GEX Levels"</h2><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock fixture"</span></div></div>
+            <dl>
+                {gex_levels.into_iter().map(|level| {
+                    let tone = match level.tone {
+                        crate::application::asset_chart::ChartTone::Blue => "text-interactive-text",
+                        crate::application::asset_chart::ChartTone::Green => "text-finance-positive",
+                        crate::application::asset_chart::ChartTone::Red => "text-negative-text",
+                        _ => "text-text-primary",
+                    };
+                    view! { <div class="fact-row min-h-9 py-1.5 text-xs"><dt class="text-text-secondary">{level.label.clone()}</dt><dd class=format!("numeric {tone}")>{format!("{:.2}", level.value)}</dd></div> }
+                }).collect_view()}
+            </dl>
             <div class="panel-header mt-2"><h2 class="text-sm font-semibold">"Price Details"</h2></div>
             {last.map(|candle| view! {
                 <dl>

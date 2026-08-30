@@ -25,14 +25,17 @@ resize, render, and disposal. Indicator calculations remain behind
 `/assets/AAPL/chart` is a deterministic, full-viewport technical-analysis
 workspace. The page loads OHLCV fixtures through `AssetChartPort`, calculates
 MA 20/50/200, RSI 14, and MACD through the YATA adapter, and sends only the
-provider-neutral read model to the route-scoped ECharts renderer. Indicator
-visibility can be changed locally from the right-hand panel.
+provider-neutral read model to the route-scoped ECharts renderer. The indicator
+catalog can add or remove MA 20/50/200, Bollinger Bands, RSI, and MACD; the
+right-hand panel mirrors the active selection.
 
-The chart deliberately omits Call Wall, Put Wall, and Gamma Flip levels. Those
-labels require explicit backend definitions and must not be inferred from mock
-OHLCV data. Compare and drawing controls remain visibly unavailable until their
-interactions have real contracts. Loading, unavailable, and recoverable-error
-states are available through the same `?scenario=` values used by other slices.
+The Call Wall, Gamma Flip, and Put Wall levels are explicit visual fixtures from
+the approved reference and are labelled as mock data in the UI. They are not
+derived from OHLCV data and must be replaced by an explicit backend contract
+before being treated as financial output. Compare and drawing controls remain
+visibly unavailable until their interactions have real contracts. Loading,
+unavailable, and recoverable-error states use the same `?scenario=` values as
+other slices.
 
 ## Mocked Asset Overview
 

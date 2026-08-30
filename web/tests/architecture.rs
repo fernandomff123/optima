@@ -209,6 +209,7 @@ fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
 
     assert!(page.contains("asset_chart_use_case"));
     assert!(page.contains("IndicatorToggle"));
+    assert!(page.contains("ChartIndicatorCatalog"));
     assert!(!page.contains("MockAssetChartAdapter"));
     assert!(!page.contains("YataTechnicalIndicatorAdapter"));
     assert!(application.contains("AssetChartPort"));
@@ -222,10 +223,11 @@ fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
     assert!(!renderer.contains("MockAssetChartAdapter"));
     assert!(composition.contains("MockAssetChartAdapter"));
     assert!(composition.contains("YataTechnicalIndicatorAdapter"));
-    for unsupported in ["Call Wall", "Put Wall", "Gamma Flip"] {
-        assert!(!page.contains(unsupported));
-        assert!(!renderer.contains(unsupported));
-    }
+    assert!(mock.contains("GexLevelSnapshot"));
+    assert!(mock.contains("Call Wall"));
+    assert!(mock.contains("Gamma Flip"));
+    assert!(mock.contains("Put Wall"));
+    assert!(page.contains("Mock fixture"));
 }
 
 #[test]
