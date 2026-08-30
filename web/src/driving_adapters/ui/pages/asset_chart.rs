@@ -5,7 +5,7 @@ use crate::{
     },
     composition::asset_chart_use_case,
     driving_adapters::ui::{
-        components::{AssetTabs, ChartIndicatorCatalog, DataState, Panel},
+        components::{AssetTabs, ChartIndicatorCatalog, ChartSimulationAction, DataState, Panel},
         echarts::{AssetChartCanvas, ChartVisibility},
     },
     ports::asset_chart::ChartScenario,
@@ -54,6 +54,7 @@ fn ChartContent(model: AssetChartReadModel) -> impl IntoView {
     let (bollinger, set_bollinger) = signal(false);
     let (rsi, set_rsi) = signal(true);
     let (macd, set_macd) = signal(true);
+    let (gex, set_gex) = signal(true);
     let (catalog_open, set_catalog_open) = signal(false);
     let visibility = Signal::derive(move || ChartVisibility {
         ma20: ma20.get(),
@@ -62,6 +63,7 @@ fn ChartContent(model: AssetChartReadModel) -> impl IntoView {
         bollinger: bollinger.get(),
         rsi: rsi.get(),
         macd: macd.get(),
+        gex: gex.get(),
     });
     let canvas_model = model.clone();
     let sidebar_model = model.clone();
@@ -72,6 +74,7 @@ fn ChartContent(model: AssetChartReadModel) -> impl IntoView {
                 <ChartToolbar catalog_open on_indicators=Callback::new(move |_| set_catalog_open.update(|open| *open = !*open)) on_reset=Callback::new(move |_| {
                     set_ma20.set(true); set_ma50.set(true); set_ma200.set(true);
                     set_bollinger.set(false); set_rsi.set(true); set_macd.set(true);
+                    set_gex.set(true);
                     set_catalog_open.set(false);
                 }) />
             </div>
@@ -90,7 +93,7 @@ fn ChartContent(model: AssetChartReadModel) -> impl IntoView {
                 <ChartSidebar
                     model=sidebar_model
                     ma20 set_ma20 ma50 set_ma50 ma200 set_ma200 bollinger set_bollinger
-                    rsi set_rsi macd set_macd
+                    rsi set_rsi macd set_macd gex set_gex
                 />
             </main>
         </div>
@@ -203,6 +206,8 @@ fn ChartSidebar(
     set_rsi: WriteSignal<bool>,
     macd: ReadSignal<bool>,
     set_macd: WriteSignal<bool>,
+    gex: ReadSignal<bool>,
+    set_gex: WriteSignal<bool>,
 ) -> impl IntoView {
     let last = model.candles.last().cloned();
     let ma20_value = indicator_value(&model, "ma-20", 0);
@@ -212,6 +217,7 @@ fn ChartSidebar(
     let rsi_value = indicator_value(&model, "rsi", 0);
     let macd_value = indicator_value(&model, "macd", 0);
     let gex_levels = model.gex_levels.clone();
+    let simulation_symbol = model.symbol.clone();
     view! {
         <aside class="dense-scrollbar min-h-0 overflow-y-auto border border-border bg-surface" aria-label="Indicators and price details">
             <div class="panel-header"><h2 class="text-sm font-semibold">"Indicators"</h2><span class="text-text-secondary">"⚙"</span></div>
@@ -223,9 +229,21 @@ fn ChartSidebar(
                 <IndicatorToggle label="RSI (14)" value=rsi_value tone="text-interactive-text" enabled=rsi set_enabled=set_rsi />
                 <IndicatorToggle label="MACD (12, 26)" value=macd_value tone="text-finance-positive" enabled=macd set_enabled=set_macd />
             </div>
-            <div class="panel-header mt-2"><div><h2 class="text-sm font-semibold">"GEX Levels"</h2><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock fixture"</span></div></div>
-            <dl>
-                {gex_levels.into_iter().map(|level| {
+            <div class="panel-header mt-2">
+                <div><h2 class="text-sm font-semibold">"GEX Levels"</h2><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock fixture"</span></div>
+                <button
+                    type="button"
+                    class=move || if gex.get() { "relative h-5 w-9 rounded-full bg-interactive-source" } else { "relative h-5 w-9 rounded-full border border-border bg-canvas" }
+                    aria-label="Show mock GEX levels"
+                    aria-pressed=move || gex.get()
+                    title="Show or hide mock GEX levels"
+                    on:click=move |_| set_gex.update(|value| *value = !*value)
+                >
+                    <span class=move || if gex.get() { "absolute right-0.5 top-0.5 size-4 rounded-full bg-white transition-all" } else { "absolute left-0.5 top-0.5 size-4 rounded-full bg-text-muted-readable transition-all" }></span>
+                </button>
+            </div>
+            {move || gex.get().then(|| view! { <dl>
+                {gex_levels.clone().into_iter().map(|level| {
                     let tone = match level.tone {
                         crate::application::asset_chart::ChartTone::Blue => "text-interactive-text",
                         crate::application::asset_chart::ChartTone::Green => "text-finance-positive",
@@ -234,7 +252,7 @@ fn ChartSidebar(
                     };
                     view! { <div class="fact-row min-h-9 py-1.5 text-xs"><dt class="text-text-secondary">{level.label.clone()}</dt><dd class=format!("numeric {tone}")>{format!("{:.2}", level.value)}</dd></div> }
                 }).collect_view()}
-            </dl>
+            </dl> })}
             <div class="panel-header mt-2"><h2 class="text-sm font-semibold">"Price Details"</h2></div>
             {last.map(|candle| view! {
                 <dl>
@@ -247,6 +265,7 @@ fn ChartSidebar(
                     <Metric label="Avg Volume (20D)" value=format_volume(model.average_volume) />
                 </dl>
             })}
+            <ChartSimulationAction symbol=simulation_symbol />
         </aside>
     }
 }

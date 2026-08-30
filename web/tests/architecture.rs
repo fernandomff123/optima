@@ -203,6 +203,12 @@ fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
     let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset_chart.rs")).unwrap();
     let renderer =
         fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_chart.rs")).unwrap();
+    let catalog =
+        fs::read_to_string(root.join("driving_adapters/ui/components/chart_indicator_catalog.rs"))
+            .unwrap();
+    let simulation =
+        fs::read_to_string(root.join("driving_adapters/ui/components/chart_simulation_action.rs"))
+            .unwrap();
     let application = fs::read_to_string(root.join("application/asset_chart/mod.rs")).unwrap();
     let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_chart.rs")).unwrap();
     let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
@@ -228,6 +234,15 @@ fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
     assert!(mock.contains("Gamma Flip"));
     assert!(mock.contains("Put Wall"));
     assert!(page.contains("Mock fixture"));
+    assert!(page.contains("set_gex"));
+    assert!(renderer.contains("visibility.gex"));
+    assert!(catalog.contains("aria-modal=\"true\""));
+    assert!(catalog.contains(">\"Done\"<"));
+    assert!(simulation.contains("Add underlying to Simulation"));
+    assert!(simulation.contains("100_u32"));
+    assert!(simulation.contains("step=\"100\""));
+    assert!(simulation.contains("\"Long\"") && simulation.contains("\"Short\""));
+    assert!(!simulation.contains("http"));
 }
 
 #[test]

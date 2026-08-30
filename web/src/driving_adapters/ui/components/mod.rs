@@ -1,6 +1,7 @@
 mod asset_header;
 mod asset_tabs;
 mod chart_indicator_catalog;
+mod chart_simulation_action;
 mod fact_table;
 mod feedback;
 mod financial_value;
@@ -20,6 +21,7 @@ mod topbar;
 pub use asset_header::AssetHeader;
 pub use asset_tabs::AssetTabs;
 pub use chart_indicator_catalog::ChartIndicatorCatalog;
+pub use chart_simulation_action::ChartSimulationAction;
 pub use fact_table::FactTable;
 pub use feedback::DataState;
 pub use financial_value::FinancialValue;

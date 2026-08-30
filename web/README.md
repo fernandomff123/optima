@@ -27,7 +27,11 @@ workspace. The page loads OHLCV fixtures through `AssetChartPort`, calculates
 MA 20/50/200, RSI 14, and MACD through the YATA adapter, and sends only the
 provider-neutral read model to the route-scoped ECharts renderer. The indicator
 catalog can add or remove MA 20/50/200, Bollinger Bands, RSI, and MACD; the
-right-hand panel mirrors the active selection.
+right-hand panel mirrors the active selection. Its GEX switch hides or restores
+the three mock levels in both the chart and legend. The same contextual panel
+can add a local Long or Short underlying draft to Simulation, using an editable
+quantity that starts at 100 and advances in steps of 100; this is an
+interface-only interaction and does not call a backend.
 
 The Call Wall, Gamma Flip, and Put Wall levels are explicit visual fixtures from
 the approved reference and are labelled as mock data in the UI. They are not

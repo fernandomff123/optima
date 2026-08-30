@@ -23,6 +23,7 @@ pub struct ChartVisibility {
     pub bollinger: bool,
     pub rsi: bool,
     pub macd: bool,
+    pub gex: bool,
 }
 
 #[component]
@@ -72,8 +73,13 @@ pub fn build_asset_chart_option(
             })
         })
         .collect::<Vec<_>>();
+    let gex_levels = if visibility.gex {
+        model.gex_levels.as_slice()
+    } else {
+        &[]
+    };
     let mut series = vec![
-        candlestick_series(candles, &model.price, &model.gex_levels),
+        candlestick_series(candles, &model.price, gex_levels),
         volume_series(volumes),
     ];
     for (id, visible) in [
@@ -117,7 +123,14 @@ pub fn build_asset_chart_option(
         "backgroundColor": tokens::CANVAS,
         "textStyle": { "color": tokens::TEXT_SECONDARY, "fontSize": 11 },
         "axisPointer": { "link": [{ "xAxisIndex": "all" }] },
-        "tooltip": { "trigger": "axis", "axisPointer": { "type": "cross" } },
+        "tooltip": {
+            "trigger": "axis",
+            "backgroundColor": tokens::TEXT_SECONDARY,
+            "borderColor": tokens::TEXT_MUTED_READABLE,
+            "borderWidth": 1,
+            "textStyle": { "color": tokens::CANVAS },
+            "axisPointer": { "type": "cross" }
+        },
         "title": titles,
         "grid": [
             { "left": 12, "right": 62, "top": "2%", "height": "45%" },
@@ -200,6 +213,7 @@ mod tests {
             bollinger: false,
             rsi: true,
             macd: true,
+            gex: true,
         };
         assert!(visibility.ma20);
         assert!(!visibility.ma50);

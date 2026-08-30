@@ -18,10 +18,16 @@ pub fn ChartIndicatorCatalog(
     on_close: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <section class="absolute left-[33rem] top-[8.35rem] z-30 w-80 rounded-panel border border-border bg-surface-elevated shadow-panel" aria-label="Technical indicator catalog">
+        <button
+            type="button"
+            class="fixed inset-0 z-20 cursor-default bg-canvas/70"
+            aria-label="Close technical indicator catalog"
+            on:click=move |_| on_close.run(())
+        ></button>
+        <section class="fixed left-1/2 top-1/2 z-30 w-[min(24rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-panel border border-border bg-surface-elevated shadow-panel" role="dialog" aria-modal="true" aria-label="Technical indicator catalog">
             <div class="panel-header">
                 <div><h2 class="text-sm font-semibold">"Technical Indicators"</h2><p class="text-[0.6875rem] text-text-muted-readable">"Select overlays and lower panels"</p></div>
-                <button type="button" class="grid size-8 place-items-center rounded text-text-secondary hover:bg-state-hover hover:text-text-primary" aria-label="Close indicator catalog" on:click=move |_| on_close.run(())>"×"</button>
+                <button type="button" class="grid size-10 place-items-center rounded text-xl leading-none text-text-primary hover:bg-state-hover" aria-label="Close indicator catalog" title="Close" on:click=move |_| on_close.run(())>"×"</button>
             </div>
             <div class="p-2">
                 <p class="px-2 pb-1 pt-1 text-[0.625rem] font-semibold uppercase tracking-wider text-text-muted-readable">"Overlays"</p>
@@ -33,6 +39,9 @@ pub fn ChartIndicatorCatalog(
                 <CatalogOption label="Relative Strength Index (14)" enabled=rsi set_enabled=set_rsi />
                 <CatalogOption label="MACD (12, 26, 9)" enabled=macd set_enabled=set_macd />
             </div>
+            <footer class="border-t border-border p-3">
+                <button type="button" class="min-h-10 w-full rounded border border-interactive-source bg-interactive-source px-4 text-xs font-semibold text-white hover:brightness-110" on:click=move |_| on_close.run(())>"Done"</button>
+            </footer>
         </section>
     }
 }
