@@ -252,6 +252,13 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     let port = fs::read_to_string(root.join("ports/asset_simulation.rs")).unwrap();
     let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_simulation.rs")).unwrap();
     let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+    let page =
+        fs::read_to_string(root.join("driving_adapters/ui/pages/asset_simulation.rs")).unwrap();
+    let payoff =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_simulation.rs")).unwrap();
+    let heatmap =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_heatmap.rs"))
+            .unwrap();
 
     assert!(application.contains("AssetSimulationPort"));
     assert!(!application.contains("leptos"));
@@ -263,6 +270,15 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(mock.contains("MetricSentiment"));
     assert!(composition.contains("MockAssetSimulationAdapter"));
     assert!(!composition.contains("asset_simulation::AssetSimulationSnapshot"));
+    assert!(page.contains("asset_simulation_use_case"));
+    assert!(!page.contains("MockAssetSimulationAdapter"));
+    assert!(page.contains("SimulationPayoffChart"));
+    assert!(payoff.contains("render_chart"));
+    assert!(payoff.contains("current_pnl"));
+    assert!(payoff.contains("expiration_pnl"));
+    assert!(!payoff.contains("MockAssetSimulationAdapter"));
+    assert!(heatmap.contains("<table"));
+    assert!(!heatmap.to_lowercase().contains("echarts"));
 }
 
 #[test]

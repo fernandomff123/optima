@@ -47,8 +47,11 @@ The simulation foundation keeps the reference position, payoff curves, scenario
 controls, P&L heatmap, summary metrics, and Greeks in a deterministic driven
 adapter behind `AssetSimulationPort`. These values are illustrative fixtures,
 not browser-side pricing or risk calculations. The application only maps the
-provider-neutral snapshot; a later UI patch will render it on
-`/assets/AAPL/simulation`.
+provider-neutral snapshot. `/assets/AAPL/simulation` renders the approved
+desktop composition with a deterministic position, ECharts payoff, scenario
+fixture, summary strip, accessible HTML P&L heatmap, and Greeks table.
+Alternative result tabs remain visibly unavailable until dedicated result
+contracts exist; scenario controls never reprice in the browser.
 
 ## Mocked Asset Overview
 

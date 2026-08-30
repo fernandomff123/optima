@@ -169,7 +169,3 @@ pub fn AssetVolatilityPage() -> impl IntoView {
 pub fn AssetGexPage() -> impl IntoView {
     view! { <AssetWorkspacePage section="gex" /> }
 }
-#[component]
-pub fn AssetSimulationPage() -> impl IntoView {
-    view! { <AssetWorkspacePage section="simulation" /> }
-}
