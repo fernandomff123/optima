@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@tailwindcss/cli": "4.3.3",
+    "echarts": "6.1.0",
     "plotly.js-dist-min": "3.0.1",
     "tailwindcss": "4.3.3"
   }

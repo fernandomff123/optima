@@ -115,6 +115,36 @@ fn plotly_is_local_and_cleanup_uses_purge() {
 }
 
 #[test]
+fn echarts_is_local_route_scoped_and_only_a_driving_adapter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let html = fs::read_to_string(root.join("index.html")).unwrap();
+    let package = fs::read_to_string(root.join("package.json")).unwrap();
+    let runtime =
+        fs::read_to_string(root.join("src/driving_adapters/ui/echarts/runtime.rs")).unwrap();
+    let host = fs::read_to_string(root.join("src/driving_adapters/ui/echarts/host.rs")).unwrap();
+
+    assert!(package.contains("\"echarts\": \"6.1.0\""));
+    assert!(html.contains("node_modules/echarts/dist/echarts.min.js"));
+    assert!(html.contains("src=\"/echarts.min.js\""));
+    assert!(!html.contains("cdn"));
+    assert!(runtime.contains("globalThis.echarts.init"));
+    assert!(runtime.contains("chart.setOption"));
+    assert!(runtime.contains("chart.resize"));
+    assert!(runtime.contains("chart.dispose"));
+    assert!(host.contains("on_cleanup"));
+    assert!(host.contains("dispose_chart"));
+
+    for layer in ["domain", "application", "ports"] {
+        for (path, source) in rust_sources(&root.join("src").join(layer)) {
+            assert!(
+                !source.to_lowercase().contains("echarts"),
+                "{path} couples an inner layer to ECharts"
+            );
+        }
+    }
+}
+
+#[test]
 fn asset_overview_respects_hexagonal_boundaries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
