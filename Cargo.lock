@@ -2367,6 +2367,7 @@ dependencies = [
  "leptos",
  "leptos_router",
  "plotly",
+ "serde_json",
  "url",
  "walkdir",
  "wasm-bindgen",

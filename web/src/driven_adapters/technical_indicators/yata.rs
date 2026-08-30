@@ -1,12 +1,13 @@
 use crate::ports::technical_indicators::{
-    IndicatorLine, IndicatorPlacement, IndicatorRequest, IndicatorSeries, TechnicalCandle,
-    TechnicalIndicatorFailure, TechnicalIndicatorPort,
+    IndicatorLine, IndicatorPlacement, IndicatorRequest, IndicatorSeries, MovingAverageKind,
+    TechnicalCandle, TechnicalIndicatorFailure, TechnicalIndicatorPort,
 };
 use yata::{
     core::Source,
     helpers::MA,
     indicators::{BollingerBands, MACD, RelativeStrengthIndex},
-    prelude::{Candle, IndicatorConfig},
+    methods::{EMA, SMA},
+    prelude::{Candle, IndicatorConfig, Method},
 };
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -34,6 +35,9 @@ impl TechnicalIndicatorPort for YataTechnicalIndicatorAdapter {
             .collect::<Vec<_>>();
 
         match request {
+            IndicatorRequest::MovingAverage { kind, period } => {
+                moving_average(&yata_candles, kind, period)
+            }
             IndicatorRequest::BollingerBands { period, sigma } => {
                 bollinger_bands(&yata_candles, period, sigma)
             }
@@ -47,6 +51,40 @@ impl TechnicalIndicatorPort for YataTechnicalIndicatorAdapter {
             } => macd(&yata_candles, fast_period, slow_period, signal_period),
         }
     }
+}
+
+fn moving_average(
+    candles: &[Candle],
+    kind: MovingAverageKind,
+    period: u8,
+) -> Result<IndicatorSeries, TechnicalIndicatorFailure> {
+    let first = candles
+        .first()
+        .ok_or(TechnicalIndicatorFailure::EmptyInput)?
+        .close;
+    let values = match kind {
+        MovingAverageKind::Simple => {
+            let mut average = SMA::new(period, &first).map_err(map_yata_error)?;
+            candles
+                .iter()
+                .map(|candle| average.next(&candle.close))
+                .collect()
+        }
+        MovingAverageKind::Exponential => {
+            let mut average = EMA::new(period, &first).map_err(map_yata_error)?;
+            candles
+                .iter()
+                .map(|candle| average.next(&candle.close))
+                .collect()
+        }
+    };
+    Ok(IndicatorSeries {
+        placement: IndicatorPlacement::PriceOverlay,
+        lines: vec![IndicatorLine {
+            label: "Moving Average",
+            values,
+        }],
+    })
 }
 
 fn bollinger_bands(
@@ -178,6 +216,16 @@ mod tests {
         let engine = YataTechnicalIndicatorAdapter;
         let candles = candles();
 
+        let average = engine
+            .calculate(
+                &candles,
+                IndicatorRequest::MovingAverage {
+                    kind: MovingAverageKind::Simple,
+                    period: 20,
+                },
+            )
+            .unwrap();
+
         let bollinger = engine
             .calculate(
                 &candles,
@@ -205,6 +253,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(bollinger.placement, IndicatorPlacement::PriceOverlay);
+        assert_eq!(average.placement, IndicatorPlacement::PriceOverlay);
+        assert_eq!(average.lines[0].values.len(), candles.len());
         assert_eq!(bollinger.lines.len(), 3);
         assert_eq!(rsi.lines[0].values.len(), candles.len());
         assert!(

@@ -7,8 +7,18 @@ pub struct TechnicalCandle {
     pub volume: f64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MovingAverageKind {
+    Simple,
+    Exponential,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IndicatorRequest {
+    MovingAverage {
+        kind: MovingAverageKind,
+        period: u8,
+    },
     BollingerBands {
         period: u8,
         sigma: f64,

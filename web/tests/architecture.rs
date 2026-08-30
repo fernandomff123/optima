@@ -194,6 +194,38 @@ fn yata_is_isolated_behind_the_technical_indicator_port() {
     assert!(adapter.contains("BollingerBands"));
     assert!(adapter.contains("RelativeStrengthIndex"));
     assert!(adapter.contains("MACD"));
+    assert!(adapter.contains("SMA"));
+}
+
+#[test]
+fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset_chart.rs")).unwrap();
+    let renderer =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_chart.rs")).unwrap();
+    let application = fs::read_to_string(root.join("application/asset_chart/mod.rs")).unwrap();
+    let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_chart.rs")).unwrap();
+    let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+
+    assert!(page.contains("asset_chart_use_case"));
+    assert!(page.contains("IndicatorToggle"));
+    assert!(!page.contains("MockAssetChartAdapter"));
+    assert!(!page.contains("YataTechnicalIndicatorAdapter"));
+    assert!(application.contains("AssetChartPort"));
+    assert!(application.contains("TechnicalIndicatorsUseCase"));
+    assert!(!application.contains("echarts"));
+    assert!(!application.contains("leptos"));
+    assert!(mock.contains("55_210_000.0"));
+    assert!(renderer.contains("candlestick"));
+    assert!(renderer.contains("dataZoom"));
+    assert!(renderer.contains("xAxisIndex"));
+    assert!(!renderer.contains("MockAssetChartAdapter"));
+    assert!(composition.contains("MockAssetChartAdapter"));
+    assert!(composition.contains("YataTechnicalIndicatorAdapter"));
+    for unsupported in ["Call Wall", "Put Wall", "Gamma Flip"] {
+        assert!(!page.contains(unsupported));
+        assert!(!renderer.contains(unsupported));
+    }
 }
 
 #[test]

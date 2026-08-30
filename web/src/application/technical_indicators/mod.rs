@@ -19,7 +19,22 @@ pub struct IndicatorDefinition {
     pub category: IndicatorCategory,
 }
 
-pub const INITIAL_INDICATOR_CATALOG: [IndicatorDefinition; 3] = [
+pub const INITIAL_INDICATOR_CATALOG: [IndicatorDefinition; 6] = [
+    IndicatorDefinition {
+        id: "ma-20",
+        label: "Moving Average (20)",
+        category: IndicatorCategory::Overlay,
+    },
+    IndicatorDefinition {
+        id: "ma-50",
+        label: "Moving Average (50)",
+        category: IndicatorCategory::Overlay,
+    },
+    IndicatorDefinition {
+        id: "ma-200",
+        label: "Moving Average (200)",
+        category: IndicatorCategory::Overlay,
+    },
     IndicatorDefinition {
         id: "bollinger-bands",
         label: "Bollinger Bands",
@@ -98,6 +113,6 @@ mod tests {
             .expect("indicator calculation should succeed");
 
         assert_eq!(result.lines[0].values, vec![1.0]);
-        assert_eq!(INITIAL_INDICATOR_CATALOG.len(), 3);
+        assert_eq!(INITIAL_INDICATOR_CATALOG.len(), 6);
     }
 }

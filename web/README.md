@@ -20,6 +20,20 @@ route-scoped adapter under `driving_adapters/ui/echarts` owns initialization,
 resize, render, and disposal. Indicator calculations remain behind
 `TechnicalIndicatorPort` and do not depend on ECharts types.
 
+## Mocked Asset Chart
+
+`/assets/AAPL/chart` is a deterministic, full-viewport technical-analysis
+workspace. The page loads OHLCV fixtures through `AssetChartPort`, calculates
+MA 20/50/200, RSI 14, and MACD through the YATA adapter, and sends only the
+provider-neutral read model to the route-scoped ECharts renderer. Indicator
+visibility can be changed locally from the right-hand panel.
+
+The chart deliberately omits Call Wall, Put Wall, and Gamma Flip levels. Those
+labels require explicit backend definitions and must not be inferred from mock
+OHLCV data. Compare and drawing controls remain visibly unavailable until their
+interactions have real contracts. Loading, unavailable, and recoverable-error
+states are available through the same `?scenario=` values used by other slices.
+
 ## Mocked Asset Overview
 
 `/assets/:ticker/overview` is a mocks-first vertical slice. The Leptos page calls

@@ -3,11 +3,15 @@ use leptos_router::components::Router;
 use std::rc::Rc;
 
 use crate::{
+    application::asset_chart::AssetChartUseCase,
     application::asset_options::AssetOptionsUseCase,
     application::asset_overview::AssetOverviewUseCase,
+    application::technical_indicators::TechnicalIndicatorsUseCase,
     driven_adapters::mocks::{
-        asset_options::MockAssetOptionsAdapter, asset_overview::MockAssetOverviewAdapter,
+        asset_chart::MockAssetChartAdapter, asset_options::MockAssetOptionsAdapter,
+        asset_overview::MockAssetOverviewAdapter,
     },
+    driven_adapters::technical_indicators::yata::YataTechnicalIndicatorAdapter,
     driving_adapters::ui::{layout::AppShell, router::AppRoutes},
 };
 
@@ -17,6 +21,13 @@ pub fn asset_overview_use_case() -> AssetOverviewUseCase {
 
 pub fn asset_options_use_case() -> AssetOptionsUseCase {
     AssetOptionsUseCase::new(Rc::new(MockAssetOptionsAdapter))
+}
+
+pub fn asset_chart_use_case() -> AssetChartUseCase {
+    AssetChartUseCase::new(
+        Rc::new(MockAssetChartAdapter),
+        TechnicalIndicatorsUseCase::new(Rc::new(YataTechnicalIndicatorAdapter)),
+    )
 }
 
 #[component]
