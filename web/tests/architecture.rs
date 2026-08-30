@@ -572,3 +572,23 @@ fn asset_volatility_keeps_the_shared_grid_behind_its_port() {
         assert!(!source.contains("24.4%"));
     }
 }
+
+#[test]
+fn asset_volatility_has_two_views_and_explicit_plotly_lifecycle() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let page =
+        fs::read_to_string(root.join("driving_adapters/ui/pages/asset_volatility.rs")).unwrap();
+    let surface =
+        fs::read_to_string(root.join("driving_adapters/ui/plotly/asset_volatility.rs")).unwrap();
+    let heatmap =
+        fs::read_to_string(root.join("driving_adapters/ui/components/volatility_heatmap.rs"))
+            .unwrap();
+    assert!(page.contains("Surface 3D"));
+    assert!(page.contains("Heatmap"));
+    assert!(page.contains("asset_volatility_use_case"));
+    assert!(surface.contains("Plotly.react"));
+    assert!(surface.contains("Plotly.purge"));
+    assert!(heatmap.contains("<table"));
+    assert!(!page.contains("31.6"));
+    assert!(!surface.contains("31.6"));
+}

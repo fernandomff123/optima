@@ -162,10 +162,6 @@ fn OverviewSkeleton() -> impl IntoView {
 }
 
 #[component]
-pub fn AssetVolatilityPage() -> impl IntoView {
-    view! { <AssetWorkspacePage section="volatility" /> }
-}
-#[component]
 pub fn AssetGexPage() -> impl IntoView {
     view! { <AssetWorkspacePage section="gex" /> }
 }

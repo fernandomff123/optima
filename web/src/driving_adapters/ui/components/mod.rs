@@ -22,6 +22,8 @@ mod simulation_metrics;
 mod simulation_position;
 mod simulation_scenario;
 mod topbar;
+mod volatility_heatmap;
+mod volatility_snapshot;
 
 pub use asset_header::AssetHeader;
 pub use asset_tabs::AssetTabs;
@@ -47,3 +49,5 @@ pub use simulation_metrics::SimulationMetricStrip;
 pub use simulation_position::SimulationPosition;
 pub use simulation_scenario::{ScenarioSelection, SimulationScenarioPanel};
 pub use topbar::Topbar;
+pub use volatility_heatmap::VolatilityHeatmap;
+pub use volatility_snapshot::VolatilitySnapshot;

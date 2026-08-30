@@ -1,8 +1,12 @@
 mod asset_options;
 mod asset_overview;
+mod asset_volatility;
+mod asset_volatility_analytics;
 mod host;
 mod theme;
 pub use asset_options::{OptionsSmileChart, build_smile_plot};
 pub use asset_overview::{AssetOverviewChart, build_price_volume_plot};
+pub use asset_volatility::{VolatilitySurfaceChart, build_surface_plot};
+pub use asset_volatility_analytics::VolatilityAnalytics;
 pub use host::PlotlyHost;
 pub use theme::PlotlyTheme;
