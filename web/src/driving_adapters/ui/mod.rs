@@ -1,4 +1,5 @@
 pub mod components;
+pub mod echarts;
 pub mod layout;
 pub mod pages;
 pub mod plotly;

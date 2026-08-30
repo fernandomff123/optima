@@ -115,6 +115,36 @@ fn plotly_is_local_and_cleanup_uses_purge() {
 }
 
 #[test]
+fn echarts_is_local_route_scoped_and_only_a_driving_adapter() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let html = fs::read_to_string(root.join("index.html")).unwrap();
+    let package = fs::read_to_string(root.join("package.json")).unwrap();
+    let runtime =
+        fs::read_to_string(root.join("src/driving_adapters/ui/echarts/runtime.rs")).unwrap();
+    let host = fs::read_to_string(root.join("src/driving_adapters/ui/echarts/host.rs")).unwrap();
+
+    assert!(package.contains("\"echarts\": \"6.1.0\""));
+    assert!(html.contains("node_modules/echarts/dist/echarts.min.js"));
+    assert!(html.contains("src=\"/echarts.min.js\""));
+    assert!(!html.contains("cdn"));
+    assert!(runtime.contains("globalThis.echarts.init"));
+    assert!(runtime.contains("chart.setOption"));
+    assert!(runtime.contains("chart.resize"));
+    assert!(runtime.contains("chart.dispose"));
+    assert!(host.contains("on_cleanup"));
+    assert!(host.contains("dispose_chart"));
+
+    for layer in ["domain", "application", "ports"] {
+        for (path, source) in rust_sources(&root.join("src").join(layer)) {
+            assert!(
+                !source.to_lowercase().contains("echarts"),
+                "{path} couples an inner layer to ECharts"
+            );
+        }
+    }
+}
+
+#[test]
 fn asset_overview_respects_hexagonal_boundaries() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset.rs")).unwrap();
@@ -145,6 +175,74 @@ fn asset_options_respects_hexagonal_boundaries_and_keeps_fixtures_in_mock_adapte
     assert!(mock.contains("191.13"));
     assert!(mock.contains("MockAssetOptionsAdapter"));
     assert!(composition.contains("MockAssetOptionsAdapter"));
+}
+
+#[test]
+fn yata_is_isolated_behind_the_technical_indicator_port() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let application =
+        fs::read_to_string(root.join("application/technical_indicators/mod.rs")).unwrap();
+    let port = fs::read_to_string(root.join("ports/technical_indicators.rs")).unwrap();
+    let adapter =
+        fs::read_to_string(root.join("driven_adapters/technical_indicators/yata.rs")).unwrap();
+
+    assert!(application.contains("TechnicalIndicatorPort"));
+    assert!(!application.contains("yata::"));
+    assert!(!port.contains("yata::"));
+    assert!(adapter.contains("YataTechnicalIndicatorAdapter"));
+    assert!(adapter.contains("yata::"));
+    assert!(adapter.contains("BollingerBands"));
+    assert!(adapter.contains("RelativeStrengthIndex"));
+    assert!(adapter.contains("MACD"));
+    assert!(adapter.contains("SMA"));
+}
+
+#[test]
+fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let page = fs::read_to_string(root.join("driving_adapters/ui/pages/asset_chart.rs")).unwrap();
+    let renderer =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_chart.rs")).unwrap();
+    let catalog =
+        fs::read_to_string(root.join("driving_adapters/ui/components/chart_indicator_catalog.rs"))
+            .unwrap();
+    let simulation =
+        fs::read_to_string(root.join("driving_adapters/ui/components/chart_simulation_action.rs"))
+            .unwrap();
+    let application = fs::read_to_string(root.join("application/asset_chart/mod.rs")).unwrap();
+    let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_chart.rs")).unwrap();
+    let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+
+    assert!(page.contains("asset_chart_use_case"));
+    assert!(page.contains("IndicatorToggle"));
+    assert!(page.contains("ChartIndicatorCatalog"));
+    assert!(!page.contains("MockAssetChartAdapter"));
+    assert!(!page.contains("YataTechnicalIndicatorAdapter"));
+    assert!(application.contains("AssetChartPort"));
+    assert!(application.contains("TechnicalIndicatorsUseCase"));
+    assert!(!application.contains("echarts"));
+    assert!(!application.contains("leptos"));
+    assert!(mock.contains("55_210_000.0"));
+    assert!(renderer.contains("candlestick"));
+    assert!(renderer.contains("dataZoom"));
+    assert!(renderer.contains("xAxisIndex"));
+    assert!(!renderer.contains("MockAssetChartAdapter"));
+    assert!(composition.contains("MockAssetChartAdapter"));
+    assert!(composition.contains("YataTechnicalIndicatorAdapter"));
+    assert!(mock.contains("GexLevelSnapshot"));
+    assert!(mock.contains("Call Wall"));
+    assert!(mock.contains("Gamma Flip"));
+    assert!(mock.contains("Put Wall"));
+    assert!(page.contains("Mock fixture"));
+    assert!(page.contains("set_gex"));
+    assert!(renderer.contains("visibility.gex"));
+    assert!(catalog.contains("aria-modal=\"true\""));
+    assert!(catalog.contains(">\"Done\"<"));
+    assert!(simulation.contains("Add underlying to Simulation"));
+    assert!(simulation.contains("100_u32"));
+    assert!(simulation.contains("step=\"100\""));
+    assert!(simulation.contains("\"Long\"") && simulation.contains("\"Short\""));
+    assert!(!simulation.contains("http"));
 }
 
 #[test]

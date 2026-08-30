@@ -14,6 +14,33 @@ Rust dependencies are pinned by the workspace `Cargo.lock`; npm dependencies are
 
 Plotly.js 3.0.1 is pinned by npm and copied into `dist` by Trunk. The Rust `plotly` crate supplies WASM-compatible models and bindings without embedding a second JavaScript payload in the WASM binary. No CDN or external runtime asset is used. The concrete adapter under `driving_adapters/ui/plotly` owns theme mapping and route-scoped `Plotly.purge` cleanup.
 
+Apache ECharts 6.1.0 is also pinned locally for the Asset Chart workspace. Trunk
+copies its minified browser bundle from `node_modules`; no CDN is used. The
+route-scoped adapter under `driving_adapters/ui/echarts` owns initialization,
+resize, render, and disposal. Indicator calculations remain behind
+`TechnicalIndicatorPort` and do not depend on ECharts types.
+
+## Mocked Asset Chart
+
+`/assets/AAPL/chart` is a deterministic, full-viewport technical-analysis
+workspace. The page loads OHLCV fixtures through `AssetChartPort`, calculates
+MA 20/50/200, RSI 14, and MACD through the YATA adapter, and sends only the
+provider-neutral read model to the route-scoped ECharts renderer. The indicator
+catalog can add or remove MA 20/50/200, Bollinger Bands, RSI, and MACD; the
+right-hand panel mirrors the active selection. Its GEX switch hides or restores
+the three mock levels in both the chart and legend. The same contextual panel
+can add a local Long or Short underlying draft to Simulation, using an editable
+quantity that starts at 100 and advances in steps of 100; this is an
+interface-only interaction and does not call a backend.
+
+The Call Wall, Gamma Flip, and Put Wall levels are explicit visual fixtures from
+the approved reference and are labelled as mock data in the UI. They are not
+derived from OHLCV data and must be replaced by an explicit backend contract
+before being treated as financial output. Compare and drawing controls remain
+visibly unavailable until their interactions have real contracts. Loading,
+unavailable, and recoverable-error states use the same `?scenario=` values as
+other slices.
+
 ## Mocked Asset Overview
 
 `/assets/:ticker/overview` is a mocks-first vertical slice. The Leptos page calls
