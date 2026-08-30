@@ -246,6 +246,68 @@ fn asset_chart_keeps_fixtures_calculation_and_rendering_in_separate_adapters() {
 }
 
 #[test]
+fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let application = fs::read_to_string(root.join("application/asset_simulation/mod.rs")).unwrap();
+    let port = fs::read_to_string(root.join("ports/asset_simulation.rs")).unwrap();
+    let mock = fs::read_to_string(root.join("driven_adapters/mocks/asset_simulation.rs")).unwrap();
+    let composition = fs::read_to_string(root.join("composition.rs")).unwrap();
+    let page =
+        fs::read_to_string(root.join("driving_adapters/ui/pages/asset_simulation.rs")).unwrap();
+    let payoff =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_simulation.rs")).unwrap();
+    let heatmap =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_heatmap.rs"))
+            .unwrap();
+    let scenario =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_scenario.rs"))
+            .unwrap();
+    let position =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_position.rs"))
+            .unwrap();
+    let draft = fs::read_to_string(root.join("driving_adapters/ui/simulation_draft.rs")).unwrap();
+    let options =
+        fs::read_to_string(root.join("driving_adapters/ui/components/options_contract.rs"))
+            .unwrap();
+    let chart_action =
+        fs::read_to_string(root.join("driving_adapters/ui/components/chart_simulation_action.rs"))
+            .unwrap();
+
+    assert!(application.contains("AssetSimulationPort"));
+    assert!(!application.contains("leptos"));
+    assert!(!application.to_lowercase().contains("echarts"));
+    assert!(!port.contains("leptos"));
+    assert!(mock.contains("Long Call Spread"));
+    assert!(mock.contains("heatmap_fixture"));
+    assert!(mock.contains("PayoffPointSnapshot"));
+    assert!(mock.contains("time_payoff_fixture"));
+    assert!(mock.contains("MetricSentiment"));
+    assert!(composition.contains("MockAssetSimulationAdapter"));
+    assert!(!composition.contains("asset_simulation::AssetSimulationSnapshot"));
+    assert!(page.contains("asset_simulation_use_case"));
+    assert!(!page.contains("MockAssetSimulationAdapter"));
+    assert!(page.contains("SimulationPayoffChart"));
+    assert!(payoff.contains("render_chart"));
+    assert!(payoff.contains("current_pnl"));
+    assert!(payoff.contains("expiration_pnl"));
+    assert!(payoff.contains("time_payoffs"));
+    assert!(payoff.contains("at_expiration"));
+    assert!(payoff.contains("0.22"));
+    assert!(!payoff.contains("MockAssetSimulationAdapter"));
+    assert!(heatmap.contains("<table"));
+    assert!(!heatmap.to_lowercase().contains("echarts"));
+    assert!(scenario.contains("type=\"range\""));
+    assert!(scenario.contains("ScenarioSelection"));
+    assert!(position.contains("Edit Position"));
+    assert!(position.contains("/options") && position.contains("/chart"));
+    assert!(draft.contains("localStorage"));
+    assert!(draft.contains("optima.simulation-draft.v1"));
+    assert!(options.contains("upsert_draft_leg"));
+    assert!(chart_action.contains("upsert_draft_leg"));
+    assert!(!draft.contains("AssetSimulationPort"));
+}
+
+#[test]
 fn options_chain_is_html_and_options_plotly_has_explicit_lifecycle() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let chain =

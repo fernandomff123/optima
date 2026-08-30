@@ -1,9 +1,17 @@
-use crate::application::asset_options::ContractDetail;
+use crate::{
+    application::asset_options::ContractDetail,
+    driving_adapters::ui::simulation_draft::{
+        contains_draft_leg, option_draft_leg, upsert_draft_leg,
+    },
+};
 use leptos::prelude::*;
 
 #[component]
-pub fn OptionsContractPanel(contract: ContractDetail) -> impl IntoView {
-    let (added_to_simulation, set_added_to_simulation) = signal(false);
+pub fn OptionsContractPanel(contract: ContractDetail, symbol: String) -> impl IntoView {
+    let draft_leg = option_draft_leg(&contract);
+    let draft_key = draft_leg.key.clone();
+    let (added_to_simulation, set_added_to_simulation) = signal(contains_draft_leg(&draft_key));
+    let simulation_path = format!("/assets/{symbol}/simulation");
     view! {
         <aside class="flex h-full min-h-0 flex-col border border-border bg-surface" aria-label="Selected mock contract">
             <div class="dense-scrollbar min-h-0 flex-1 overflow-y-auto">
@@ -22,11 +30,16 @@ pub fn OptionsContractPanel(contract: ContractDetail) -> impl IntoView {
                     class=move || if added_to_simulation.get() { "min-h-10 w-full rounded border border-interactive-source bg-state-selected px-4 text-xs font-semibold text-interactive-text" } else { "min-h-10 w-full rounded border border-interactive-source bg-interactive-source px-4 text-xs font-semibold text-white hover:brightness-110" }
                     aria-pressed=move || added_to_simulation.get()
                     disabled=move || added_to_simulation.get()
-                    on:click=move |_| set_added_to_simulation.set(true)
+                    on:click=move |_| {
+                        if upsert_draft_leg(draft_leg.clone()) {
+                            set_added_to_simulation.set(true);
+                        }
+                    }
                 >
                     {move || if added_to_simulation.get() { "Added to Simulation" } else { "Add to Simulation" }}
                 </button>
                 <p class="sr-only" aria-live="polite">{move || added_to_simulation.get().then_some("Selected option added to the simulation")}</p>
+                <a class=move || if added_to_simulation.get() { "mt-2 block min-h-9 rounded border border-border px-3 py-2 text-center text-xs font-semibold text-interactive-text hover:bg-state-hover" } else { "hidden" } href=simulation_path>"Open Simulation"</a>
             </footer>
         </aside>
     }

@@ -52,6 +52,7 @@ fn OptionsContent(model: AssetOptionsReadModel) -> impl IntoView {
     let chain = model.chain.clone();
     let smile = model.smile.clone();
     let contract = model.contract.clone();
+    let symbol = model.symbol.clone();
     view! {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <div class="xl:shrink-0"><OptionsAssetHeader model=model.clone() /></div>
@@ -61,7 +62,7 @@ fn OptionsContent(model: AssetOptionsReadModel) -> impl IntoView {
                     <Panel title="AAPL Options Chain · Mock" compact=true><OptionsChain rows=chain /></Panel>
                     <Panel title="Options Analytics · 17 May 2025" compact=true><OptionsSmileChart smile /></Panel>
                 </div>
-                <OptionsContractPanel contract />
+                <OptionsContractPanel contract symbol />
             </main>
         </div>
     }

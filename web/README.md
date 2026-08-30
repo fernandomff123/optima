@@ -41,6 +41,23 @@ visibly unavailable until their interactions have real contracts. Loading,
 unavailable, and recoverable-error states use the same `?scenario=` values as
 other slices.
 
+## Mocked Asset Simulation
+
+The simulation foundation keeps the reference position, payoff curves, scenario
+controls, P&L heatmap, summary metrics, and Greeks in a deterministic driven
+adapter behind `AssetSimulationPort`. These values are illustrative fixtures,
+not browser-side pricing or risk calculations. The application only maps the
+provider-neutral snapshot. `/assets/AAPL/simulation` renders the approved
+desktop composition with a deterministic position, ECharts payoff, scenario
+fixture, summary strip, accessible HTML P&L heatmap, and Greeks table.
+Alternative result tabs remain visibly unavailable until dedicated result
+contracts exist. Spot, IV, and time sliders select coordinates in the explicit
+mock grid and update the payoff marker and heatmap selection without repricing
+in the browser. The Time slider selects one of eight explicit daily payoff
+fixtures; the final curve is unsmoothed and exactly matches the piecewise-linear
+expiration payoff. Chart and Options `Add to Simulation` actions share a local
+browser draft with Position; `Add leg` routes back to those instrument pickers.
+
 ## Mocked Asset Overview
 
 `/assets/:ticker/overview` is a mocks-first vertical slice. The Leptos page calls
