@@ -14,12 +14,12 @@ pub fn Panel(
         "flex min-h-14 items-center justify-between border-b border-border px-4 sm:px-5"
     };
     let body_class = if compact {
-        "flex min-h-0 flex-1 flex-col p-0"
+        "flex min-h-0 min-w-0 flex-1 flex-col p-0"
     } else {
         "p-4 sm:p-5"
     };
     let section_class = if compact {
-        "flex h-full flex-col border border-border bg-surface"
+        "flex h-full min-w-0 flex-col border border-border bg-surface"
     } else {
         "rounded-panel border border-border bg-surface shadow-panel"
     };

@@ -20,6 +20,7 @@ pub enum ShellIconKind {
     Launcher,
     Star,
     More,
+    Trash,
     Collapse,
 }
 
@@ -61,6 +62,9 @@ pub fn ShellIcon(kind: ShellIconKind, #[prop(optional, into)] class: String) -> 
         }
         ShellIconKind::More => {
             r#"<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/>"#
+        }
+        ShellIconKind::Trash => {
+            r#"<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/>"#
         }
         ShellIconKind::Collapse => r#"<path d="m11 17-5-5 5-5M18 17l-5-5 5-5"/>"#,
     };

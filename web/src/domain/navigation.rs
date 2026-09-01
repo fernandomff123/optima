@@ -14,7 +14,7 @@ pub const GLOBAL_NAV: [NavItem; 9] = [
     NavItem::new("Volatility", "/volatility", "/volatility", false),
     NavItem::new("GEX / Flow", "/gex", "/gex", false),
     NavItem::new("Simulations", "/simulations", "/simulations", false),
-    NavItem::new("Portfolio", "/portfolio", "/portfolio", true),
+    NavItem::new("Portfolio", "/portfolio", "/portfolio", false),
     NavItem::new("Settings", "/settings", "/settings", false),
 ];
 
@@ -115,14 +115,7 @@ mod tests {
                 "/settings"
             ]
         );
-        assert!(GLOBAL_NAV[7].separator_before);
-        assert_eq!(
-            GLOBAL_NAV
-                .iter()
-                .filter(|item| item.separator_before)
-                .count(),
-            1
-        );
+        assert!(GLOBAL_NAV.iter().all(|item| !item.separator_before));
         assert_eq!(GLOBAL_NAV.len() + 1, 10);
         for item in GLOBAL_NAV {
             assert!(item.is_current(item.href));

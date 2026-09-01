@@ -32,7 +32,14 @@ pub fn OptionsAssetHeader(model: AssetOptionsReadModel) -> impl IntoView {
                 </div>
                 <dl class="grid grid-cols-2 gap-x-8 gap-y-3 pt-1 text-xs sm:grid-cols-4 xl:gap-x-12">
                     {summary.into_iter().map(|(label, value, special)| view! {
-                        <div><dt class="text-text-secondary">{label}</dt><dd class=if special { "numeric mt-1 font-semibold text-level-special" } else { "numeric mt-1 font-semibold text-text-primary" }>{value}</dd></div>
+                        <div>
+                            <dt class="text-text-secondary">{label}</dt>
+                            <dd class=if special {
+                                "numeric mt-1 font-semibold text-level-special"
+                            } else {
+                                "numeric mt-1 font-semibold text-text-primary"
+                            }>{value}</dd>
+                        </div>
                     }).collect_view()}
                 </dl>
             </div>

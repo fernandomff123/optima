@@ -2,8 +2,9 @@ use crate::{
     domain::asset::{AssetCapability, AssetSymbol},
     ports::asset_volatility::{
         AssetVolatilityFailure, AssetVolatilityPort, AssetVolatilitySnapshot,
-        VolatilityGridSnapshot, VolatilityHistoryPointSnapshot, VolatilityMetricSnapshot,
-        VolatilityScenario, VolatilitySmileSnapshot, VolatilityTermPointSnapshot,
+        VolatilityGridSnapshot, VolatilityHistoryPointSnapshot, VolatilityHistorySummarySnapshot,
+        VolatilityMetricSnapshot, VolatilityScenario, VolatilitySmileSnapshot,
+        VolatilityTermPointSnapshot,
     },
 };
 use std::rc::Rc;
@@ -46,6 +47,15 @@ pub struct VolatilityHistoryPoint {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct VolatilityHistorySummary {
+    pub atm_iv_30d: String,
+    pub rv20: String,
+    pub rv60: String,
+    pub iv_rv_spread_30d: String,
+    pub percentile: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct AssetVolatilityReadModel {
     pub symbol: String,
     pub name: String,
@@ -63,6 +73,7 @@ pub struct AssetVolatilityReadModel {
     pub smiles: Vec<VolatilitySmile>,
     pub term_structure: Vec<VolatilityTermPoint>,
     pub history: Vec<VolatilityHistoryPoint>,
+    pub history_summary: VolatilityHistorySummary,
     pub snapshot_metrics: Vec<VolatilityMetric>,
 }
 
@@ -123,6 +134,7 @@ fn to_read_model(snapshot: AssetVolatilitySnapshot) -> AssetVolatilityReadModel 
             .map(term_point)
             .collect(),
         history: snapshot.history.into_iter().map(history_point).collect(),
+        history_summary: history_summary(snapshot.history_summary),
         snapshot_metrics: snapshot.snapshot_metrics.into_iter().map(metric).collect(),
     }
 }
@@ -166,6 +178,16 @@ fn history_point(value: VolatilityHistoryPointSnapshot) -> VolatilityHistoryPoin
         realized_volatility_20d_percent: value.realized_volatility_20d_percent,
         realized_volatility_60d_percent: value.realized_volatility_60d_percent,
         earnings: value.earnings,
+    }
+}
+
+fn history_summary(value: VolatilityHistorySummarySnapshot) -> VolatilityHistorySummary {
+    VolatilityHistorySummary {
+        atm_iv_30d: value.atm_iv_30d.into(),
+        rv20: value.rv20.into(),
+        rv60: value.rv60.into(),
+        iv_rv_spread_30d: value.iv_rv_spread_30d.into(),
+        percentile: value.percentile.into(),
     }
 }
 
@@ -231,6 +253,13 @@ mod tests {
             smiles: vec![],
             term_structure: vec![],
             history: vec![],
+            history_summary: VolatilityHistorySummarySnapshot {
+                atm_iv_30d: "24%",
+                rv20: "19%",
+                rv60: "20%",
+                iv_rv_spread_30d: "+5 vols",
+                percentile: "60%",
+            },
             snapshot_metrics: vec![],
         };
         let use_case = AssetVolatilityUseCase::new(Rc::new(StubPort {

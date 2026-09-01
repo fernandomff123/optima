@@ -53,6 +53,7 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
     let position_strategy = model.strategy_name.clone();
     let position_legs = model.legs.clone();
     let position_symbol = model.symbol.clone();
+    let position_spot_price = model.price.clone();
     let payoff_model = model.clone();
     let scenario_preset = model.preset.clone();
     let scenario_controls = model.controls.clone();
@@ -66,9 +67,9 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
     view! {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <SimulationHeader model=model />
-            <main class="grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:grid-cols-[18rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(25rem,1fr)_4.375rem_minmax(15rem,0.72fr)] xl:overflow-hidden">
-                <SimulationPosition symbol=position_symbol strategy_name=position_strategy legs=position_legs />
-                <section class="flex min-h-0 flex-col border border-border bg-surface xl:col-start-2" aria-label="Simulation result">
+            <main class="grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:grid-cols-[25.5rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(25rem,1fr)_4.375rem_minmax(15rem,0.72fr)] xl:overflow-hidden">
+                <SimulationPosition symbol=position_symbol strategy_name=position_strategy legs=position_legs spot_price=position_spot_price />
+                <section class="flex min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-surface xl:col-start-2" aria-label="Simulation result">
                     <div class="panel-header"><h2 class="text-sm font-semibold">"Result"</h2><div class="flex items-center gap-3"><span class="numeric text-[0.6875rem] text-text-secondary">{move || { let selected = scenario_selection.get(); let pnl = selected_fixture_pnl(&result_heatmap, selected); format!("Spot {:.2} · IV {:.1}% · +{:.0}d · Fixture P&L ${pnl:.0}", selected.spot, selected.implied_volatility, selected.time_days) }}</span><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock snapshot"</span></div></div>
                     <ResultTabs />
                     <SimulationPayoffChart model=payoff_model selection=scenario_selection />
@@ -151,5 +152,5 @@ fn SimulationState(
 
 #[component]
 fn SimulationSkeleton() -> impl IntoView {
-    view! { <div aria-busy="true" aria-label="Loading asset simulation"><div class="h-32 animate-pulse border-b border-border bg-surface"></div><div class="grid gap-2 p-2 xl:grid-cols-[18rem_minmax(0,1fr)_20rem]"><div class="h-[30rem] animate-pulse border border-border bg-surface"></div><div class="h-[30rem] animate-pulse border border-border bg-surface"></div><div class="h-[30rem] animate-pulse border border-border bg-surface"></div></div></div> }
+    view! { <div aria-busy="true" aria-label="Loading asset simulation"><div class="h-32 animate-pulse border-b border-border bg-surface"></div><div class="grid gap-2 p-2 xl:grid-cols-[25.5rem_minmax(0,1fr)_20rem]"><div class="h-[30rem] animate-pulse border border-border bg-surface"></div><div class="h-[30rem] animate-pulse border border-border bg-surface"></div><div class="h-[30rem] animate-pulse border border-border bg-surface"></div></div></div> }
 }

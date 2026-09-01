@@ -1,10 +1,21 @@
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(inline_js = r#"
+function observeOptimaEChart(host) {
+  if (!globalThis.ResizeObserver || host.__optimaResizeObserver) return;
+  const observer = new ResizeObserver(() => {
+    const instance = globalThis.echarts?.getInstanceByDom(host);
+    if (instance) instance.resize();
+  });
+  observer.observe(host);
+  host.__optimaResizeObserver = observer;
+}
+
 export function renderOptimaEChart(hostId, optionJson) {
   const host = document.getElementById(hostId);
   if (!host || !globalThis.echarts) return false;
   const chart = globalThis.echarts.getInstanceByDom(host)
     || globalThis.echarts.init(host, null, { renderer: 'canvas' });
+  observeOptimaEChart(host);
   chart.setOption(JSON.parse(optionJson), { notMerge: true, lazyUpdate: false });
   chart.resize();
   return true;
@@ -23,6 +34,10 @@ export function disposeOptimaEChart(hostId) {
   const host = document.getElementById(hostId);
   if (!host || !globalThis.echarts) return;
   const chart = globalThis.echarts.getInstanceByDom(host);
+  if (host.__optimaResizeObserver) {
+    host.__optimaResizeObserver.disconnect();
+    delete host.__optimaResizeObserver;
+  }
   if (chart) chart.dispose();
 }
 "#)]

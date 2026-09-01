@@ -17,8 +17,11 @@ pub const STATE_FOCUS: &str = "#1D62D2";
 pub const TEXT_MUTED_READABLE: &str = "#78828D";
 pub const INTERACTIVE_TEXT: &str = "#3B82F6";
 pub const NEGATIVE_TEXT: &str = "#EE4547";
+pub const VOLATILITY_LOW: &str = "#0A3558";
+pub const VOLATILITY_HIGH: &str = "#5B4BB7";
+pub const VOLATILITY_REALIZED: &str = "#22D3EE";
 
-pub const APPROVED_HEX: [&str; 19] = [
+pub const APPROVED_HEX: [&str; 22] = [
     CANVAS,
     SIDEBAR,
     SURFACE,
@@ -38,4 +41,7 @@ pub const APPROVED_HEX: [&str; 19] = [
     TEXT_MUTED_READABLE,
     INTERACTIVE_TEXT,
     NEGATIVE_TEXT,
+    VOLATILITY_LOW,
+    VOLATILITY_HIGH,
+    VOLATILITY_REALIZED,
 ];

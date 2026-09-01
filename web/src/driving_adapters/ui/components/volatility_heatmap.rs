@@ -42,12 +42,12 @@ pub fn VolatilityHeatmap(grid: VolatilityGrid) -> impl IntoView {
                                 {values.into_iter().enumerate().map(|(column_index, value)| {
                                     let selected = row_index == selected_row && column_index == selected_column;
                                     let tone = match value {
-                                        value if value < 21.0 => "bg-state-selected/35",
-                                        value if value < 23.0 => "bg-state-selected/55",
-                                        value if value < 25.0 => "bg-interactive-source/45",
-                                        value if value < 27.0 => "bg-interactive-source/65",
-                                        value if value < 29.0 => "bg-state-focus/75",
-                                        _ => "bg-state-focus",
+                                        value if value < 21.0 => "bg-volatility-low",
+                                        value if value < 23.0 => "bg-volatility-low/80",
+                                        value if value < 25.0 => "bg-interactive-source/55",
+                                        value if value < 27.0 => "bg-interactive-source/75",
+                                        value if value < 29.0 => "bg-volatility-high/75",
+                                        _ => "bg-volatility-high",
                                     };
                                     let selection = if selected { "border-interactive-text outline outline-1 outline-interactive-text" } else { "border-border" };
                                     let cell_class = format!("border px-2 py-3 text-sm text-text-primary {tone} {selection}");
@@ -62,7 +62,7 @@ pub fn VolatilityHeatmap(grid: VolatilityGrid) -> impl IntoView {
                     }).collect_view()}
                 </tbody>
             </table>
-            <div class="mx-auto mt-5 flex max-w-sm items-center gap-3 text-xs text-text-secondary"><span>{format!("{minimum:.1}%")}</span><span class="h-2 flex-1 bg-gradient-to-r from-state-selected via-interactive-source to-state-focus"></span><span>{format!("{maximum:.1}%")}</span></div>
+            <div class="mx-auto mt-5 flex max-w-sm items-center gap-3 text-xs text-text-secondary"><span>{format!("{minimum:.1}%")}</span><span class="h-2 flex-1 bg-gradient-to-r from-volatility-low via-interactive-source to-volatility-high"></span><span>{format!("{maximum:.1}%")}</span></div>
         </div>
     }
 }

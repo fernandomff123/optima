@@ -298,29 +298,39 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(!heatmap.to_lowercase().contains("echarts"));
     assert!(scenario.contains("type=\"range\""));
     assert!(scenario.contains("ScenarioSelection"));
-    assert!(position.contains("Edit Position"));
-    assert!(position.contains("/options") && position.contains("/chart"));
+    assert!(!position.contains("Edit Position"));
+    assert!(position.contains("Increase quantity"));
+    assert!(position.contains("Decrease quantity"));
+    assert!(position.contains("ShellIconKind::Trash"));
+    assert!(position.contains("/options"));
+    assert!(!position.contains("/chart"));
     assert!(draft.contains("localStorage"));
     assert!(draft.contains("optima.simulation-draft.v1"));
-    assert!(options.contains("upsert_draft_leg"));
+    assert!(!options.contains("upsert_draft_leg"));
+    assert!(
+        fs::read_to_string(root.join("driving_adapters/ui/pages/asset_options.rs"))
+            .unwrap()
+            .contains("upsert_draft_leg")
+    );
     assert!(chart_action.contains("upsert_draft_leg"));
     assert!(!draft.contains("AssetSimulationPort"));
 }
 
 #[test]
-fn options_chain_is_html_and_options_plotly_has_explicit_lifecycle() {
+fn options_chain_is_html_and_options_smile_uses_the_shared_echarts_runtime() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let chain =
         fs::read_to_string(root.join("driving_adapters/ui/components/options_chain.rs")).unwrap();
-    let plot =
-        fs::read_to_string(root.join("driving_adapters/ui/plotly/asset_options.rs")).unwrap();
+    let chart =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_options.rs")).unwrap();
     assert!(chain.contains("<table"));
     assert!(!chain.contains("Plotly"));
-    assert!(plot.contains("Plotly.react"));
-    assert!(plot.contains("purge_plot(HOST_ID)"));
-    assert!(plot.contains("displayModeBar:false"));
-    assert!(!plot.to_lowercase().contains("echarts"));
-    assert!(!plot.contains("MockAssetOptionsAdapter"));
+    assert!(chart.contains("EChartsHost"));
+    assert!(chart.contains("render_chart"));
+    assert!(chart.contains("build_options_smile_option"));
+    assert!(chart.contains("markLine"));
+    assert!(!chart.contains("Plotly"));
+    assert!(!chart.contains("MockAssetOptionsAdapter"));
 }
 
 #[test]
@@ -566,6 +576,7 @@ fn asset_volatility_keeps_the_shared_grid_behind_its_port() {
     assert!(!port.contains("echarts"));
     assert!(!port.contains("plotly"));
     assert!(mock.contains("31.6"));
+    assert!(mock.contains("+5.2 vols"));
     assert!(mock.contains("Deterministic illustrative fixture"));
     for source in [application, port] {
         assert!(!source.contains("31.6"));
@@ -574,24 +585,56 @@ fn asset_volatility_keeps_the_shared_grid_behind_its_port() {
 }
 
 #[test]
-fn asset_volatility_has_two_views_and_explicit_plotly_lifecycle() {
+fn asset_volatility_uses_echarts_for_every_view_and_echarts_gl_only_for_3d() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let page =
         fs::read_to_string(root.join("driving_adapters/ui/pages/asset_volatility.rs")).unwrap();
     let surface =
-        fs::read_to_string(root.join("driving_adapters/ui/plotly/asset_volatility.rs")).unwrap();
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_volatility_surface.rs"))
+            .unwrap();
     let heatmap =
-        fs::read_to_string(root.join("driving_adapters/ui/components/volatility_heatmap.rs"))
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_volatility_heatmap.rs"))
+            .unwrap();
+    let history =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_volatility_history.rs"))
+            .unwrap();
+    let analytics =
+        fs::read_to_string(root.join("driving_adapters/ui/echarts/asset_volatility_analytics.rs"))
             .unwrap();
     assert!(page.contains("Surface 3D"));
     assert!(page.contains("Heatmap"));
     assert!(page.contains("asset_volatility_use_case"));
-    assert!(surface.contains("Plotly.react"));
-    assert!(surface.contains("Plotly.purge"));
-    assert!(surface.contains("dragmode:false"));
-    assert!(heatmap.contains("<table"));
-    assert!(!heatmap.contains("color-mix"));
+    assert!(surface.contains("\"type\": \"surface\""));
+    assert!(surface.contains("\"type\": \"scatter3D\""));
+    assert!(surface.contains("Observed IV"));
+    assert!(surface.contains("seriesIndex"));
+    assert!(surface.contains("\"min\": 0.5"));
+    assert!(surface.contains("rotateSensitivity"));
+    assert!(heatmap.contains("\"type\": \"heatmap\""));
+    assert!(heatmap.contains("visualMap"));
+    assert!(heatmap.contains("Days to Expiry"));
+    assert!(history.contains("tokens::VOLATILITY_HIGH"));
+    assert!(history.contains("tokens::VOLATILITY_REALIZED"));
+    assert!(history.contains("markLine"));
+    assert!(history.contains("Earnings"));
+    assert!(history.contains("IV–RV Spread (30D)"));
+    assert!(analytics.contains("build_smile_option"));
+    assert!(analytics.contains("build_term_option"));
     assert!(page.contains("VolatilityHistoryChart"));
     assert!(!page.contains("31.6"));
     assert!(!surface.contains("31.6"));
+    for source in [page, surface, heatmap, history, analytics] {
+        assert!(!source.contains("Plotly"));
+    }
+}
+
+#[test]
+fn echarts_gl_is_local_and_loaded_after_echarts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let html = fs::read_to_string(root.join("index.html")).unwrap();
+    let package = fs::read_to_string(root.join("package.json")).unwrap();
+    assert!(package.contains("\"echarts-gl\": \"2.1.0\""));
+    assert!(html.contains("node_modules/echarts-gl/dist/echarts-gl.min.js"));
+    assert!(html.contains("src=\"/echarts-gl.min.js\""));
+    assert!(html.find("/echarts.min.js").unwrap() < html.find("/echarts-gl.min.js").unwrap());
 }

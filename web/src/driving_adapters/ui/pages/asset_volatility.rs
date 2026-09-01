@@ -5,8 +5,11 @@ use crate::{
     },
     composition::asset_volatility_use_case,
     driving_adapters::ui::{
-        components::{AssetTabs, DataState, Panel, VolatilityHeatmap, VolatilitySnapshot},
-        plotly::{VolatilityAnalytics, VolatilityHistoryChart, VolatilitySurfaceChart},
+        components::{AssetTabs, DataState, Panel, VolatilitySnapshot},
+        echarts::{
+            VolatilityAnalytics, VolatilityHeatmapChart, VolatilityHistoryChart,
+            VolatilitySurfaceChart,
+        },
     },
     ports::asset_volatility::VolatilityScenario,
 };
@@ -55,18 +58,19 @@ fn VolatilityContent(model: AssetVolatilityReadModel) -> impl IntoView {
     let smiles = model.smiles.clone();
     let term_structure = model.term_structure.clone();
     let history = model.history.clone();
+    let history_summary = model.history_summary.clone();
     view! {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <VolatilityHeader model=model.clone() />
             <main class="flex min-h-0 flex-1 flex-col gap-2 bg-canvas p-2 xl:overflow-hidden">
                 <VolatilityFilters model=model.clone() />
-                <div class="grid min-h-0 flex-1 gap-2 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(25rem,1fr)_minmax(17rem,0.58fr)]">
+                <div class="grid min-h-0 flex-1 gap-2 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(24rem,1fr)_minmax(20rem,0.82fr)]">
                     <section class="flex min-h-0 flex-col border border-border bg-surface" aria-label="Volatility visualization">
-                        <div class="panel-header gap-4"><h2 class="text-sm font-semibold">"Implied Volatility · Moneyness × Days to Expiry"</h2><div class="ml-auto flex rounded border border-border bg-canvas p-0.5" role="group" aria-label="Volatility visualization"><button type="button" class=move || if selected_view.get()==VolatilityView::Surface { "min-h-8 bg-state-selected px-3 text-xs text-interactive-text" } else { "min-h-8 px-3 text-xs text-text-secondary" } aria-pressed=move || selected_view.get()==VolatilityView::Surface on:click=move |_| selected_view.set(VolatilityView::Surface)>"Surface 3D"</button><button type="button" class=move || if selected_view.get()==VolatilityView::Heatmap { "min-h-8 bg-state-selected px-3 text-xs text-interactive-text" } else { "min-h-8 px-3 text-xs text-text-secondary" } aria-pressed=move || selected_view.get()==VolatilityView::Heatmap on:click=move |_| selected_view.set(VolatilityView::Heatmap)>"Heatmap"</button></div></div>
-                        {move || if selected_view.get()==VolatilityView::Surface { view! { <VolatilitySurfaceChart grid=surface_grid.clone() /> }.into_any() } else { view! { <VolatilityHeatmap grid=heatmap_grid.clone() /> }.into_any() }}
+                        <div class="panel-header gap-4"><h2 class="text-sm font-semibold">{move || if selected_view.get()==VolatilityView::Surface { "Implied Volatility Surface (Calls + Puts)" } else { "IV Heatmap — Moneyness × Days to Expiry" }}</h2><div class="ml-auto flex rounded border border-border bg-canvas p-0.5" role="group" aria-label="Volatility visualization"><button type="button" class=move || if selected_view.get()==VolatilityView::Surface { "min-h-8 bg-state-selected px-3 text-xs text-interactive-text" } else { "min-h-8 px-3 text-xs text-text-secondary" } aria-pressed=move || selected_view.get()==VolatilityView::Surface on:click=move |_| selected_view.set(VolatilityView::Surface)>"Surface 3D"</button><button type="button" class=move || if selected_view.get()==VolatilityView::Heatmap { "min-h-8 bg-state-selected px-3 text-xs text-interactive-text" } else { "min-h-8 px-3 text-xs text-text-secondary" } aria-pressed=move || selected_view.get()==VolatilityView::Heatmap on:click=move |_| selected_view.set(VolatilityView::Heatmap)>"Heatmap"</button></div></div>
+                        {move || if selected_view.get()==VolatilityView::Surface { view! { <VolatilitySurfaceChart grid=surface_grid.clone() /> }.into_any() } else { view! { <VolatilityHeatmapChart grid=heatmap_grid.clone() /> }.into_any() }}
                     </section>
                     <VolatilitySnapshot metrics=model.snapshot_metrics.clone() as_of=model.as_of.clone() />
-                    <div class="min-h-0 xl:col-span-2">{move || if selected_view.get()==VolatilityView::Surface { view! { <VolatilityAnalytics moneyness=analytics_moneyness.clone() smiles=smiles.clone() term_structure=term_structure.clone() /> }.into_any() } else { view! { <VolatilityHistoryChart history=history.clone() /> }.into_any() }}</div>
+                    <div class="min-h-0 xl:col-span-2">{move || if selected_view.get()==VolatilityView::Surface { view! { <VolatilityAnalytics moneyness=analytics_moneyness.clone() smiles=smiles.clone() term_structure=term_structure.clone() /> }.into_any() } else { view! { <VolatilityHistoryChart history=history.clone() summary=history_summary.clone() /> }.into_any() }}</div>
                 </div>
             </main>
         </div>
