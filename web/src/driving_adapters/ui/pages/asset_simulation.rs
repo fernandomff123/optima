@@ -1,7 +1,7 @@
 use crate::{
     application::{
         asset_options::AssetOptionsState,
-        asset_simulation::{AssetSimulationReadModel, AssetSimulationState, TimePayoffCurve},
+        asset_simulation::{AssetSimulationReadModel, AssetSimulationState},
         read_models::FeedbackState,
     },
     composition::{asset_options_use_case, asset_simulation_use_case},
@@ -11,7 +11,7 @@ use crate::{
             SimulationLegPicker, SimulationMetricStrip, SimulationPnlHeatmap,
             SimulationPosition, SimulationScenarioPanel,
         },
-        echarts::SimulationPayoffChart,
+        echarts::{SimulationPayoffChart, SimulationPnlByDateChart, SimulationTimeDecayChart},
         simulation_draft::{DraftLeg, base_draft_legs, read_draft_legs, write_draft_legs},
     },
     ports::{
@@ -67,13 +67,16 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
     let strategy_name = model.strategy_name.clone();
     let draft_rows = RwSignal::new(initial_draft(&model));
     let result_model = model.clone();
+    let lower_result_model = model.clone();
     let scenario_preset = model.preset.clone();
     let scenario_controls = model.controls.clone();
     let scenario_selection = RwSignal::new(ScenarioSelection::from_controls(&scenario_controls));
     let result_view = RwSignal::new(ResultView::Payoff);
+    let strategy_editor_open = RwSignal::new(false);
     let metrics = model.metrics.clone();
     let heatmap = model.heatmap.clone();
     let result_heatmap = heatmap.clone();
+    let summary_heatmap = result_heatmap.clone();
     let greeks = model.greeks.clone();
     let probability_low = model.probability_low.clone();
     let probability_high = model.probability_high.clone();
@@ -81,15 +84,20 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
         AssetOptionsState::Ready(options) => Some(options),
         _ => None,
     };
+    let open_strategy_editor = Callback::new(move |_| {
+        result_view.set(ResultView::Payoff);
+        strategy_editor_open.set(true);
+    });
+    let close_strategy_editor = Callback::new(move |_| strategy_editor_open.set(false));
 
     view! {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <SimulationHeader model=model />
-            <main class="grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:grid-cols-[25.5rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(20rem,1fr)_4.375rem_minmax(14rem,0.72fr)] xl:overflow-hidden">
-                <div class="min-h-0 xl:row-span-2"><SimulationPosition strategy_name rows=draft_rows /></div>
+            <main class=move || if strategy_editor_open.get() || result_view.get() == ResultView::PnlByDate { "grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:grid-cols-[25.5rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(20rem,1fr)_4.375rem_minmax(14rem,0.72fr)] xl:overflow-hidden" } else { "grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:grid-cols-[25.5rem_minmax(0,1fr)_20rem] xl:grid-rows-[minmax(20rem,1fr)_4.375rem] xl:overflow-hidden" }>
+                <div class="min-h-0"><SimulationPosition strategy_name rows=draft_rows on_add_leg=open_strategy_editor /></div>
                 <section class="flex min-h-0 min-w-0 flex-col overflow-hidden border border-border bg-surface xl:col-start-2" aria-label="Simulation result">
                     <div class="panel-header"><h2 class="text-sm font-semibold">"Result"</h2><div class="flex items-center gap-3"><span class="numeric text-[0.6875rem] text-text-secondary">{move || { let selected = scenario_selection.get(); let pnl = selected_fixture_pnl(&result_heatmap, selected); format!("Spot {:.2} · IV {:.1}% · +{:.0}d · Fixture P&L ${pnl:.0}", selected.spot, selected.implied_volatility, selected.time_days) }}</span><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Mock snapshot"</span></div></div>
-                    <ResultTabs selected=result_view />
+                    <ResultTabs selected=result_view strategy_editor_open />
                     <div class="min-h-0 flex-1">
                         {move || match result_view.get() {
                             ResultView::Payoff => view! {
@@ -98,7 +106,7 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
                                     <div class="flex shrink-0 items-center gap-3 border-t border-border px-6 py-2 text-[0.6875rem] text-text-secondary numeric"><span>{probability_low.clone()}</span><span class="h-px flex-1 bg-border"></span><span>"68% Probability"</span><span class="h-px flex-1 bg-border"></span><span>{probability_high.clone()}</span></div>
                                 </div>
                             }.into_any(),
-                            ResultView::PnlByDate => view! { <SimulationPnlByDate curves=result_model.time_payoffs.clone() spot_prices=result_model.payoff.iter().map(|point| point.underlying_price).collect() selection=scenario_selection /> }.into_any(),
+                            ResultView::PnlByDate => view! { <SimulationPnlByDateChart model=result_model.clone() selection=scenario_selection /> }.into_any(),
                             ResultView::Greeks => view! { <SimulationGreeks greeks=greeks.clone() /> }.into_any(),
                             ResultView::PnlHeatmap => view! { <SimulationPnlHeatmap heatmap=heatmap.clone() selection=scenario_selection /> }.into_any(),
                             ResultView::MonteCarlo => view! { <SimulationMonteCarlo /> }.into_any(),
@@ -106,10 +114,17 @@ fn SimulationContent(model: AssetSimulationReadModel) -> impl IntoView {
                     </div>
                 </section>
                 <div class="min-h-0 xl:col-start-3 xl:row-span-2"><SimulationScenarioPanel preset=scenario_preset controls=scenario_controls selection=scenario_selection /></div>
-                <div class="xl:col-start-2 xl:row-start-2"><SimulationMetricStrip metrics /></div>
-                <div class="min-h-0 xl:col-span-3 xl:row-start-3">
-                    {options_model.map(|options| view! { <SimulationLegPicker model=options draft_rows /> }.into_any()).unwrap_or_else(|| view! { <section class="flex h-full items-center justify-center border border-border bg-surface text-sm text-text-secondary">"Option strikes are unavailable for this mock asset."</section> }.into_any())}
-                </div>
+                <div class="xl:col-span-2 xl:row-start-2"><SimulationMetricStrip metrics /></div>
+                {move || if strategy_editor_open.get() {
+                    Some(view! { <div class="min-h-0 xl:col-span-3 xl:row-start-3">{options_model.clone().map(|options| view! { <SimulationLegPicker model=options draft_rows on_close=close_strategy_editor /> }.into_any()).unwrap_or_else(|| view! { <section class="flex h-full items-center justify-center border border-border bg-surface text-sm text-text-secondary">"Option strikes are unavailable for this mock asset."</section> }.into_any())}</div> }.into_any())
+                } else if result_view.get() == ResultView::PnlByDate {
+                    Some(view! {
+                        <div class="min-h-0 overflow-hidden border border-border bg-surface xl:col-span-2 xl:row-start-3"><SimulationTimeDecayChart model=lower_result_model.clone() selection=scenario_selection /></div>
+                        <div class="min-h-0 xl:col-start-3 xl:row-start-3"><SelectedScenarioSummary heatmap=summary_heatmap.clone() selection=scenario_selection /></div>
+                    }.into_any())
+                } else {
+                    None
+                }}
             </main>
         </div>
     }
@@ -141,7 +156,10 @@ fn initial_draft(model: &AssetSimulationReadModel) -> Vec<DraftLeg> {
 }
 
 #[component]
-fn ResultTabs(selected: RwSignal<ResultView>) -> impl IntoView {
+fn ResultTabs(
+    selected: RwSignal<ResultView>,
+    strategy_editor_open: RwSignal<bool>,
+) -> impl IntoView {
     let tabs = [
         (ResultView::Payoff, "Payoff"),
         (ResultView::PnlByDate, "P&L by Date"),
@@ -151,7 +169,7 @@ fn ResultTabs(selected: RwSignal<ResultView>) -> impl IntoView {
     ];
     view! {
         <div class="dense-scrollbar flex h-11 shrink-0 overflow-x-auto border-b border-border text-xs" role="tablist" aria-label="Simulation result views">
-            {tabs.into_iter().map(|(tab, label)| view! { <button type="button" role="tab" class=move || result_tab_class(selected.get() == tab) aria-selected=move || selected.get() == tab on:click=move |_| selected.set(tab)>{label}</button> }).collect_view()}
+            {tabs.into_iter().map(|(tab, label)| view! { <button type="button" role="tab" class=move || result_tab_class(selected.get() == tab) aria-selected=move || selected.get() == tab on:click=move |_| { strategy_editor_open.set(false); selected.set(tab); }>{label}</button> }).collect_view()}
         </div>
     }
 }
@@ -165,17 +183,19 @@ fn result_tab_class(selected: bool) -> &'static str {
 }
 
 #[component]
-fn SimulationPnlByDate(
-    curves: Vec<TimePayoffCurve>,
-    spot_prices: Vec<f64>,
+fn SelectedScenarioSummary(
+    heatmap: crate::application::asset_simulation::PnlHeatmap,
     selection: RwSignal<ScenarioSelection>,
 ) -> impl IntoView {
     view! {
-        <section class="flex h-full min-h-0 flex-col bg-surface" aria-label="Profit and loss by date">
-            <div class="panel-header"><div><h3 class="text-sm font-semibold">"P&L by Date"</h3><p class="text-[0.625rem] uppercase tracking-wider text-level-special">"Deterministic fixture"</p></div><span class="text-xs text-text-secondary">"Nearest scenario spot"</span></div>
-            <div class="dense-scrollbar min-h-0 flex-1 overflow-auto p-4">
-                <table class="mx-auto w-full max-w-3xl text-xs numeric"><thead class="border-b border-border text-text-secondary"><tr><th class="px-4 py-2 text-left font-medium">"Date"</th><th class="px-4 py-2 text-right font-medium">"Elapsed"</th><th class="px-4 py-2 text-right font-medium">"Scenario spot"</th><th class="px-4 py-2 text-right font-medium">"P&L"</th></tr></thead><tbody class="divide-y divide-border">{curves.into_iter().map(|curve| { let values = curve.pnl_values; let prices = spot_prices.clone(); view! { <tr class="hover:bg-state-hover"><th class="px-4 py-3 text-left font-medium text-text-primary">{curve.label}</th><td class="px-4 py-3 text-right text-text-secondary">{format!("+{}d", curve.elapsed_days)}</td><td class="px-4 py-3 text-right text-text-primary">{move || format!("${:.2}", selection.get().spot)}</td><td class="px-4 py-3 text-right font-semibold text-text-primary">{move || { let index = nearest(&prices, selection.get().spot); format!("${:.0}", values.get(index).copied().unwrap_or_default()) }}</td></tr> } }).collect_view()}</tbody></table>
-            </div>
+        <section class="flex h-full min-h-0 flex-col border border-border bg-surface" aria-label="Selected scenario summary">
+            <div class="panel-header"><h3 class="text-sm font-semibold">"Selected Scenario Summary"</h3></div>
+            <dl class="space-y-3 p-4 text-xs numeric">
+                <div class="flex justify-between gap-3"><dt class="text-text-secondary">"Selected scenario"</dt><dd class="text-text-primary">{move || if selection.get().time_days == 0.0 { "Today".to_owned() } else { format!("+{:.0} days", selection.get().time_days) }}</dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-text-secondary">"Spot price"</dt><dd class="text-text-primary">{move || format!("{:.2}", selection.get().spot)}</dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-text-secondary">"Implied volatility"</dt><dd class="text-text-primary">{move || format!("{:.1}%", selection.get().implied_volatility)}</dd></div>
+                <div class="flex justify-between gap-3 border-t border-border pt-3"><dt class="text-text-secondary">"Fixture P&L"</dt><dd class="font-semibold text-interactive-text">{move || format!("${:.0}", selected_fixture_pnl(&heatmap, selection.get()))}</dd></div>
+            </dl>
         </section>
     }
 }

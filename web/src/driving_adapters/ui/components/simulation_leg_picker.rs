@@ -19,6 +19,7 @@ enum LegPickerTab {
 pub fn SimulationLegPicker(
     model: AssetOptionsReadModel,
     draft_rows: RwSignal<Vec<DraftLeg>>,
+    on_close: Callback<()>,
 ) -> impl IntoView {
     let selected_tab = RwSignal::new(LegPickerTab::Options);
     let action_model = model.clone();
@@ -64,6 +65,7 @@ pub fn SimulationLegPicker(
                     <span>{expiration}</span>
                     <span class="rounded border border-border bg-canvas px-3 py-1.5">"All strikes"</span>
                     <span class="rounded border border-border bg-canvas px-3 py-1.5">"Calls + Puts"</span>
+                    <button type="button" class="ml-2 px-2 text-lg leading-none hover:text-text-primary" aria-label="Close strategy editor" on:click=move |_| on_close.run(())>"×"</button>
                 </div>
             </header>
             {move || match selected_tab.get() {

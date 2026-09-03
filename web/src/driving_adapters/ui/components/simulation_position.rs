@@ -6,6 +6,7 @@ use leptos::prelude::*;
 pub fn SimulationPosition(
     strategy_name: String,
     rows: RwSignal<Vec<DraftLeg>>,
+    on_add_leg: Callback<()>,
 ) -> impl IntoView {
     // Option legs are now selected from the embedded /options chain below the result.
     view! {
@@ -44,7 +45,7 @@ pub fn SimulationPosition(
                     </tbody>
                 </table>
             </div>
-            <footer class="flex items-center justify-between border-t border-border px-3 py-3 text-xs text-text-secondary"><span>{move || format!("Legs · {}", rows.get().len())}</span><span class="text-interactive-text">"Select another strike below"</span></footer>
+            <footer class="flex items-center justify-between border-t border-border px-3 py-3 text-xs text-text-secondary"><span>{move || format!("Legs · {}", rows.get().len())}</span><button type="button" class="font-semibold text-interactive-text hover:underline" on:click=move |_| on_add_leg.run(())>"＋ Add leg"</button></footer>
         </section>
     }
 }
