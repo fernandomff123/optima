@@ -52,7 +52,7 @@ pub fn option_draft_leg(contract: &ContractDetail) -> DraftLeg {
             "option:{}:{expiration}:{strike}:{instrument}",
             contract.title
         ),
-        quantity: 1,
+        quantity: contract.quantity,
         instrument: instrument.to_uppercase(),
         strike: strike.to_owned(),
         expiration: expiration.to_owned(),
@@ -98,15 +98,25 @@ pub fn write_draft_legs(legs: &[DraftLeg]) -> bool {
 }
 
 pub fn upsert_draft_leg(leg: DraftLeg) -> bool {
+    upsert_draft_leg_with_quantity(leg).is_some()
+}
+
+pub fn upsert_draft_leg_with_quantity(leg: DraftLeg) -> Option<i32> {
+    let key = leg.key.clone();
     let mut legs = read_draft_legs();
-    if let Some(existing) = legs.iter_mut().find(|existing| existing.key == leg.key) {
+    if let Some(existing) = legs.iter_mut().find(|existing| existing.key == key) {
         existing.quantity = existing.quantity.saturating_add(leg.quantity);
         existing.price = leg.price;
     } else {
         legs.push(leg);
     }
+    let quantity = legs
+        .iter()
+        .find(|existing| existing.key == key)
+        .map(|existing| existing.quantity)
+        .unwrap_or_default();
     legs.retain(|leg| leg.quantity != 0);
-    write_draft_legs(&legs)
+    write_draft_legs(&legs).then_some(quantity)
 }
 
 pub fn contains_draft_leg(key: &str) -> bool {
