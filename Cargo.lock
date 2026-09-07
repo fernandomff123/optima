@@ -2371,6 +2371,7 @@ dependencies = [
  "url",
  "walkdir",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "yata",
 ]
 

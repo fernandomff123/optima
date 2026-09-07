@@ -288,8 +288,9 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(!page.contains("MockAssetSimulationAdapter"));
     assert!(page.contains("SimulationPayoffChart"));
     assert!(payoff.contains("render_chart"));
-    assert!(payoff.contains("current_pnl"));
-    assert!(payoff.contains("expiration_pnl"));
+    assert!(payoff.contains("position_current_proxy"));
+    assert!(payoff.contains("position_horizon_pnl"));
+    assert!(payoff.contains("live_payoff_metrics"));
     assert!(payoff.contains("time_payoffs"));
     assert!(payoff.contains("at_expiration"));
     assert!(payoff.contains("0.22"));
@@ -302,8 +303,16 @@ fn asset_simulation_keeps_financial_fixtures_behind_its_port() {
     assert!(position.contains("Increase quantity"));
     assert!(position.contains("Decrease quantity"));
     assert!(position.contains("ShellIconKind::Trash"));
-    assert!(position.contains("/options"));
+    let picker =
+        fs::read_to_string(root.join("driving_adapters/ui/components/simulation_leg_picker.rs"))
+            .unwrap();
+    assert!(!position.contains("/options"));
     assert!(!position.contains("/chart"));
+    assert!(position.contains("Adding option leg"));
+    assert!(position.contains("Add option leg"));
+    assert!(picker.contains("Compact simulation option strikes"));
+    assert!(picker.contains("Close strategy editor"));
+    assert!(picker.contains("underlying_draft_leg"));
     assert!(draft.contains("localStorage"));
     assert!(draft.contains("optima.simulation-draft.v1"));
     assert!(!options.contains("upsert_draft_leg"));

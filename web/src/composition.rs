@@ -9,6 +9,7 @@ use crate::{
     application::asset_simulation::AssetSimulationUseCase,
     application::asset_volatility::AssetVolatilityUseCase,
     application::technical_indicators::TechnicalIndicatorsUseCase,
+    driven_adapters::http::strategy_simulation::HttpStrategySimulationAdapter,
     driven_adapters::mocks::{
         asset_chart::MockAssetChartAdapter, asset_options::MockAssetOptionsAdapter,
         asset_overview::MockAssetOverviewAdapter, asset_simulation::MockAssetSimulationAdapter,
@@ -16,6 +17,7 @@ use crate::{
     },
     driven_adapters::technical_indicators::yata::YataTechnicalIndicatorAdapter,
     driving_adapters::ui::{layout::AppShell, router::AppRoutes},
+    ports::asset_simulation::StrategySimulationPort,
 };
 
 pub fn asset_overview_use_case() -> AssetOverviewUseCase {
@@ -35,6 +37,10 @@ pub fn asset_chart_use_case() -> AssetChartUseCase {
 
 pub fn asset_simulation_use_case() -> AssetSimulationUseCase {
     AssetSimulationUseCase::new(Rc::new(MockAssetSimulationAdapter))
+}
+
+pub fn strategy_simulation_port() -> Rc<dyn StrategySimulationPort> {
+    Rc::new(HttpStrategySimulationAdapter)
 }
 
 pub fn asset_volatility_use_case() -> AssetVolatilityUseCase {

@@ -16,7 +16,24 @@ export function renderOptimaEChart(hostId, optionJson) {
   const chart = globalThis.echarts.getInstanceByDom(host)
     || globalThis.echarts.init(host, null, { renderer: 'canvas' });
   observeOptimaEChart(host);
-  chart.setOption(JSON.parse(optionJson), { notMerge: true, lazyUpdate: false });
+  if (!host.__optimaLegendStateBound) {
+    chart.on('legendselectchanged', (event) => {
+      host.__optimaLegendSelection = { ...event.selected };
+    });
+    host.__optimaLegendStateBound = true;
+  }
+  const option = JSON.parse(optionJson);
+  const previousSelection = host.__optimaLegendSelection;
+  const nextLegend = Array.isArray(option.legend) ? option.legend[0] : option.legend;
+  if (previousSelection && nextLegend) {
+    const availableNames = new Set((nextLegend.data || []).map((item) =>
+      typeof item === 'string' ? item : item?.name
+    ).filter(Boolean));
+    nextLegend.selected = Object.fromEntries(
+      Object.entries(previousSelection).filter(([name]) => availableNames.has(name))
+    );
+  }
+  chart.setOption(option, { notMerge: true, lazyUpdate: false });
   chart.resize();
   return true;
 }
@@ -38,6 +55,8 @@ export function disposeOptimaEChart(hostId) {
     host.__optimaResizeObserver.disconnect();
     delete host.__optimaResizeObserver;
   }
+  delete host.__optimaLegendSelection;
+  delete host.__optimaLegendStateBound;
   if (chart) chart.dispose();
 }
 "#)]

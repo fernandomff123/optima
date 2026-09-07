@@ -54,14 +54,14 @@ fn aapl_snapshot(symbol: AssetSymbol) -> AssetSimulationSnapshot {
                 quantity: 1,
                 option_type: "CALL",
                 strike: "190",
-                expiration: "17 May 2024",
+                expiration: "17 May 2025",
                 price: "2.80",
             },
             SimulationLegSnapshot {
                 quantity: -1,
                 option_type: "CALL",
                 strike: "200",
-                expiration: "17 May 2024",
+                expiration: "17 May 2025",
                 price: "0.80",
             },
         ],
@@ -69,8 +69,8 @@ fn aapl_snapshot(symbol: AssetSymbol) -> AssetSimulationSnapshot {
         time_payoffs: time_payoff_fixture(),
         current_spot: 191.13,
         breakeven: 192.80,
-        current_date: "May 10, 2024",
-        expiration_date: "May 17, 2024",
+        current_date: "May 10, 2025",
+        expiration_date: "May 17, 2025",
         probability_low: "172.20",
         probability_high: "210.20",
         metrics: vec![
@@ -284,7 +284,7 @@ mod tests {
                 .all(|row| row.len() == snapshot.heatmap.spot_prices.len())
         );
         assert_eq!(snapshot.payoff.last().unwrap().expiration_pnl, 720.0);
-        assert_eq!(snapshot.legs[0].expiration, "17 May 2024");
+        assert_eq!(snapshot.legs[0].expiration, "17 May 2025");
         assert_eq!(snapshot.time_payoffs.first().unwrap().elapsed_days, 0);
         assert_eq!(snapshot.time_payoffs.last().unwrap().elapsed_days, 7);
         assert_eq!(
