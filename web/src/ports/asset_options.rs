@@ -22,10 +22,19 @@ impl OptionsScenario {
 #[derive(Clone, Debug, PartialEq)]
 pub struct OptionSideSnapshot {
     pub last: &'static str,
+    pub change: &'static str,
     pub bid: &'static str,
     pub ask: &'static str,
+    pub mid: &'static str,
+    pub bid_size: &'static str,
+    pub ask_size: &'static str,
+    pub last_size: &'static str,
     pub iv: &'static str,
     pub delta: &'static str,
+    pub gamma: &'static str,
+    pub vega: &'static str,
+    pub theta: &'static str,
+    pub rho: &'static str,
     pub open_interest: &'static str,
     pub volume: &'static str,
 }

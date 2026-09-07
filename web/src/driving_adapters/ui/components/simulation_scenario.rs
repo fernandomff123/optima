@@ -27,19 +27,19 @@ pub fn SimulationScenarioPanel(
     let initial = ScenarioSelection::from_controls(&controls);
     let (saved, set_saved) = signal(false);
     view! {
-        <aside class="flex h-full min-h-0 flex-col border border-border bg-surface" aria-label="Mock scenario controls">
+        <aside class="flex h-full min-h-0 flex-col overflow-hidden border border-border bg-surface" aria-label="Mock scenario controls">
             <div class="panel-header"><h2 class="text-sm font-semibold">"Scenario"</h2><span class="text-[0.625rem] font-semibold uppercase tracking-wider text-level-special">"Interactive fixture"</span></div>
-            <div class="dense-scrollbar min-h-0 flex-1 overflow-y-auto">
-                <div class="border-b border-border p-4">
+            <div class="dense-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain pb-1" style="scrollbar-gutter: stable;">
+                <div class="border-b border-border px-4 py-3">
                     <label class="flex items-center gap-3 text-xs text-text-secondary"><span>"Preset"</span><select class="min-h-9 flex-1 rounded border border-border bg-canvas px-3 text-text-primary" disabled><option>{preset}</option></select></label>
                 </div>
                 {controls.into_iter().map(|control| view! {
                     <ScenarioSlider control selection />
                 }).collect_view()}
-                <button type="button" class="flex min-h-12 w-full items-center justify-between border-b border-border px-4 text-xs text-text-primary" disabled><span>"Advanced Settings"</span><span>"›"</span></button>
-                <p class="px-4 py-3 text-[0.6875rem] leading-relaxed text-text-muted-readable">"Sliders select coordinates within the deterministic mock grid. The highlighted payoff marker and P&L heatmap cell update without browser-side pricing."</p>
+                <button type="button" class="flex min-h-10 w-full items-center justify-between border-b border-border px-4 text-xs text-text-primary" disabled><span>"Advanced Settings"</span><span>"›"</span></button>
+                <p class="px-4 py-2 text-[0.6875rem] leading-relaxed text-text-muted-readable">"Sliders select coordinates within the deterministic mock grid. The highlighted payoff marker and P&L heatmap cell update without browser-side pricing."</p>
             </div>
-            <footer class="grid shrink-0 grid-cols-2 gap-3 border-t border-border p-4">
+            <footer class="grid shrink-0 grid-cols-2 gap-3 border-t border-border p-3">
                 <button type="button" class=move || if saved.get() { "min-h-10 rounded border border-interactive-source bg-state-selected px-3 text-xs font-semibold text-interactive-text" } else { "min-h-10 rounded border border-interactive-source px-3 text-xs font-semibold text-interactive-text hover:bg-state-hover" } aria-pressed=move || saved.get() on:click=move |_| set_saved.set(true)>{move || if saved.get() { "Scenario Saved" } else { "Save Scenario" }}</button>
                 <button type="button" class="min-h-10 rounded border border-border px-3 text-xs font-semibold text-text-secondary hover:bg-state-hover hover:text-text-primary" on:click=move |_| { selection.set(initial); set_saved.set(false); }>"Reset"</button>
             </footer>
@@ -55,6 +55,7 @@ fn ScenarioSlider(
     let label = control.label.clone();
     let event_label = label.clone();
     let display_label = label.clone();
+    let slider_style_label = label.clone();
     let minimum = numeric(&control.minimum).unwrap_or(0.0);
     let maximum = numeric(&control.maximum).unwrap_or(100.0);
     let step = if label == "Spot" {
@@ -65,7 +66,7 @@ fn ScenarioSlider(
         0.5
     };
     view! {
-        <section class="border-b border-border p-4">
+        <section class="border-b border-border px-4 py-3">
             <div class="flex items-center justify-between gap-3 text-sm">
                 <h3 class="font-medium text-text-primary">{label.clone()}</h3>
                 <p class="numeric text-interactive-text">{control.current}<span class="px-2 text-text-secondary">"→"</span>{move || format_value(&display_label, selected(selection, &display_label))}</p>
@@ -76,7 +77,14 @@ fn ScenarioSlider(
                 max=maximum.to_string()
                 step=step.to_string()
                 prop:value=move || selected(selection, &label).to_string()
-                class="mt-4 h-2 w-full cursor-pointer accent-interactive-source"
+                class="optima-scenario-slider mt-3 h-2 w-full cursor-pointer"
+                style=move || {
+                    let span = maximum - minimum;
+                    let fill = if span > 0.0 {
+                        ((selected(selection, &slider_style_label) - minimum) / span * 100.0).clamp(0.0, 100.0)
+                    } else { 0.0 };
+                    format!("--optima-slider-fill: {fill:.4}%")
+                }
                 aria-label=format!("{} scenario value", control.label)
                 on:input=move |event| {
                     if let Ok(value) = event_target_value(&event).parse::<f64>() {

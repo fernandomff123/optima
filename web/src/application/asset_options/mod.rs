@@ -7,13 +7,25 @@ use crate::{
 };
 use std::rc::Rc;
 
+mod selection;
+pub use selection::{OptionKind, OptionQuote, OptionSelection};
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct OptionSide {
     pub last: String,
+    pub change: String,
     pub bid: String,
     pub ask: String,
+    pub mid: String,
+    pub bid_size: String,
+    pub ask_size: String,
+    pub last_size: String,
     pub iv: String,
     pub delta: String,
+    pub gamma: String,
+    pub vega: String,
+    pub theta: String,
+    pub rho: String,
     pub open_interest: String,
     pub volume: String,
 }
@@ -46,6 +58,10 @@ pub struct ContractDetail {
     pub ask: String,
     pub bid_size: String,
     pub ask_size: String,
+    pub action: String,
+    pub position: String,
+    pub selected_quote: String,
+    pub quantity: i32,
     pub metrics: Vec<(String, String)>,
     pub facts: Vec<(String, String)>,
 }
@@ -132,10 +148,19 @@ fn to_read_model(snapshot: AssetOptionsSnapshot) -> AssetOptionsReadModel {
 fn side(value: OptionSideSnapshot) -> OptionSide {
     OptionSide {
         last: value.last.into(),
+        change: value.change.into(),
         bid: value.bid.into(),
         ask: value.ask.into(),
+        mid: value.mid.into(),
+        bid_size: value.bid_size.into(),
+        ask_size: value.ask_size.into(),
+        last_size: value.last_size.into(),
         iv: value.iv.into(),
         delta: value.delta.into(),
+        gamma: value.gamma.into(),
+        vega: value.vega.into(),
+        theta: value.theta.into(),
+        rho: value.rho.into(),
         open_interest: value.open_interest.into(),
         volume: value.volume.into(),
     }
@@ -181,6 +206,10 @@ fn contract(value: ContractDetailSnapshot) -> ContractDetail {
         ask: value.ask.into(),
         bid_size: value.bid_size.into(),
         ask_size: value.ask_size.into(),
+        action: "BUY".into(),
+        position: "LONG".into(),
+        selected_quote: "Ask".into(),
+        quantity: 1,
         metrics: value
             .metrics
             .into_iter()
@@ -266,5 +295,15 @@ mod tests {
             AssetOptionsState::Loading
         );
         assert_eq!(port.0.get(), 0);
+    }
+
+    #[test]
+    fn bid_and_ask_encode_short_and_long_simulation_quantities() {
+        assert_eq!(OptionQuote::Bid.action(), "SELL");
+        assert_eq!(OptionQuote::Bid.position(), "SHORT");
+        assert_eq!(OptionQuote::Bid.quantity(), -1);
+        assert_eq!(OptionQuote::Ask.action(), "BUY");
+        assert_eq!(OptionQuote::Ask.position(), "LONG");
+        assert_eq!(OptionQuote::Ask.quantity(), 1);
     }
 }

@@ -41,7 +41,7 @@ pub fn Sidebar() -> impl IntoView {
                     <ShellIcon kind=ShellIconKind::Menu class="size-5" />
                 </button>
             </div>
-            <nav class="space-y-1 px-2 py-4" aria-label="Primary navigation">
+            <nav class="space-y-1 px-2 pb-1 pt-4" aria-label="Primary navigation">
                 {GLOBAL_NAV.into_iter().filter(|item| item.href != "/settings").map(|item| {
                     let aria_location = location.clone();
                     let class_location = location.clone();
@@ -62,8 +62,8 @@ pub fn Sidebar() -> impl IntoView {
                     }
                 }).collect_view()}
             </nav>
-            <div class="mx-5 border-t border-border" aria-hidden="true"></div>
-            <div class="flex-1 px-2 py-3 numeric">
+            <div class="mx-5 mt-4 border-t border-border" aria-hidden="true"></div>
+            <div class="flex-1 px-2 py-4 numeric">
                 <WatchlistRow symbol="SPX" value="5,303.27" change="+0.72%" positive=true href="/assets/SPX/overview" selected=spx_selected collapsed />
                 <WatchlistRow symbol="NDX" value="18,404.48" change="+0.84%" positive=true selected=false collapsed />
                 <WatchlistRow symbol="AAPL" value="191.13" change="+1.24%" positive=true href="/assets/AAPL/overview" selected=aapl_selected collapsed />

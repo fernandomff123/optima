@@ -1,6 +1,6 @@
 use crate::{
     application::{
-        asset_options::{AssetOptionsReadModel, AssetOptionsState},
+        asset_options::{AssetOptionsReadModel, AssetOptionsState, OptionSelection},
         read_models::FeedbackState,
     },
     composition::asset_options_use_case,
@@ -9,7 +9,10 @@ use crate::{
             AssetTabs, DataState, OptionsAssetHeader, OptionsChain, OptionsContractPanel,
             OptionsToolbar, Panel,
         },
-        plotly::OptionsSmileChart,
+        echarts::OptionsSmileChart,
+        simulation_draft::{
+            option_draft_leg, read_draft_legs, underlying_draft_leg, upsert_draft_leg_with_quantity,
+        },
     },
     ports::asset_options::OptionsScenario,
 };
@@ -51,18 +54,86 @@ pub fn AssetOptionsPage() -> impl IntoView {
 fn OptionsContent(model: AssetOptionsReadModel) -> impl IntoView {
     let chain = model.chain.clone();
     let smile = model.smile.clone();
-    let contract = model.contract.clone();
     let symbol = model.symbol.clone();
+    let company = model.name.clone();
+    let contract_model = model.clone();
+    let action_model = model.clone();
+    let quantity_model = model.clone();
+    let (selection, set_selection) = signal::<Option<OptionSelection>>(None);
+    let (feedback, set_feedback) = signal::<Option<String>>(None);
+    let (draft_legs, set_draft_legs) = signal(read_draft_legs());
+    let underlying_key = underlying_draft_leg(&symbol, 100).key;
+    let underlying_quantity = Memo::new(move |_| {
+        draft_legs
+            .get()
+            .into_iter()
+            .find(|leg| leg.key == underlying_key)
+            .map(|leg| leg.quantity)
+            .unwrap_or_default()
+    });
+    let underlying_symbol = symbol.clone();
+    let on_underlying = Callback::new(move |delta: i32| {
+        match upsert_draft_leg_with_quantity(underlying_draft_leg(&underlying_symbol, delta)) {
+            Some(quantity) => {
+                set_draft_legs.set(read_draft_legs());
+                set_feedback.set(Some(if quantity == 0 {
+                    format!("{underlying_symbol} removed from simulation draft")
+                } else {
+                    format!("{underlying_symbol} underlying · Draft Qty {quantity:+}")
+                }));
+            }
+            None => set_feedback.set(Some("Unable to update the browser simulation draft".into())),
+        }
+    });
+    let selected_contract = Memo::new(move |_| {
+        selection
+            .get()
+            .map(|value| contract_model.contract_for(value))
+            .unwrap_or_else(|| contract_model.contract.clone())
+    });
+    let preview_quantity = Memo::new(move |_| {
+        selection.get().and_then(|value| {
+            let contract = quantity_model.contract_for(value);
+            let key = option_draft_leg(&contract).key;
+            draft_legs
+                .get()
+                .into_iter()
+                .find(|leg| leg.key == key)
+                .map(|leg| leg.quantity)
+        })
+    });
+    let on_preview = Callback::new(move |next: OptionSelection| {
+        set_selection.set(Some(next));
+    });
+    let on_quote = Callback::new(move |next: OptionSelection| {
+        let contract = action_model.contract_for(next);
+        set_selection.set(Some(next));
+        match upsert_draft_leg_with_quantity(option_draft_leg(&contract)) {
+            Some(quantity) => {
+                set_draft_legs.set(read_draft_legs());
+                let message = if quantity == 0 {
+                    format!("{} removed from simulation draft", contract.title)
+                } else {
+                    format!(
+                        "{} {} at {} · Draft Qty {quantity:+}",
+                        contract.action, contract.title, contract.price
+                    )
+                };
+                set_feedback.set(Some(message));
+            }
+            None => set_feedback.set(Some("Unable to update the browser simulation draft".into())),
+        }
+    });
     view! {
         <div class="xl:flex xl:h-[calc(100dvh-3.5rem)] xl:min-h-0 xl:flex-col xl:overflow-hidden">
             <div class="xl:shrink-0"><OptionsAssetHeader model=model.clone() /></div>
-            <div class="xl:shrink-0"><OptionsToolbar model=model /></div>
-            <main class="grid gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_18rem]">
-                <div class="grid min-h-0 gap-[7px] xl:grid-rows-[minmax(0,1.35fr)_minmax(0,1fr)]">
-                    <Panel title="AAPL Options Chain · Mock" compact=true><OptionsChain rows=chain /></Panel>
+            <div class="xl:shrink-0"><OptionsToolbar model=model underlying_quantity on_underlying /></div>
+            <main class="grid min-w-0 gap-[7px] bg-canvas p-[7px] xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-[minmax(0,1fr)_18rem]">
+                <div class="grid min-h-0 min-w-0 gap-[7px] xl:grid-rows-[minmax(0,1.35fr)_minmax(0,1fr)]">
+                    <Panel title="AAPL Options Chain · Mock" compact=true><OptionsChain rows=chain draft_legs on_preview on_quote /></Panel>
                     <Panel title="Options Analytics · 17 May 2025" compact=true><OptionsSmileChart smile /></Panel>
                 </div>
-                <OptionsContractPanel contract symbol />
+                <OptionsContractPanel contract=selected_contract company symbol selection feedback draft_quantity=preview_quantity />
             </main>
         </div>
     }

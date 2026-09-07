@@ -1,4 +1,5 @@
 use crate::domain::asset::{AssetCapability, AssetSymbol};
+use std::{future::Future, pin::Pin};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SimulationScenario {
@@ -120,4 +121,82 @@ pub trait AssetSimulationPort {
         symbol: &AssetSymbol,
         scenario: SimulationScenario,
     ) -> Result<Option<AssetSimulationSnapshot>, AssetSimulationFailure>;
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StrategySimulationSide {
+    Buy,
+    Sell,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrategySimulationLeg {
+    pub option_type: String,
+    pub strike: f64,
+    pub side: StrategySimulationSide,
+    pub quantity: u32,
+    pub entry_price: f64,
+    pub expiration: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrategySimulationRequest {
+    pub ticker: String,
+    pub valuation_date: String,
+    pub analysis_date: String,
+    pub spot: f64,
+    pub scenario_spot: f64,
+    pub volatility: f64,
+    pub volatility_shift: f64,
+    pub risk_free_rate: f64,
+    pub dividend_yield: f64,
+    pub legs: Vec<StrategySimulationLeg>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StrategySimulationGreeks {
+    pub delta: f64,
+    pub gamma: f64,
+    pub theta: f64,
+    pub vega: f64,
+    pub rho: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StrategySimulationPoint {
+    pub spot: f64,
+    pub pnl: f64,
+    pub greeks: StrategySimulationGreeks,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrategySimulationCurve {
+    pub label: String,
+    pub valuation_date: String,
+    pub volatility_shift: f64,
+    pub points: Vec<StrategySimulationPoint>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StrategySimulationResult {
+    pub valuation_date: String,
+    pub expiration: String,
+    pub spot: f64,
+    pub break_even_points: Vec<f64>,
+    pub curves: Vec<StrategySimulationCurve>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum StrategySimulationFailure {
+    Unsupported(String),
+    Transport(String),
+    InvalidResponse(String),
+}
+
+pub type StrategySimulationFuture = Pin<
+    Box<dyn Future<Output = Result<StrategySimulationResult, StrategySimulationFailure>> + 'static>,
+>;
+
+pub trait StrategySimulationPort {
+    fn simulate(&self, request: StrategySimulationRequest) -> StrategySimulationFuture;
 }

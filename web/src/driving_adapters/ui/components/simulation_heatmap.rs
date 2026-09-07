@@ -15,8 +15,8 @@ pub fn SimulationPnlHeatmap(
         <section class="flex h-full min-h-0 flex-col border border-border bg-surface" aria-label="Mock profit and loss heatmap">
             <div class="panel-header"><div><h2 class="text-sm font-semibold">"P&L Heatmap (USD)"</h2><p class="text-[0.625rem] uppercase tracking-wider text-level-special">"Deterministic fixture"</p></div><span class="text-xs text-text-secondary">"Spot Price at Expiration"</span></div>
             <div class="dense-scrollbar min-h-0 flex-1 overflow-auto p-3">
-                <table class="w-full min-w-[42rem] border-collapse text-xs numeric">
-                    <thead><tr><th class="px-2 py-2 text-left font-medium text-text-secondary">"IV"</th>{columns.into_iter().map(|spot| view! { <th class="px-2 py-2 text-center font-medium text-text-secondary">{format_spot(spot)}</th> }).collect_view()}</tr></thead>
+                <table class="w-full min-w-[42rem] table-fixed border-collapse text-xs numeric">
+                    <thead><tr><th class="w-20 px-2 py-2 text-left font-medium text-text-secondary">"IV"</th>{columns.into_iter().map(|spot| view! { <th class="px-2 py-2 text-center font-medium text-text-secondary">{format_spot(spot)}</th> }).collect_view()}</tr></thead>
                     <tbody>
                         {heatmap.implied_volatilities.into_iter().zip(heatmap.values).enumerate().map(|(row_index, (volatility, row))| {
                             let row_volatilities = implied_volatilities.clone();
